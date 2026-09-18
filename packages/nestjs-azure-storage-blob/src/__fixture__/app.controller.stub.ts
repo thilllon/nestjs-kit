@@ -1,7 +1,7 @@
-import { Controller, Get, NotFoundException, Query } from "@nestjs/common";
+import { Controller, Get, Query } from "@nestjs/common";
 import axios from "axios";
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { AzureStorageBlobService } from "..";
 
 @Controller()
@@ -43,12 +43,7 @@ export class AppController {
       { add: true, create: true, read: true, delete: true, write: true },
       { expiresOn },
     );
-    const buffer = fs.readFileSync(
-      path.join(process.cwd(), "assets", fileName),
-    );
-    if (buffer) {
-      throw new NotFoundException("file not found");
-    }
+    const buffer = fs.readFileSync(path.join(__dirname, "image.jpg"));
     const response = await axios.put(blobSas.sasUrl, buffer, {
       headers: { ...blobSas.headers },
     });
