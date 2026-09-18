@@ -2,9 +2,9 @@ import { Injectable, Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { S3Module } from "./s3.module";
-import type { ModuleOptionsFactory } from "./aws-s3.interface";
-import { AwsS3Service } from "./aws-s3.service";
-import { getClientToken } from "./aws-s3.utils";
+import type { ModuleOptionsFactory } from "./s3.interface";
+import { S3Service } from "./s3.service";
+import { getClientToken } from "./s3.utils";
 
 const options = {
   region: async () => "storage-region-1",
@@ -43,7 +43,7 @@ describe("S3 module", () => {
       const module = await Test.createTestingModule({
         imports: [registration],
       }).compile();
-      const client = module.get<AwsS3Service>(getClientToken("assets"));
+      const client = module.get<S3Service>(getClientToken("assets"));
       expect(client.config.forcePathStyle).toBe(true);
       expect(await client.config.region()).toBe("storage-region-1");
       expect(await client.config.endpoint?.()).toMatchObject({
@@ -65,7 +65,7 @@ describe("S3 module", () => {
       const module = await Test.createTestingModule({
         imports: [S3Module.register({ region })],
       }).compile();
-      const client = module.get<AwsS3Service>(getClientToken());
+      const client = module.get<S3Service>(getClientToken());
       expect(await client.config.region()).toBe(region);
       await module.close();
     },
