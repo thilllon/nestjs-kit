@@ -1,100 +1,120 @@
 import { BlobServiceClient } from "@azure/storage-blob";
-import { DynamicModule, Module, Provider, Type } from "@nestjs/common";
 import {
-  MODULE_CLIENT_TOKEN,
-  MODULE_CONNECTION_VARIABLE_TOKEN,
-  MODULE_OPTIONS_TOKEN,
-} from "./azure-storage-blob.constants";
-import {
+  type DynamicModule,
+  Module,
+  type Provider,
+  type Type,
+} from "@nestjs/common";
+import { MODULE_CONNECTION_VARIABLE_TOKEN } from "./azure-storage-blob.constants";
+import type {
   AsyncModuleOptions,
   ExtraModuleOptions,
   ModuleOptions,
   ModuleOptionsFactory,
 } from "./azure-storage-blob.interface";
 import { AzureStorageBlobService } from "./azure-storage-blob.service";
+import {
+  getAzureStorageBlobServiceToken,
+  getStorageBlobClientToken,
+  getStorageBlobOptionsToken,
+} from "./azure-storage-blob.tokens";
 
-@Module({
-  providers: [AzureStorageBlobService],
-  exports: [AzureStorageBlobService],
-})
+@Module({})
 export class AzureStorageBlobModule {
   static register(
     options: ModuleOptions,
     extras?: ExtraModuleOptions,
   ): DynamicModule {
-    return {
-      module: AzureStorageBlobModule,
-      providers: [
-        { provide: MODULE_OPTIONS_TOKEN, useValue: options },
+    return this.createModule(
+      [
         {
-          provide: MODULE_CLIENT_TOKEN,
-          useFactory: () => this.createClient(options),
-          scope: extras?.scope,
+          provide: getStorageBlobOptionsToken(extras?.alias),
+          useValue: options,
         },
       ],
-      exports: [MODULE_CLIENT_TOKEN, MODULE_OPTIONS_TOKEN],
-      global: extras?.global,
-    };
+      extras,
+    );
   }
 
   static registerAsync(
     options: AsyncModuleOptions,
     extras?: ExtraModuleOptions,
   ): DynamicModule {
-    const provider: Provider = {
-      provide: MODULE_CLIENT_TOKEN,
-      useFactory: (options: ModuleOptions) => this.createClient(options),
-      inject: [MODULE_OPTIONS_TOKEN],
-      scope: extras?.scope,
-    };
-
     return {
+      ...this.createModule(this.createAsyncProviders(options, extras), extras),
       imports: options.imports,
+    };
+  }
+
+  private static createModule(
+    optionsProviders: Provider[],
+    extras?: ExtraModuleOptions,
+  ): DynamicModule {
+    const optionsToken = getStorageBlobOptionsToken(extras?.alias);
+    const clientToken = getStorageBlobClientToken(extras?.alias);
+    const serviceToken = getAzureStorageBlobServiceToken(extras?.alias);
+    return {
       module: AzureStorageBlobModule,
-      providers: [...this.createAsyncProviders(options), provider],
-      exports: [MODULE_CLIENT_TOKEN, MODULE_OPTIONS_TOKEN],
       global: extras?.global,
+      providers: [
+        ...optionsProviders,
+        {
+          provide: clientToken,
+          useFactory: (options: ModuleOptions) => this.createClient(options),
+          inject: [optionsToken],
+          scope: extras?.scope,
+        },
+        {
+          provide: serviceToken,
+          useFactory: (client: BlobServiceClient, options: ModuleOptions) =>
+            new AzureStorageBlobService(client, options),
+          inject: [clientToken, optionsToken],
+          scope: extras?.scope,
+        },
+      ],
+      exports: [clientToken, optionsToken, serviceToken],
     };
   }
 
   private static createAsyncProviders(
-    optionsAsync: AsyncModuleOptions,
+    options: AsyncModuleOptions,
+    extras?: ExtraModuleOptions,
   ): Provider[] {
-    if (optionsAsync.useExisting || optionsAsync.useFactory) {
-      return [this.createAsyncOptionsProvider(optionsAsync)];
-    }
-
-    if (optionsAsync.useClass) {
+    const token = getStorageBlobOptionsToken(extras?.alias);
+    if (options.useFactory) {
       return [
-        { provide: optionsAsync.useClass, useClass: optionsAsync.useClass },
-        this.createAsyncOptionsProvider(optionsAsync),
+        {
+          provide: token,
+          useFactory: options.useFactory,
+          inject: options.inject,
+          scope: extras?.scope,
+        },
       ];
     }
-
-    throw new Error(
-      "One of useClass, useFactory or useExisting should be provided",
-    );
-  }
-
-  private static createAsyncOptionsProvider(
-    options: AsyncModuleOptions,
-  ): Provider {
-    if (options.useFactory) {
-      return {
-        provide: MODULE_OPTIONS_TOKEN,
-        useFactory: options.useFactory,
-        inject: options.inject,
-      };
+    const factory = options.useClass ?? options.useExisting;
+    if (!factory) {
+      throw new Error(
+        "One of useClass, useFactory or useExisting should be provided",
+      );
     }
-
-    return {
-      provide: MODULE_OPTIONS_TOKEN,
-      useFactory: (optionsFactory: ModuleOptionsFactory) =>
-        optionsFactory.createModuleOptions(),
-      inject: [
-        (options.useClass ?? options.useExisting) as Type<ModuleOptionsFactory>,
-      ],
-    };
+    return [
+      ...(options.useClass
+        ? [
+            {
+              provide: options.useClass,
+              useClass: options.useClass,
+              scope: extras?.scope,
+            },
+          ]
+        : []),
+      {
+        provide: token,
+        useFactory: (optionsFactory: ModuleOptionsFactory) =>
+          optionsFactory.createModuleOptions(),
+        inject: [factory as Type<ModuleOptionsFactory>],
+        scope: extras?.scope,
+      },
+    ];
   }
 
   private static createClient(options: ModuleOptions): BlobServiceClient {
@@ -103,7 +123,6 @@ export class AzureStorageBlobModule {
         `Environment variable is required: "${MODULE_CONNECTION_VARIABLE_TOKEN}"`,
       );
     }
-
     return BlobServiceClient.fromConnectionString(
       options.connection,
       options.storageOptions,

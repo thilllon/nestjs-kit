@@ -1,6 +1,15 @@
 import { Inject } from "@nestjs/common";
-import { MODULE_CLIENT_TOKEN } from "./azure-storage-blob.constants";
+import {
+  getAzureStorageBlobServiceToken,
+  getStorageBlobClientToken,
+} from "./azure-storage-blob.tokens";
 
-export function InjectStorageBlob() {
-  return Inject(MODULE_CLIENT_TOKEN);
+export function InjectStorageBlob(alias?: string): ReturnType<typeof Inject> {
+  return Inject(getStorageBlobClientToken(alias));
+}
+
+export function InjectAzureStorageBlobService(
+  alias?: string,
+): ReturnType<typeof Inject> {
+  return Inject(getAzureStorageBlobServiceToken(alias));
 }

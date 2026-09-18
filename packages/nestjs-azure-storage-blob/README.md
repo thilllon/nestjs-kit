@@ -135,9 +135,74 @@ AzureStorageBlobModule.registerAsync({
 | Option                              | Purpose                                                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `connection`                        | Required Azure Storage connection string.                                                               |
+| `containerName`                     | Per-registration value returned by `getContainerName()`; falls back to `NESTJS_STORAGE_BLOB_CONTAINER`. |
 | `storageOptions`                    | Azure SDK `StoragePipelineOptions`, such as retry settings.                                             |
 | Second argument: `{ global: true }` | Make the registered module available throughout the application. Global registration is off by default. |
-| Second argument: `{ scope }`        | Set the Nest provider scope of the storage client.                                                      |
+| Second argument: `{ alias }`        | Register an independent named account; omit for the default account.                                    |
+| Second argument: `{ scope }`        | Set the Nest scope of the client, service and asynchronous options factory.                             |
+
+### Multiple accounts
+
+Register each account with a unique `alias`, then use that same alias when injecting its client or helper service. Aliases go in the second argument of both `register()` and `registerAsync()`:
+
+```ts
+import { BlobServiceClient } from "@azure/storage-blob";
+import { Injectable, Module } from "@nestjs/common";
+import {
+  AzureStorageBlobModule,
+  AzureStorageBlobService,
+  InjectAzureStorageBlobService,
+  InjectStorageBlob,
+} from "nestjs-azure-storage-blob";
+
+function connection(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+@Injectable()
+export class ArchiveService {
+  constructor(
+    @InjectStorageBlob("primary") readonly primary: BlobServiceClient,
+    @InjectAzureStorageBlobService("archive")
+    readonly archive: AzureStorageBlobService,
+  ) {}
+
+  createArchiveUpload(blobName: string) {
+    return this.archive.getBlockBlobSasUrl("backups", blobName);
+  }
+}
+
+@Module({
+  imports: [
+    AzureStorageBlobModule.register(
+      {
+        connection: connection("AZURE_PRIMARY_CONNECTION"),
+        containerName: "uploads",
+      },
+      { alias: "primary" },
+    ),
+    AzureStorageBlobModule.registerAsync(
+      {
+        useFactory: () => ({
+          connection: connection("AZURE_ARCHIVE_CONNECTION"),
+          containerName: "backups",
+        }),
+      },
+      { alias: "archive" },
+    ),
+  ],
+  providers: [ArchiveService],
+})
+export class ArchiveModule {}
+```
+
+A named registration exports only its named client, options and service tokens. It does not replace the default `AzureStorageBlobService`. For an unnamed registration, existing class injection and `@InjectStorageBlob()` continue to work; `@InjectAzureStorageBlobService()` also selects the default service.
+
+For custom providers and tests, use `getStorageBlobClientToken(alias?)` and `getAzureStorageBlobServiceToken(alias?)` rather than constructing token strings. Each service signs SAS URLs with its own account. `containerName` is metadata returned by `getContainerName()`; operation methods still take an explicit container argument.
+
+The second-argument `scope` applies to clients, services and asynchronous options. An imported `useExisting` factory retains its declared Nest scope; request-scoped dependencies propagate to the registered client and service. Choose unique aliases within a consumer's module graph.
 
 ### Azure SDK access
 
