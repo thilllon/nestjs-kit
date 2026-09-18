@@ -122,21 +122,6 @@ test("git history accumulates package changes and skips consumed releases", asyn
     commit("docs: explain setup");
     process.chdir(temp);
     assert.deepEqual(planRelease().changes, []);
-    // Empty pending state must skip orphan directories without registry access.
-    const { publish } = await import("./release-publish.mts");
-    const previousGate = process.env.NPM_PUBLISH_ENABLED;
-    const previousFetch = globalThis.fetch;
-    process.env.NPM_PUBLISH_ENABLED = "true";
-    globalThis.fetch = () => {
-      throw new Error("Unexpected registry request for an empty release plan");
-    };
-    try {
-      await publish();
-    } finally {
-      if (previousGate === undefined) delete process.env.NPM_PUBLISH_ENABLED;
-      else process.env.NPM_PUBLISH_ENABLED = previousGate;
-      globalThis.fetch = previousFetch;
-    }
     write("packages/one/src/index.ts", "export const one = 1;");
     commit("feat(one): expose one");
     write("packages/two/src/index.ts", "export const two = 2;");
@@ -210,88 +195,7 @@ test("git history accumulates package changes and skips consumed releases", asyn
   }
 });
 
-test("publication only accepts explicitly versioned packages in the persisted plan", async () => {
-  const { shouldPublish } = await import("./release-publish.mts");
-  assert.equal(shouldPublish({ name: "new", version: "0.0.0" }, {}), false);
-  assert.equal(
-    shouldPublish({ name: "existing", version: "1.0.0" }, { other: "1.0.0" }),
-    false,
-  );
-  assert.equal(
-    shouldPublish(
-      { name: "existing", version: "1.1.0" },
-      { existing: "1.1.0" },
-    ),
-    true,
-  );
-  assert.throws(
-    () => shouldPublish({ name: "new", version: "0.0.0" }, { new: "0.0.0" }),
-    /Invalid release plan/,
-  );
-  assert.throws(
-    () =>
-      shouldPublish(
-        { name: "existing", version: "1.0.0" },
-        { existing: "1.1.0" },
-      ),
-    /Invalid release plan/,
-  );
-});
-
-test("removed or private planned packages fail before any publication", async () => {
-  const { validatePending } = await import("./release-publish.mts");
-  assert.throws(
-    () => validatePending([], { removed: "1.0.0" }),
-    /removed or made private/,
-  );
-  assert.throws(
-    () =>
-      validatePending([{ name: "private", version: "1.0.0", private: true }], {
-        private: "1.0.0",
-      }),
-    /removed or made private/,
-  );
-  assert.doesNotThrow(() =>
-    validatePending([{ name: "unreleased", version: "0.0.0" }], {}),
-  );
-});
-
-test("tag recovery retries a failed push without recreating its local tag", async () => {
-  const { recoverTag } = await import("./release-publish.mts");
-  const head = "a".repeat(40);
-  let tagExists = false;
-  let createCount = 0;
-  let pushCount = 0;
-  const git = (...args: string[]) => {
-    if (args[0] === "tag" && args[1] === "--list")
-      return tagExists ? "pkg@1.0.0" : "";
-    if (args[0] === "rev-parse") return head;
-    if (args[0] === "tag") {
-      tagExists = true;
-      createCount++;
-      return "";
-    }
-    if (args[0] === "push") {
-      pushCount++;
-      if (pushCount === 1) throw new Error("network unavailable");
-      return "";
-    }
-    throw new Error(`Unexpected git command: ${args}`);
-  };
-  assert.throws(
-    () => recoverTag("pkg@1.0.0", head, git),
-    /network unavailable/,
-  );
-  recoverTag("pkg@1.0.0", head, git);
-  assert.equal(createCount, 1);
-  assert.equal(pushCount, 2);
-  assert.throws(
-    () => recoverTag("pkg@1.0.0", "b".repeat(40), git),
-    /different commit/,
-  );
-});
-
-test("real Changesets combines manual and automatic bumps and supports manual-only releases", async () => {
+test("real Changesets combines manual and automatic bumps and checkpoints manual-only releases", async () => {
   const { execFileSync } = await import("node:child_process");
   const {
     mkdtempSync,
@@ -379,32 +283,252 @@ test("real Changesets combines manual and automatic bumps and supports manual-on
       ".changeset/major.md",
       '---\n"one": major\n"two": major\n---\n\nExplicit major release.\n',
     );
-    commit("feat(one)!: replace public API");
+    const source = commit("feat(one)!: replace public API");
     assert.match(prepare(), /Prepared package releases/);
     assert.equal(read("packages/one/package.json").version, "2.0.0");
     assert.equal(read("packages/two/package.json").version, "2.0.0");
-    assert.deepEqual(read(".changeset/release-state.json").pending, {
-      one: "2.0.0",
-      two: "2.0.0",
-    });
+    assert.deepEqual(read(".changeset/release-state.json"), { source });
     commit("chore(release): version changed packages");
     assert.match(prepare(), /No publishable package changes/);
     write(
       ".changeset/manual-only.md",
       '---\n"two": patch\n---\n\nManual-only release request.\n',
     );
-    commit("chore: request manual package release");
+    const manualSource = commit("chore: request manual package release");
     assert.match(prepare(), /Prepared package releases/);
     assert.equal(read("packages/one/package.json").version, "2.0.0");
     assert.equal(read("packages/two/package.json").version, "2.0.1");
-    assert.deepEqual(read(".changeset/release-state.json").pending, {
-      one: "2.0.0",
-      two: "2.0.1",
+    assert.deepEqual(read(".changeset/release-state.json"), {
+      source: manualSource,
     });
     commit("chore(release): version manual request");
     assert.match(prepare(), /No publishable package changes/);
     assert.equal(git("status", "--porcelain"), "");
   } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("native publication skips existing versions and recovers a partial release and missing tags", async () => {
+  const { execFile, execFileSync } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { createServer } = await import("node:http");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
+    "node:fs"
+  );
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const cli = fileURLToPath(import.meta.resolve("@changesets/cli/bin.js"));
+  const temp = mkdtempSync(join(tmpdir(), "nestjs-kit-native-publish-"));
+  const workspace = join(temp, "workspace");
+  const remote = join(temp, "remote.git");
+  mkdirSync(workspace);
+  const git = (...args: string[]) =>
+    execFileSync("git", args, {
+      cwd: workspace,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const write = (path: string, value: unknown) =>
+    writeFileSync(
+      join(workspace, path),
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
+  interface RegistryPackage {
+    name: string;
+    "dist-tags": { latest: string };
+    versions: Record<
+      string,
+      {
+        name: string;
+        version: string;
+        dist?: { tarball: string; shasum: string };
+      }
+    >;
+  }
+  const registryPackages = new Map<string, RegistryPackage>();
+  for (const name of ["changed", "retry", "unchanged"]) {
+    registryPackages.set(name, {
+      name,
+      "dist-tags": { latest: "1.0.0" },
+      versions: {
+        "1.0.0": {
+          name,
+          version: "1.0.0",
+          dist: {
+            tarball: "http://127.0.0.1/fixture.tgz",
+            shasum: "0".repeat(40),
+          },
+        },
+      },
+    });
+  }
+  const uploads: string[] = [];
+  const lookups: string[] = [];
+  let failRetry = true;
+  const server = createServer(async (request, response) => {
+    response.setHeader("content-type", "application/json");
+    const name = decodeURIComponent(
+      new URL(request.url ?? "/", "http://localhost").pathname.slice(1),
+    );
+    if (request.method === "GET") {
+      lookups.push(name);
+      const metadata = registryPackages.get(name);
+      response.writeHead(metadata ? 200 : 404);
+      response.end(JSON.stringify(metadata ?? { error: "not_found" }));
+      return;
+    }
+    if (request.method !== "PUT" || !registryPackages.has(name)) {
+      response.writeHead(405);
+      response.end(JSON.stringify({ error: "unexpected_fixture_request" }));
+      return;
+    }
+    uploads.push(name);
+    if (name === "retry" && failRetry) {
+      failRetry = false;
+      response.writeHead(403);
+      response.end(JSON.stringify({ error: "fixture_publish_failure" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of request) body += chunk.toString();
+    const incoming = JSON.parse(body) as RegistryPackage;
+    const previous = registryPackages.get(name);
+    registryPackages.set(name, {
+      ...incoming,
+      versions: { ...previous?.versions, ...incoming.versions },
+    });
+    response.writeHead(201);
+    response.end(JSON.stringify({ ok: true }));
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const registry = `http://127.0.0.1:${address.port}/`;
+    git("init", "-q");
+    git("config", "user.name", "Release Test");
+    git("config", "user.email", "test@example.com");
+    git("init", "--bare", "-q", remote);
+    git("remote", "add", "origin", remote);
+    mkdirSync(join(workspace, ".changeset"));
+    write("package.json", {
+      name: "release-fixture",
+      private: true,
+    });
+    write(
+      "pnpm-workspace.yaml",
+      "packages:\n  - packages/*\nfetchRetries: 0\n",
+    );
+    write(
+      ".npmrc",
+      `registry=${registry}\n//127.0.0.1:${address.port}/:_authToken=local-fixture\n`,
+    );
+    write("empty-user.npmrc", "");
+    write(".changeset/config.json", {
+      changelog: false,
+      commit: false,
+      fixed: [],
+      linked: [],
+      access: "public",
+      baseBranch: "main",
+      updateInternalDependencies: "patch",
+      ignore: [],
+    });
+    for (const name of ["changed", "retry", "unchanged", "private-fixture"]) {
+      mkdirSync(join(workspace, "packages", name), { recursive: true });
+      write(`packages/${name}/package.json`, {
+        name,
+        version: name === "changed" || name === "retry" ? "2.0.0" : "1.0.0",
+        private: name === "private-fixture",
+        files: ["index.js"],
+        publishConfig: { registry, access: "public", provenance: false },
+      });
+      write(`packages/${name}/index.js`, "module.exports = {};\n");
+    }
+    git("add", ".");
+    git(
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "-qm",
+      "chore(release): fixture versions",
+    );
+    git("tag", "-a", "unchanged@1.0.0", "-m", "existing release");
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      CI: "true",
+      LEFTHOOK: "0",
+      NPM_CONFIG_USERCONFIG: join(workspace, "empty-user.npmrc"),
+      NPM_CONFIG_REGISTRY: registry,
+      PNPM_CONFIG_REGISTRY: registry,
+    };
+    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    const run = (...args: string[]) =>
+      promisify(execFile)(process.execPath, [cli, ...args], {
+        cwd: workspace,
+        env,
+        timeout: 30000,
+      });
+    let firstFailure = "";
+    await assert.rejects(run("publish"), (error: unknown) => {
+      assert.ok(
+        error instanceof Error && "stdout" in error && "stderr" in error,
+      );
+      firstFailure = String(error.stdout) + String(error.stderr);
+      return true;
+    });
+    assert.ok(registryPackages.get("changed")?.versions["2.0.0"], firstFailure);
+    assert.equal(registryPackages.get("retry")?.versions["2.0.0"], undefined);
+    await run("publish");
+    assert.deepEqual(
+      uploads.filter((name) => name === "changed"),
+      ["changed"],
+    );
+    assert.deepEqual(
+      uploads.filter((name) => name === "retry"),
+      ["retry", "retry"],
+    );
+    assert.equal(
+      uploads.includes("unchanged"),
+      false,
+      JSON.stringify({ lookups, uploads, firstFailure }),
+    );
+    assert.equal(lookups.includes("private-fixture"), false);
+    // Native publish skips already-published public versions; git-tag repairs their tags.
+    git("tag", "-d", "changed@2.0.0");
+    await run("publish");
+    assert.equal(git("tag", "--list", "changed@2.0.0"), "");
+    await run("git-tag");
+    const releaseHead = git("rev-parse", "HEAD");
+    assert.equal(git("rev-parse", "changed@2.0.0^{commit}"), releaseHead);
+    assert.equal(git("tag", "--list", "private-fixture@1.0.0"), "");
+    git("push", "origin", "--tags");
+    const remoteTags = git("ls-remote", "--tags", "origin");
+    assert.match(remoteTags, /refs\/tags\/changed@2\.0\.0/);
+    assert.match(remoteTags, /refs\/tags\/retry@2\.0\.0/);
+    const uploadCount = uploads.length;
+    write("README.md", "Documentation only.\n");
+    git("add", "README.md");
+    git(
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "-qm",
+      "docs: update example",
+    );
+    await run("publish");
+    await run("git-tag");
+    assert.equal(uploads.length, uploadCount);
+    assert.equal(git("rev-parse", "changed@2.0.0^{commit}"), releaseHead);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(temp, { recursive: true, force: true });
   }
 });

@@ -1,2 +1,2 @@
-export * from "./lib/pubnub.module";
-export * from "./lib/pubnub.service";
+export * from "./pubnub.module";
+export * from "./pubnub.service";

@@ -105,7 +105,6 @@ jobs:
     env:
       LEFTHOOK: "0"
       TURBO_UI: stream
-      NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -119,4 +118,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
+      - name: Configure release tag identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
       - run: pnpm release:publish
+      - name: Recover any missing release tags after successful publication
+        run: pnpm exec changeset git-tag
+      - name: Push release tags without changing branches
+        run: git push origin --tags
