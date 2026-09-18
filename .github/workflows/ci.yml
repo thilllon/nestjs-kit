@@ -40,7 +40,6 @@ jobs:
       - run: pnpm check-types
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm pack:check
       - name: Start PostgreSQL for integration tests
         run: pnpm docker:up
       - name: Test against real PostgreSQL

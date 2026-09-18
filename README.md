@@ -52,6 +52,8 @@ export class FilesModule {}
 
 AWS credentials use the SDK's default provider chain. Each package guide includes asynchronous configuration for Nest's dependency injection system.
 
+Every library ships separate ESM and CommonJS builds with matching TypeScript declarations. Use normal `import` syntax in ESM or `require()` in CommonJS; package exports select the matching output automatically.
+
 ## Develop locally
 
 Install [mise](https://mise.jdx.dev/getting-started.html), then:

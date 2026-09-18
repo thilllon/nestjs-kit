@@ -15,5 +15,5 @@
       "persistent": true
     }
   },
-  "globalDependencies": ["tsconfig.base.json", "scripts/build-package.mjs"]
+  "globalDependencies": ["tsconfig.base.json", "tsdown.config.mts"]
 }
