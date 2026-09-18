@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   UploadApiErrorResponse,
   UploadApiOptions,
@@ -11,7 +11,6 @@ import type {
   ModuleOptions,
   SignedUploadUrlOptions,
 } from "./cloudinary.interface";
-import { MODULE_OPTIONS_TOKEN } from "./cloudinary.module-definition";
 
 export const defaultCreateSignedUploadUrlOptions: Partial<SignedUploadUrlOptions> =
   {
@@ -21,23 +20,57 @@ export const defaultCreateSignedUploadUrlOptions: Partial<SignedUploadUrlOptions
 
 @Injectable()
 export class CloudinaryService {
-  public readonly cloudinary = cloudinary;
-
-  constructor(
-    @Inject(MODULE_OPTIONS_TOKEN) private readonly options: ModuleOptions,
-  ) {}
+  constructor(private readonly options: ModuleOptions) {}
 
   async onModuleInit(): Promise<void> {
     if (this.options.pingOnInit) await this.ping();
   }
 
-  ping() {
-    return this.cloudinary.api.ping(this.sdkOptions);
+  async ping() {
+    return cloudinary.api.ping(this.getSdkOptions());
   }
 
-  private get sdkOptions() {
+  private getSdkOptions(apiSecret?: string, signing = false) {
+    // The SDK has no account-scoped instance and falls back to arbitrary shared
+    // settings, including OAuth and proxy configuration. Never inherit them.
+    if (
+      Object.keys(cloudinary.config()).length > 0 ||
+      process.env.CLOUDINARY_URL ||
+      process.env.CLOUDINARY_ACCOUNT_URL ||
+      process.env.CLOUDINARY_API_PROXY
+    ) {
+      throw new Error(
+        "CloudinaryService requires empty shared SDK configuration. Remove cloudinary.config() settings and CLOUDINARY_URL, CLOUDINARY_ACCOUNT_URL or CLOUDINARY_API_PROXY; pass configuration to each module registration instead.",
+      );
+    }
     const { pingOnInit: _pingOnInit, ...options } = this.options;
-    return options;
+    const secret = apiSecret ?? options.api_secret;
+    const present = (value: unknown): value is string =>
+      typeof value === "string" && value.trim().length > 0;
+    if (!present(options.cloud_name)) {
+      throw new Error(
+        "CloudinaryService requires a registration-local cloud_name.",
+      );
+    }
+    if (signing || !present(options.oauth_token)) {
+      if (!present(options.api_key) || !present(secret)) {
+        throw new Error(
+          "CloudinaryService requires registration-local api_key and api_secret (or an explicit oauth_token for ping/upload). Signed uploads always require api_key and api_secret.",
+        );
+      }
+    }
+    return {
+      ...options,
+      api_key: options.api_key,
+      api_secret: secret,
+      oauth_token: options.oauth_token,
+      api_proxy: options.api_proxy,
+      agent: options.agent,
+      extra_headers: options.extra_headers,
+      upload_prefix: options.upload_prefix ?? "https://api.cloudinary.com",
+      signature_algorithm: options.signature_algorithm ?? "sha1",
+      signature_version: options.signature_version ?? 2,
+    };
   }
 
   /**
@@ -51,17 +84,21 @@ export class CloudinaryService {
     options: SignedUploadUrlOptions,
     apiSecret?: string,
   ) {
+    const sdkOptions = this.getSdkOptions(apiSecret, true);
     options = { ...defaultCreateSignedUploadUrlOptions, ...options };
-    const url = `https://api.cloudinary.com/v1_1/${this.options.cloud_name}/${options.resource_type}/upload`;
+    const url = cloudinary.utils.api_url("upload", {
+      ...sdkOptions,
+      resource_type: options.resource_type,
+    });
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = this.cloudinary.utils.api_sign_request(
+    const { signature } = cloudinary.utils.sign_request(
       {
         public_id: options.public_id,
         timestamp,
         folder: options.folder,
         eager: options.eager,
       },
-      apiSecret ?? this.options.api_secret ?? "",
+      sdkOptions,
     );
 
     return {
@@ -83,9 +120,10 @@ export class CloudinaryService {
     file: IFile,
     options?: UploadApiOptions,
   ): Promise<UploadApiResponse | UploadApiErrorResponse> {
+    const sdkOptions = this.getSdkOptions();
     return new Promise((resolve, reject) => {
-      const upload = this.cloudinary.uploader.upload_stream(
-        { ...this.sdkOptions, ...options },
+      const upload = cloudinary.uploader.upload_stream(
+        { ...options, ...sdkOptions },
         (error, result) => {
           if (error) return reject(error);
           if (!result)
@@ -97,9 +135,5 @@ export class CloudinaryService {
         if (error) reject(error);
       });
     });
-  }
-
-  get instance() {
-    return this.cloudinary;
   }
 }

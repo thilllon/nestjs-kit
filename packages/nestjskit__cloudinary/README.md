@@ -55,6 +55,55 @@ CloudinaryModule.registerAsync({
 });
 ```
 
+## Multiple accounts and endpoints
+
+Use a distinct `alias` for each account. `InjectCloudinary(alias)` injects a `CloudinaryService` whose upload, ping and signing operations use that registration's configuration. `alias` and `global` are Nest module settings: declare them beside `useFactory`, not in its returned configuration. The factory returns Cloudinary options and, optionally, the service setting `pingOnInit`. For synchronous registration, include all these settings in the same object.
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+import {
+  CloudinaryModule,
+  CloudinaryService,
+  InjectCloudinary,
+} from "@nestjs-kit/cloudinary";
+
+@Injectable()
+class AccountMedia {
+  constructor(
+    @InjectCloudinary("primary") readonly primary: CloudinaryService,
+    @InjectCloudinary("regional") readonly regional: CloudinaryService,
+  ) {}
+}
+
+@Module({
+  imports: [
+    CloudinaryModule.register({
+      alias: "primary",
+      global: false,
+      cloud_name: process.env.PRIMARY_CLOUD_NAME!,
+      api_key: process.env.PRIMARY_API_KEY!,
+      api_secret: process.env.PRIMARY_API_SECRET!,
+    }),
+    CloudinaryModule.registerAsync({
+      alias: "regional",
+      global: false,
+      useFactory: () => ({
+        cloud_name: process.env.REGIONAL_CLOUD_NAME!,
+        api_key: process.env.REGIONAL_API_KEY!,
+        api_secret: process.env.REGIONAL_API_SECRET!,
+        upload_prefix: "https://api-eu.cloudinary.com",
+      }),
+    }),
+  ],
+  providers: [AccountMedia],
+})
+export class MultiAccountModule {}
+```
+
+Set credentials for both accounts. Use a regional `upload_prefix` only for an account configured for that [Cloudinary data center](https://cloudinary.com/documentation/image_upload_api_reference#eu_or_ap_data_centers_and_endpoints_premium_feature). The configured prefix also determines the direct-upload URL returned by `createSignedUploadUrl()`.
+
+`getCloudinaryToken(alias)` is available for custom providers and testing. Named registrations export only their named service token. Omit `alias` (or use `""` or the reserved `"default"` alias) to preserve ordinary `CloudinaryService` injection. Other aliases are exact, opaque names; use a unique name for each registration. The existing global-by-default behavior remains; use `global: false` for module-local registrations. The adapter opens no persistent client connection to dispose.
+
 ## Sign a direct upload
 
 Register this service in the module that imports `CloudinaryModule`:
@@ -106,8 +155,16 @@ Register this provider in a module importing `CloudinaryModule`. These are [Clou
 
 The third `uploadFile()` resize argument and `SharpInputOptions` type have been removed. Remove that argument from existing calls. No resize operation is applied automatically, and the adapter no longer installs or loads Sharp. If you need local preprocessing before upload, perform it in your application using your chosen library and provide the resulting buffer. Use Cloudinary upload transformation options only when server-side processing matches your intended behavior.
 
-### Raw SDK access
+### Account configuration and shared SDK state
 
-`instance` exposes the raw, shared Cloudinary SDK; when using multiple accounts, pass credentials explicitly to raw SDK operations. Wrapper methods use the module's own configuration.
+Every operation requires a registration-local `cloud_name` and either `api_key` plus `api_secret`, or an explicit `oauth_token` for ping/upload. Direct-upload signatures always require a local API key and secret; the existing second `createSignedUploadUrl()` argument can supply the signing secret explicitly. Missing credentials fail before a request is sent. Registration options take precedence over per-upload options. Credentials, OAuth, endpoint, proxy, agent and extra headers must be supplied at registration; per-upload values cannot replace them, even when the registration leaves an optional field unset. Per-upload transformations and other upload-specific options remain supported. This precedence is part of the major release; use another named service to select another account.
+
+The Cloudinary Node SDK has one process-wide configuration object and can silently inherit authentication, endpoints, proxies and other settings from it. This adapter therefore **rejects every nonempty shared SDK configuration at each operation**, including changes made after module registration. Do not call `cloudinary.config({...})` in an application using this adapter. Remove `CLOUDINARY_URL`, `CLOUDINARY_ACCOUNT_URL` and `CLOUDINARY_API_PROXY` from the process environment before importing Cloudinary or starting Nest; these variables initialize SDK-global state. Use separate application environment variables and pass their values explicitly to each registration instead. Restart the process after removing shared configuration: the SDK also captures transport choices when it is first imported, so clearing its config object later is not sufficient.
+
+This is a deliberate compatibility restriction, not a separate SDK instance or automatic cleanup of global state. Even unrelated shared SDK settings are rejected because the SDK may inherit them in current or future operations. Other code in the same process may use the SDK only with explicit call options and an empty shared configuration. If existing application code requires SDK-global configuration, it cannot share this process with these scoped services. The adapter never temporarily changes or resets global settings. Its default API endpoint is explicitly `https://api.cloudinary.com`; signing defaults are explicitly SHA-1 and signature version 2, with per-registration overrides supported.
+
+### Breaking change: shared SDK access removed
+
+The `instance` and `cloudinary` accessors have been removed. They exposed the same process-wide SDK object for every account, so they could not represent an independently configured client. Use `uploadFile()`, `ping()` and `createSignedUploadUrl()` on the injected service. For SDK operations outside this facade, import Cloudinary directly in your application and pass the intended account configuration explicitly on every call; do not mutate shared `cloudinary.config()` state to switch accounts. Existing default `CloudinaryService` injection still works.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
