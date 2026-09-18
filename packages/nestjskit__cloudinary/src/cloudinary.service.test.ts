@@ -22,6 +22,17 @@ const uploader = cloudinary.uploader as unknown as {
   ) => UploadStream;
 };
 
+const credentials = {
+  cloud_name: "account",
+  api_key: "key",
+  api_secret: "secret",
+};
+const sdkDefaults = {
+  upload_prefix: "https://api.cloudinary.com",
+  signature_algorithm: "sha1",
+  signature_version: 2,
+};
+
 const file = { buffer: Buffer.from("file"), mimetype: "text/plain" } as IFile;
 afterEach(() => vi.restoreAllMocks());
 describe("Cloudinary service", () => {
@@ -46,13 +57,18 @@ describe("Cloudinary service", () => {
       imports: [
         CloudinaryModule.register({
           alias: "default",
+          ...credentials,
           cloud_name: "offline",
           pingOnInit: true,
         }),
       ],
     }).compile();
     await module.init();
-    expect(ping).toHaveBeenCalledWith({ cloud_name: "offline" });
+    expect(ping).toHaveBeenCalledWith({
+      ...credentials,
+      ...sdkDefaults,
+      cloud_name: "offline",
+    });
     await module.close();
   });
   it("keeps account configuration separate for each upload", async () => {
@@ -73,10 +89,12 @@ describe("Cloudinary service", () => {
     const first = new CloudinaryService({
       cloud_name: "first",
       api_key: "first-key",
+      api_secret: "first-secret",
     });
     const second = new CloudinaryService({
       cloud_name: "second",
       api_key: "second-key",
+      api_secret: "second-secret",
     });
     await Promise.all([first.uploadFile(file), second.uploadFile(file)]);
     expect(upload.mock.calls.map(([options]) => options.cloud_name)).toEqual([
@@ -106,12 +124,13 @@ describe("Cloudinary service", () => {
             },
           }) as UploadStream;
         });
-      const result = await new CloudinaryService({
-        cloud_name: "account",
-      }).uploadFile({ ...file, mimetype }, options);
+      const result = await new CloudinaryService(credentials).uploadFile(
+        { ...file, mimetype },
+        options,
+      );
       expect(Buffer.concat(chunks)).toEqual(file.buffer);
       expect(upload).toHaveBeenCalledWith(
-        { cloud_name: "account", ...options },
+        { ...credentials, ...sdkDefaults, ...options },
         expect.any(Function),
       );
       expect(result).toEqual({ public_id: "uploaded" });
@@ -135,7 +154,7 @@ describe("Cloudinary service", () => {
       },
     );
     await expect(
-      new CloudinaryService({}).uploadFile(file),
+      new CloudinaryService(credentials).uploadFile(file),
     ).rejects.toMatchObject({ message: "upload denied", http_code: 403 });
   });
   it("rejects upload stream failures", async () => {
@@ -147,9 +166,9 @@ describe("Cloudinary service", () => {
           },
         }) as UploadStream,
     );
-    await expect(new CloudinaryService({}).uploadFile(file)).rejects.toThrow(
-      "upload failed",
-    );
+    await expect(
+      new CloudinaryService(credentials).uploadFile(file),
+    ).rejects.toThrow("upload failed");
   });
   it("rejects an empty SDK callback result", async () => {
     vi.spyOn(uploader, "upload_stream").mockImplementation(
@@ -162,9 +181,9 @@ describe("Cloudinary service", () => {
         }) as UploadStream;
       },
     );
-    await expect(new CloudinaryService({}).uploadFile(file)).rejects.toThrow(
-      "no upload result",
-    );
+    await expect(
+      new CloudinaryService(credentials).uploadFile(file),
+    ).rejects.toThrow("no upload result");
   });
   it("signs URLs with the account-specific secret", async () => {
     const sign = vi
@@ -252,6 +271,7 @@ it.each([false, true])(
           api_secret: "first-secret",
           upload_prefix: "https://first.example.com",
           signature_algorithm: "sha1",
+          signature_version: 2,
         },
         {
           cloud_name: "second",
@@ -259,6 +279,7 @@ it.each([false, true])(
           api_secret: "second-secret",
           upload_prefix: "https://second.example.com",
           signature_algorithm: "sha256",
+          signature_version: 2,
         },
       ]);
     }
