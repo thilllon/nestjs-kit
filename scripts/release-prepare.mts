@@ -7,11 +7,17 @@ import {
   writeFileSync,
 } from "node:fs";
 import { pathToFileURL } from "node:url";
-import {
-  validatePending,
-  type PackageManifest,
-  type ReleaseState,
-} from "./release-publish.mts";
+
+interface PackageManifest {
+  name: string;
+  version: string;
+  private?: boolean;
+  scripts?: Record<string, string>;
+  [field: string]: unknown;
+}
+interface ReleaseState {
+  source: string;
+}
 
 export type ReleaseType = "major" | "minor" | "patch";
 interface PackageChange {
@@ -100,7 +106,6 @@ export function planRelease() {
     .split("\n")
     .filter(Boolean);
   const changes: PackageChange[] = [];
-  const manifests: PackageManifest[] = [];
   for (const entry of readdirSync("packages", { withFileTypes: true })) {
     if (
       !entry.isDirectory() ||
@@ -109,7 +114,6 @@ export function planRelease() {
       continue;
     const directory = `packages/${entry.name}`;
     const manifest = json<PackageManifest>(`${directory}/package.json`);
-    manifests.push(manifest);
     if (manifest.private) continue;
     const types: ReleaseType[] = [];
     const summaries: string[] = [];
@@ -147,18 +151,14 @@ export function planRelease() {
         summaries,
       });
   }
-  validatePending(manifests, state.pending ?? {});
-  return { changes, head, manifests };
+  return { changes, head };
 }
 export function prepare(): boolean {
-  const { changes, head, manifests } = planRelease();
+  const { changes, head } = planRelease();
   const manualChangesets = readdirSync(".changeset").filter(
     (file) => file.endsWith(".md") && file.toLowerCase() !== "readme.md",
   );
   if (!changes.length && !manualChangesets.length) return false;
-  const versionsBefore = new Map(
-    manifests.map((manifest) => [manifest.name, manifest.version]),
-  );
   if (changes.length) {
     const frontmatter = changes
       .map(({ name, type }) => `${JSON.stringify(name)}: ${type}`)
@@ -175,27 +175,9 @@ export function prepare(): boolean {
     );
   }
   execFileSync("pnpm", ["exec", "changeset", "version"], { stdio: "inherit" });
-  const pending = {
-    ...json<ReleaseState>(".changeset/release-state.json").pending,
-  };
-  for (const entry of readdirSync("packages", { withFileTypes: true })) {
-    if (
-      !entry.isDirectory() ||
-      !existsSync(`packages/${entry.name}/package.json`)
-    )
-      continue;
-    const manifest = json<PackageManifest>(
-      `packages/${entry.name}/package.json`,
-    );
-    if (
-      !manifest.private &&
-      versionsBefore.get(manifest.name) !== manifest.version
-    )
-      pending[manifest.name] = manifest.version;
-  }
   writeFileSync(
     ".changeset/release-state.json",
-    `${JSON.stringify({ source: head, pending }, null, 2)}\n`,
+    `${JSON.stringify({ source: head }, null, 2)}\n`,
   );
   execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
     stdio: "inherit",

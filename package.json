@@ -25,7 +25,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.mts",
     "test:release": "tsx --test scripts/release.test.ts",
     "release:prepare": "tsx scripts/release-prepare.mts",
-    "release:publish": "tsx scripts/release-publish.mts"
+    "release:publish": "changeset publish"
   },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
