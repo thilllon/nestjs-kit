@@ -15,12 +15,15 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check-types": "turbo run check-types",
-    "test": "vitest run",
+    "test": "vitest run && pnpm test:release",
     "test:unit": "vitest run",
+    "test:release": "node --test scripts/release.test.mjs",
     "pack:check": "node scripts/pack-check.mjs",
     "hooks:install": "mise exec -- lefthook install",
     "prepare": "node scripts/prepare.mjs",
-    "commitlint": "commitlint"
+    "commitlint": "commitlint",
+    "release:prepare": "node scripts/release-prepare.mjs",
+    "release:publish": "node scripts/release-publish.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
