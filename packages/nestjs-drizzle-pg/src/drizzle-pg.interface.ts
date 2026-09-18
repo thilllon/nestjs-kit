@@ -2,7 +2,7 @@ import type { DrizzleConfig } from "drizzle-orm";
 import type { ClientConfig, PoolConfig } from "pg";
 
 export interface DrizzlePgModuleOptions {
-  drizzleConfig?: DrizzleConfig;
+  drizzleConfig?: DrizzleConfig<Record<string, unknown>>;
   pgConfig?:
     | { type: "pool"; config: PoolConfig }
     | { type: "client"; config: ClientConfig };

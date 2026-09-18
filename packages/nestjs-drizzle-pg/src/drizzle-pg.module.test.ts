@@ -1,4 +1,6 @@
 import { Test } from "@nestjs/testing";
+import { integer, pgTable } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   connections: [] as {
@@ -40,6 +42,27 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 describe("Drizzle module", () => {
+  it.each([false, true])(
+    "accepts and forwards a real schema (async=%s)",
+    async (async) => {
+      const schema = {
+        users: pgTable("users", { id: integer("id").primaryKey() }),
+      };
+      const options = {
+        pgConfig: { type: "pool" as const, config: {} },
+        drizzleConfig: { schema },
+      };
+      const registration = async
+        ? DrizzlePgModule.registerAsync({ useFactory: () => options })
+        : DrizzlePgModule.register(options);
+      const module = await Test.createTestingModule({
+        imports: [registration],
+      }).compile();
+      expect(drizzle).toHaveBeenCalledWith(mocks.connections[0], { schema });
+      await module.close();
+    },
+  );
+
   it("creates lazy pools for independent aliases and closes each once", async () => {
     const module = await Test.createTestingModule({
       imports: [
