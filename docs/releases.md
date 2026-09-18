@@ -32,18 +32,20 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All six current package identities already exist on npm. Skip first-publication commands for these packages and configure their trusted publishers. For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for that new package.
+The six established package identities already exist on npm; skip first-publication commands for them. `@nestjs-kit/nodemailer` is new and awaits its first publication. Its checked-in `0.0.0` is a development placeholder, and its explicit major changeset requests `1.0.0`. Wait for that version to merge before publishing.
 
-For a future new package only, after its intended release version merges into `main`, use the following pattern with its package name and directory (the Cloudinary paths illustrate the layout; Cloudinary itself is already published):
+For a new package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for that new package.
+
+For the new Nodemailer package only, after its intended release version merges into `main`, use:
 
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- pnpm --filter @nestjs-kit/cloudinary build
+mise exec -- pnpm --filter @nestjs-kit/nodemailer build
 mise exec -- pnpm login
-cd packages/nestjskit__cloudinary
-mise exec -- pnpm pack --out /tmp/nestjs-kit-package.tgz
-tar -tzf /tmp/nestjs-kit-package.tgz
+cd packages/nestjskit__nodemailer
+mise exec -- pnpm pack --out /tmp/nestjs-kit-nodemailer.tgz
+tar -tzf /tmp/nestjs-kit-nodemailer.tgz
 mise exec -- pnpm publish --access public --provenance=false
 ```
 
