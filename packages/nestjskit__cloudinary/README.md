@@ -6,7 +6,7 @@
 
 Cloudinary uploads and upload signatures for NestJS, with optional image resizing through Sharp.
 
-This scoped package is being prepared for its first release. After publication:
+Install it in your NestJS application:
 
 ```sh
 pnpm add @nestjs-kit/cloudinary cloudinary sharp

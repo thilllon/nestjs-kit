@@ -6,7 +6,7 @@
 
 An injectable PubNub client for NestJS. `PubNubService` extends the SDK client, so publishing and subscription APIs remain available.
 
-This scoped package is being prepared for its first release. After publication:
+Install it in your NestJS application:
 
 ```sh
 pnpm add @nestjs-kit/pubnub pubnub

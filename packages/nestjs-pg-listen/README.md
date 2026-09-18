@@ -6,7 +6,7 @@
 
 PostgreSQL LISTEN / NOTIFY for NestJS, powered by [pg-listen](https://github.com/andywer/pg-listen). Inject its typed subscriber while Nest manages connection startup, channel subscriptions, and shutdown.
 
-This package is being prepared for its first release. After publication, install it into your NestJS application:
+Install it in your NestJS application:
 
 ```sh
 pnpm add nestjs-pg-listen pg-listen pg
