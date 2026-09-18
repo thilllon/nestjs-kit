@@ -74,7 +74,71 @@ PgListenModule.registerAsync({
 });
 ```
 
-Both registration methods accept `isGlobal: true` at the top level. Register once per application; named registrations are not provided. The raw subscriber is available via `@InjectPgListen()`, the `PG_LISTEN_SUBSCRIBER` token, or `PgListenService.subscriber`.
+Both registration methods accept `alias` and `isGlobal` at the top level. These are module registration settings, not values returned by `useFactory`.
+
+## Multiple connections
+
+Register once per alias to give each database its own subscriber, options, channels and lifecycle. A default connection can coexist with named connections:
+
+```ts
+import { Injectable, Module, OnModuleInit } from "@nestjs/common";
+import {
+  InjectPgListen,
+  InjectPgListenService,
+  PgListenModule,
+  PgListenService,
+  Subscriber,
+} from "nestjs-pg-listen";
+
+@Injectable()
+export class AuditListener implements OnModuleInit {
+  constructor(
+    @InjectPgListen() private readonly orders: Subscriber,
+    @InjectPgListen("audit") private readonly audit: Subscriber,
+    @InjectPgListenService("audit")
+    private readonly auditService: PgListenService,
+  ) {}
+
+  onModuleInit() {
+    this.orders.notifications.on("orders", console.log);
+    this.audit.notifications.on("audit_events", console.log);
+  }
+
+  record(event: unknown) {
+    return this.auditService.subscriber.notify("audit_events", event);
+  }
+}
+
+@Module({
+  imports: [
+    PgListenModule.register({
+      connection: { connectionString: process.env.DATABASE_URL },
+      channels: ["orders"],
+    }),
+    PgListenModule.registerAsync({
+      alias: "audit",
+      useFactory: async () => ({
+        connection: { connectionString: process.env.AUDIT_DATABASE_URL },
+        channels: ["audit_events"],
+        options: { retryTimeout: 15_000 },
+      }),
+    }),
+  ],
+  providers: [AuditListener],
+})
+export class NotificationsModule {}
+```
+
+Set both database URLs for this example. Use unique aliases for additional connections. Omitted, empty (`""`) and `"default"` aliases all identify the default registration. Its existing `@InjectPgListen()`, `PG_LISTEN_SUBSCRIBER` and direct `PgListenService` injection remain supported. Named registrations export only their named subscriber and service tokens.
+
+| API                                  | Purpose                                                           |
+| ------------------------------------ | ----------------------------------------------------------------- |
+| `@InjectPgListen(alias?)`            | Inject that registration's raw subscriber.                        |
+| `@InjectPgListenService(alias?)`     | Inject that registration's lifecycle service.                     |
+| `getPgListenSubscriberToken(alias?)` | Resolve the subscriber token for `@Inject()` or module lookups.   |
+| `getPgListenServiceToken(alias?)`    | Resolve the service token; the default returns `PgListenService`. |
+
+Registrations are local to their importing module. Re-export a shared registration module to make it available to consumers elsewhere, or set `isGlobal: true` for application-wide access. Each registration connects, subscribes and closes independently. Applications should let Nest own subscriber shutdown rather than calling the raw subscriber's `close()` themselves.
 
 ## Errors and shutdown
 

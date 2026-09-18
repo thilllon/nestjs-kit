@@ -1,5 +1,11 @@
 # nestjs-azure-storage-blob
 
+## 3.0.0
+
+### Major Changes
+
+- 175487e: Isolate Azure Blob Storage registrations by alias with independent clients, options and helper services. Add named client/service injection helpers, per-registration container metadata and consistent provider scopes. Preserve unnamed registration and the existing environment fallback; named registrations no longer expose an ambiguous default service.
+
 ## 2.0.0
 
 ### Major Changes

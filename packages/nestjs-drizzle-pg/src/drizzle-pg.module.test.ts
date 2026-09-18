@@ -1,9 +1,13 @@
+import { Injectable, Module } from "@nestjs/common";
+import type { Client, Pool } from "pg";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Test } from "@nestjs/testing";
 import { integer, pgTable } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   connections: [] as {
+    config: unknown;
     connect: ReturnType<typeof vi.fn>;
     end: ReturnType<typeof vi.fn>;
     query: ReturnType<typeof vi.fn>;
@@ -17,7 +21,7 @@ vi.mock("pg", () => {
     });
     end = vi.fn(async () => undefined);
     query = vi.fn(async () => ({ rowCount: 1 }));
-    constructor() {
+    constructor(readonly config: unknown) {
       mocks.connections.push(this);
     }
   }
@@ -35,7 +39,12 @@ import {
   getDrizzlePgServiceToken,
   getDrizzlePgToken,
 } from "./drizzle-pg.interface";
-import { InjectDrizzlePg } from "./index";
+import {
+  InjectDrizzlePg,
+  InjectDrizzlePgService,
+  InjectPgConnection,
+  getPgConnectionToken,
+} from "./index";
 beforeEach(() => {
   mocks.connections.length = 0;
   mocks.connectError = undefined;
@@ -88,8 +97,121 @@ describe("Drizzle module", () => {
     await module.close();
     for (const connection of mocks.connections)
       expect(connection.end).toHaveBeenCalledOnce();
-    expect(InjectDrizzlePg()).toBeTypeOf("function");
   });
+  it.each([false, true])(
+    "injects independent databases, raw connections and services (async=%s)",
+    async (async) => {
+      @Module({
+        providers: [
+          { provide: "PG_CONFIG", useValue: { application_name: "analytics" } },
+        ],
+        exports: ["PG_CONFIG"],
+      })
+      class ConfigurationModule {}
+      @Injectable()
+      class Consumer {
+        constructor(
+          @InjectDrizzlePg() readonly defaultDb: NodePgDatabase,
+          @InjectDrizzlePg("") readonly emptyAliasDb: NodePgDatabase,
+          @InjectDrizzlePg("default")
+          readonly explicitDefaultDb: NodePgDatabase,
+          @InjectDrizzlePg("analytics") readonly analyticsDb: NodePgDatabase,
+          @InjectPgConnection() readonly defaultConnection: Pool,
+          @InjectPgConnection("analytics") readonly analyticsConnection: Client,
+          @InjectDrizzlePgService() readonly defaultService: DrizzlePgService,
+          @InjectDrizzlePgService("analytics")
+          readonly analyticsService: DrizzlePgService,
+        ) {}
+      }
+      const options = {
+        pgConfig: {
+          type: "client" as const,
+          config: { application_name: "analytics" },
+        },
+        drizzleConfig: { logger: false },
+      };
+      const module = await Test.createTestingModule({
+        imports: [
+          DrizzlePgModule.register({
+            alias: "",
+            pgConfig: {
+              type: "pool",
+              config: { application_name: "default", max: 1 },
+            },
+          }),
+          async
+            ? DrizzlePgModule.registerAsync({
+                alias: "analytics",
+                imports: [ConfigurationModule],
+                inject: ["PG_CONFIG"],
+                useFactory: async (config: { application_name: string }) => ({
+                  ...options,
+                  pgConfig: { type: "client" as const, config },
+                }),
+              })
+            : DrizzlePgModule.register({ alias: "analytics", ...options }),
+        ],
+        providers: [Consumer],
+      }).compile();
+      const consumer = module.get(Consumer);
+      expect(consumer.defaultDb).toBe(consumer.emptyAliasDb);
+      expect(consumer.defaultDb).toBe(consumer.explicitDefaultDb);
+      expect(consumer.analyticsDb).not.toBe(consumer.defaultDb);
+      expect(consumer.defaultConnection).toBe(
+        module.get(getPgConnectionToken("default")),
+      );
+      expect(consumer.defaultConnection).toBe(
+        module.get(getPgConnectionToken("")),
+      );
+      expect(consumer.analyticsConnection).toBe(
+        module.get(getPgConnectionToken("analytics")),
+      );
+      expect(consumer.analyticsConnection).not.toBe(consumer.defaultConnection);
+      expect(consumer.defaultService).toBe(module.get(DrizzlePgService));
+      expect(consumer.defaultService).toBe(
+        module.get(getDrizzlePgServiceToken("")),
+      );
+      expect(consumer.analyticsService).toBe(
+        module.get(getDrizzlePgServiceToken("analytics")),
+      );
+      expect(mocks.connections.map((connection) => connection.config)).toEqual(
+        expect.arrayContaining([
+          { application_name: "default", max: 1 },
+          { application_name: "analytics" },
+        ]),
+      );
+      expect(drizzle).toHaveBeenCalledWith(consumer.analyticsConnection, {
+        logger: false,
+      });
+      expect(consumer.defaultConnection.connect).not.toHaveBeenCalled();
+      expect(consumer.analyticsConnection.connect).toHaveBeenCalledOnce();
+      await consumer.analyticsService.onModuleDestroy();
+      expect(consumer.analyticsConnection.end).toHaveBeenCalledOnce();
+      expect(consumer.defaultConnection.end).not.toHaveBeenCalled();
+      expect(await consumer.defaultService.ping()).toBe(true);
+      await module.close();
+      expect(consumer.defaultConnection.end).toHaveBeenCalledOnce();
+      expect(consumer.analyticsConnection.end).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("shares concurrent shutdown and retries a failed close", async () => {
+    const module = await Test.createTestingModule({
+      imports: [
+        DrizzlePgModule.register({ pgConfig: { type: "pool", config: {} } }),
+      ],
+    }).compile();
+    const service = module.get(DrizzlePgService);
+    const connection = mocks.connections[0]!;
+    connection.end.mockRejectedValueOnce(new Error("close failed"));
+    const first = service.onModuleDestroy();
+    expect(service.onModuleDestroy()).toBe(first);
+    await expect(first).rejects.toThrow("close failed");
+    await service.onModuleDestroy();
+    await module.close();
+    expect(connection.end).toHaveBeenCalledTimes(2);
+  });
+
   it("supports asynchronous client registration and closes the connection", async () => {
     const module = await Test.createTestingModule({
       imports: [

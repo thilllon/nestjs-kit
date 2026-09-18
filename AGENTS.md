@@ -39,6 +39,12 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Default unit tests must not require cloud credentials or network services. PostgreSQL E2E runs separately with `pnpm test:e2e`.
 - Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
+## Multiple client registrations
+
+- Keep named client registrations isolated: credentials, endpoints, service options and lifecycle cleanup must belong to the selected alias. Preserve existing unnamed injection APIs.
+- Declare asynchronous registration aliases in module extras, outside the options factory. Document each adapter's call shape and require distinct aliases for clients injected together.
+- Verify multiple registrations in one real Nest consumer, including default/named coexistence and shutdown. Check CJS and ESM consumers for injection changes; use Compose E2E when database behavior is involved.
+
 ## Verification and Git workflow
 
 - Before implementation, record a plan and checklist in GitHub issues. Link implementation PRs to those issues and keep their status accurate.
@@ -47,7 +53,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Lefthook pre-commit runs lint, formatting and staged Gitleaks; commit-msg runs commitlint; pre-push runs build and typecheck. GitHub CI uses `jdx/mise-action` and runs tests.
 - Use Conventional Commit titles/messages. Mark breaking public/runtime requirements with `!` or a `BREAKING CHANGE:` footer.
 - Do NOT append `Co-Authored-By` lines to commit messages. Pass `--body ''` to `gh pr merge` to suppress generated squash-message trailers.
-- Main requires a squash PR, the GitHub Actions `Validate` check, resolved conversations and an up-to-date branch. There are no bypass actors; zero mandatory approvals support solo maintenance. Force pushes and deletion are forbidden. Automated release PRs dispatch CI on their exact head and wait for success before merging.
+- Main requires a squash PR, the GitHub Actions `Validate` check, resolved conversations and an up-to-date branch. There are no bypass actors; zero mandatory approvals support solo maintenance. Force pushes and deletion are forbidden. Automated release PRs dispatch full CI on their exact head. Dispatched job checks alone do not satisfy PR protection: report a Checks API `Validate` result only after verifying the actual CI repository, workflow, commit and successful job, with its run link. Never fabricate success or weaken protection if the reported check is not accepted. Preserve validated head/base/tree guards.
 - Merge only verified revisions. When the maintainer authorizes merging, continue through passing PRs without repeatedly asking for approval.
 - Check GitHub Code scanning between PRs. Record actionable warnings in issues, fix them in linked PRs, and confirm default-branch alerts are resolved after analysis. Do not dismiss warnings just to clear the dashboard.
 
@@ -56,6 +62,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Changesets is the single versioning engine. Every PR with publishable package changes must include an explicit Changeset naming the affected packages, bump types and user-facing summary. The agent implementing the change writes this file as part of the PR; commit messages do not infer versions.
 - Honor explicit maintainer-requested coordinated releases through a changeset; Changesets combines all pending requests into one bump per package.
 - Only changed packages are versioned/published. Do not introduce a competing semantic-release publisher or release unchanged packages for documentation-only edits.
+- `@nestjs-kit/nodemailer` is temporarily ignored by Changesets while its first owner-authenticated publication is pending (#458). Keep the six established packages independent. After verifying its first publication and trusted publisher, remove the ignore entry through a checked PR; do not use a wrapper or `private: true` as a workaround.
 - npm publishing uses trusted-publisher OIDC and provenance. Leave `NPM_PUBLISH_ENABLED` disabled until the owner completes npm setup; new packages need an owner-authenticated first publication before trust can be configured.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.
 - Keep README badges, package entry points, licenses and release instructions accurate. Never claim an unpublished package is already available on npm.

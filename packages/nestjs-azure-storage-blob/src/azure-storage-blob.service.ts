@@ -12,10 +12,14 @@ import {
   ContainerSASPermissionsLike,
   ServiceGenerateAccountSasUrlOptions,
 } from "@azure/storage-blob";
-import { Injectable } from "@nestjs/common";
-import { InjectStorageBlob } from "./azure-storage-blob.decorator";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
+  MODULE_CLIENT_TOKEN,
+  MODULE_OPTIONS_TOKEN,
+} from "./azure-storage-blob.constants";
+import type {
   GetAccountSasUrlResponse,
+  ModuleOptions,
   GetBlockBlobSasUrlResponse,
   GetContainerSasUrlResponse,
 } from "./azure-storage-blob.interface";
@@ -29,10 +33,12 @@ export class AzureStorageBlobService {
   private containerName?: string;
 
   constructor(
-    @InjectStorageBlob()
+    @Inject(MODULE_CLIENT_TOKEN)
     private readonly blobServiceClient: BlobServiceClient,
+    @Optional() @Inject(MODULE_OPTIONS_TOKEN) options?: ModuleOptions,
   ) {
-    this.containerName = process.env.NESTJS_STORAGE_BLOB_CONTAINER;
+    this.containerName =
+      options?.containerName ?? process.env.NESTJS_STORAGE_BLOB_CONTAINER;
   }
 
   getClient() {
