@@ -1,6 +1,6 @@
 {
   "name": "nestjs-azure-storage-blob",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Azure Blob Storage clients and SAS URLs for NestJS",
   "license": "ISC",
   "author": "thilllon",

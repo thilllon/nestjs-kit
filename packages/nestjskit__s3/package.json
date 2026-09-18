@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/s3",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "S3-compatible object storage integration for NestJS, including AWS, NetApp, and Ceph",
   "license": "ISC",
   "author": "thilllon",
