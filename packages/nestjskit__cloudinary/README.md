@@ -57,7 +57,7 @@ CloudinaryModule.registerAsync({
 
 ## Multiple accounts and endpoints
 
-Use a distinct `alias` for each account. `InjectCloudinary(alias)` injects a `CloudinaryService` whose upload, ping and signing operations use that registration's configuration. Async aliases are declared beside `useFactory`, not in its returned configuration.
+Use a distinct `alias` for each account. `InjectCloudinary(alias)` injects a `CloudinaryService` whose upload, ping and signing operations use that registration's configuration. `alias` and `global` are Nest module settings: declare them beside `useFactory`, not in its returned configuration. The factory returns Cloudinary options and, optionally, the service setting `pingOnInit`. For synchronous registration, include all these settings in the same object.
 
 ```ts
 import { Injectable, Module } from "@nestjs/common";

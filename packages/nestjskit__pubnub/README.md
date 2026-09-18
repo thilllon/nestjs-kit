@@ -55,7 +55,7 @@ PubNubModule.registerAsync({
 
 ## Multiple clients
 
-Give each registration a unique `alias` and inject the matching client. The alias belongs beside `useFactory` for async registration, not inside the returned SDK configuration.
+Give each registration a unique `alias` and inject the matching client. `alias` and `isGlobal` are Nest module settings: place them beside `useFactory` for async registration, not inside its returned PubNub SDK configuration. For synchronous registration, include them alongside the SDK options in the same object.
 
 ```ts
 import { Injectable, Module } from "@nestjs/common";
