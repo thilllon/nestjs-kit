@@ -1,5 +1,16 @@
 # nestjs-pg-listen
 
+## 1.0.1
+
+### Patch Changes
+
+- - nestjs-azure-storage-blob: refactor: centralize package and test TypeScript settings (#440)
+  - nestjs-drizzle-pg: refactor: centralize package and test TypeScript settings (#440)
+  - nestjs-pg-listen: refactor: centralize package and test TypeScript settings (#440)
+  - @nestjs-kit/cloudinary: refactor: centralize package and test TypeScript settings (#440)
+  - @nestjs-kit/pubnub: refactor: centralize package and test TypeScript settings (#440)
+  - @nestjs-kit/s3: refactor: centralize package and test TypeScript settings (#440)
+
 ## 1.0.0
 
 ### Major Changes
