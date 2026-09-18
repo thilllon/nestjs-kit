@@ -44,7 +44,7 @@ Lefthook checks lint, formatting, and staged secrets before a commit; before a p
 
 ## Pull requests and commits
 
-Use a Conventional Commit title so release automation can determine the change type:
+Use a Conventional Commit title to describe the change:
 
 - `fix(s3): preserve custom endpoint configuration`
 - `feat(cloudinary): support a new upload option`
@@ -53,7 +53,7 @@ Use a Conventional Commit title so release automation can determine the change t
 
 Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
-Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. See [releases](docs/releases.md) for how Conventional Commits become package-specific Changesets.
+Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
 
 ## Repository layout
 

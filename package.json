@@ -14,12 +14,10 @@
     "lint": "biome lint .",
     "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
     "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
-    "test": "vitest run && pnpm test:release",
+    "test": "vitest run",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down --volumes --remove-orphans",
     "test:e2e": "vitest run --config vitest.e2e.config.mts",
-    "test:release": "tsx --test scripts/release.test.ts",
-    "release:prepare": "tsx scripts/release-prepare.mts",
     "release:publish": "changeset publish"
   },
   "devDependencies": {
@@ -39,7 +37,6 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "tsdown": "0.23.0",
-    "tsx": "4.23.13",
     "turbo": "2.10.13",
     "typescript": "7.0.2",
     "unplugin-swc": "1.6.0",

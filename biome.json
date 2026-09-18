@@ -42,7 +42,7 @@
   },
   "overrides": [
     {
-      "includes": ["scripts/**", "packages/*/src/**/*.ts"],
+      "includes": ["packages/*/src/**/*.ts"],
       "linter": {
         "rules": {
           "suspicious": {

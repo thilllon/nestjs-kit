@@ -46,14 +46,15 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Run relevant checks: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, and `pnpm build` (including strict publint/attw checks). Run Compose E2E for middleware changes.
 - Lefthook pre-commit runs lint, formatting and staged Gitleaks; commit-msg runs commitlint; pre-push runs build and typecheck. GitHub CI uses `jdx/mise-action` and runs tests.
 - Use Conventional Commit titles/messages. Mark breaking public/runtime requirements with `!` or a `BREAKING CHANGE:` footer.
-- Do NOT append `Co-Authored-By` lines to commit messages.
+- Do NOT append `Co-Authored-By` lines to commit messages. Pass `--body ''` to `gh pr merge` to suppress generated squash-message trailers.
+- Main requires a squash PR, the GitHub Actions `Validate` check, resolved conversations and an up-to-date branch. There are no bypass actors; zero mandatory approvals support solo maintenance. Force pushes and deletion are forbidden. Automated release PRs dispatch CI on their exact head and wait for success before merging.
 - Merge only verified revisions. When the maintainer authorizes merging, continue through passing PRs without repeatedly asking for approval.
 - Check GitHub Code scanning between PRs. Record actionable warnings in issues, fix them in linked PRs, and confirm default-branch alerts are resolved after analysis. Do not dismiss warnings just to clear the dashboard.
 
 ## Releases and maintenance
 
-- Changesets is the single versioning engine. Conventional Commit analysis and publishable package changes drive independent version bumps and changelogs.
-- Honor explicit maintainer-requested coordinated releases through a changeset; combine manual and automatic requests into one bump per package.
+- Changesets is the single versioning engine. Every PR with publishable package changes must include an explicit Changeset naming the affected packages, bump types and user-facing summary. The agent implementing the change writes this file as part of the PR; commit messages do not infer versions.
+- Honor explicit maintainer-requested coordinated releases through a changeset; Changesets combines all pending requests into one bump per package.
 - Only changed packages are versioned/published. Do not introduce a competing semantic-release publisher or release unchanged packages for documentation-only edits.
 - npm publishing uses trusted-publisher OIDC and provenance. Leave `NPM_PUBLISH_ENABLED` disabled until the owner completes npm setup; new packages need an owner-authenticated first publication before trust can be configured.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.
