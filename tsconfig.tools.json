@@ -5,6 +5,6 @@
     "allowImportingTsExtensions": true,
     "rootDir": "."
   },
-  "include": ["*.mts", "scripts/**/*.mts", "scripts/**/*.test.ts"],
+  "include": ["*.mts"],
   "exclude": []
 }
