@@ -22,10 +22,7 @@ export const {
     (definition, extras) => {
       const connectionToken = getPgConnectionToken(extras.alias);
       const drizzleToken = getDrizzlePgToken(extras.alias);
-      const serviceToken =
-        !extras.alias || extras.alias === defaultTokenAlias
-          ? DrizzlePgService
-          : getDrizzlePgServiceToken(extras.alias);
+      const serviceToken = getDrizzlePgServiceToken(extras.alias);
 
       definition.providers ??= [];
       definition.exports ??= [];
@@ -66,7 +63,7 @@ export const {
         useFactory: (connection: Pool | Client) =>
           new DrizzlePgService(connection),
       });
-      definition.exports.push(drizzleToken, serviceToken);
+      definition.exports.push(connectionToken, drizzleToken, serviceToken);
 
       definition.global = extras.isGlobal;
 

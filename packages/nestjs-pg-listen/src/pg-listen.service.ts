@@ -1,15 +1,11 @@
 import {
-  Inject,
   Injectable,
   Logger,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from "@nestjs/common";
 import createSubscriber, { type Subscriber } from "pg-listen";
-import {
-  MODULE_OPTIONS_TOKEN,
-  type PgListenModuleOptions,
-} from "./pg-listen.module-definition";
+import type { PgListenModuleOptions } from "./pg-listen.module-definition";
 
 @Injectable()
 export class PgListenService
@@ -19,10 +15,7 @@ export class PgListenService
   private readonly logger = new Logger(PgListenService.name);
   private closePromise?: Promise<void>;
 
-  constructor(
-    @Inject(MODULE_OPTIONS_TOKEN)
-    private readonly config: PgListenModuleOptions,
-  ) {
+  constructor(private readonly config: PgListenModuleOptions) {
     this.subscriber = createSubscriber(config.connection, config.options);
     this.subscriber.events.on("error", (error) =>
       this.logger.error(error.message, error.stack),

@@ -119,43 +119,60 @@ The factory may also return a promise. `registerAsync()` supports `useClass` and
 Give each additional registration a distinct alias. Both `alias` and `isGlobal` belong at the top level of the registration, including for `registerAsync()`; they do not belong inside its `useFactory` result.
 
 ```ts
-import { Inject, Injectable, Module } from "@nestjs/common";
+import { Injectable, Module } from "@nestjs/common";
 import { sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import type { Client } from "pg";
 import {
   DrizzlePgModule,
   DrizzlePgService,
-  getDrizzlePgServiceToken,
   InjectDrizzlePg,
+  InjectDrizzlePgService,
+  InjectPgConnection,
 } from "nestjs-drizzle-pg";
-
-const connectionString = process.env.ANALYTICS_DATABASE_URL;
-if (!connectionString) {
-  throw new Error("ANALYTICS_DATABASE_URL is required");
-}
 
 @Injectable()
 export class AnalyticsService {
   constructor(
-    @InjectDrizzlePg("analytics") private readonly db: NodePgDatabase,
-    @Inject(getDrizzlePgServiceToken("analytics"))
-    private readonly connection: DrizzlePgService,
+    @InjectDrizzlePg() private readonly primary: NodePgDatabase,
+    @InjectDrizzlePg("analytics") private readonly analytics: NodePgDatabase,
+    @InjectPgConnection("analytics") private readonly raw: Client,
+    @InjectDrizzlePgService("analytics")
+    private readonly health: DrizzlePgService,
   ) {}
 
-  databaseTime() {
-    return this.db.execute(sql`select current_timestamp as time`);
+  databaseTimes() {
+    return Promise.all([
+      this.primary.execute(sql`select current_timestamp as time`),
+      this.analytics.execute(sql`select current_timestamp as time`),
+    ]);
+  }
+
+  rawQuery() {
+    return this.raw.query("select current_database() as database");
   }
 
   isReachable() {
-    return this.connection.ping();
+    return this.health.ping();
   }
 }
 
 @Module({
   imports: [
     DrizzlePgModule.register({
+      pgConfig: {
+        type: "pool",
+        config: { connectionString: process.env.DATABASE_URL, max: 10 },
+      },
+    }),
+    DrizzlePgModule.registerAsync({
       alias: "analytics",
-      pgConfig: { type: "pool", config: { connectionString } },
+      useFactory: async () => ({
+        pgConfig: {
+          type: "client" as const,
+          config: { connectionString: process.env.ANALYTICS_DATABASE_URL },
+        },
+      }),
     }),
   ],
   providers: [AnalyticsService],
@@ -164,7 +181,9 @@ export class AnalyticsService {
 export class AnalyticsModule {}
 ```
 
-The unnamed registration uses the `default` alias. Inject its database with `@InjectDrizzlePg()` and its health service directly as `DrizzlePgService`. Register the module once per alias; use another alias for a different database or connection configuration.
+Set both database URLs for this example. The raw connection, Drizzle database and health service all use the same connection within their registration; different aliases use independent clients or pools. Match the injected raw type to its `pgConfig.type`: `Client` for a client, `Pool` for a pool.
+
+Omitted, empty (`""`) and `"default"` aliases identify the default registration. Inject its database with `@InjectDrizzlePg()`, raw connection with `@InjectPgConnection()`, and health service with `@InjectDrizzlePgService()` or directly as `DrizzlePgService`. `getDrizzlePgServiceToken()` now resolves these default aliases to that service class. Existing named `getDrizzlePgServiceToken("analytics")` tokens and `@InjectDrizzlePg(alias)` remain supported. Register once per alias; use another alias for a different database or connection configuration.
 
 Modules are local by default. Set `isGlobal: true` only when the registered providers should be available throughout the application; otherwise import the registration into the module containing its consumers, or re-export it through a shared module.
 
@@ -206,7 +225,10 @@ For tests or standalone application contexts, call `app.close()` / `module.close
 | `@InjectDrizzlePg(alias?)`               | Inject a Drizzle database; defaults to the unnamed registration. |
 | `getDrizzlePgToken(alias?)`              | Get the database token for `@Inject()` or module lookups.        |
 | `DrizzlePgService.ping()`                | Execute `SELECT 1` and return a `Promise<boolean>`.              |
-| `getDrizzlePgServiceToken(alias)`        | Get the health-service token for a named registration.           |
+| `@InjectPgConnection(alias?)`            | Inject the module-owned raw `Client` or `Pool`.                  |
+| `getPgConnectionToken(alias?)`           | Get the exported raw-connection token.                           |
+| `@InjectDrizzlePgService(alias?)`        | Inject the health and lifecycle service.                         |
+| `getDrizzlePgServiceToken(alias?)`       | Get the service token; defaults resolve to `DrizzlePgService`.   |
 | `drizzleConfig`                          | Forward Drizzle configuration, such as `schema` and `logger`.    |
 | `alias` / `isGlobal`                     | Choose a registration name and whether its providers are global. |
 

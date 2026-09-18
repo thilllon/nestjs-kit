@@ -1,5 +1,6 @@
 import type { DrizzleConfig } from "drizzle-orm";
 import type { ClientConfig, PoolConfig } from "pg";
+import { DrizzlePgService } from "./drizzle-pg.service";
 
 export interface DrizzlePgModuleOptions {
   drizzleConfig?: DrizzleConfig<Record<string, unknown>>;
@@ -16,10 +17,14 @@ export type DrizzlePgModuleExtras = {
 export const defaultTokenAlias = "default";
 
 export const getDrizzlePgToken = (name = defaultTokenAlias): string =>
-  `DRIZZLE_PG_${name}`;
+  `DRIZZLE_PG_${name || defaultTokenAlias}`;
 
 export const getPgConnectionToken = (name = defaultTokenAlias): string =>
-  `DRIZZLE_PG_CONNECTION_${name}`;
+  `DRIZZLE_PG_CONNECTION_${name || defaultTokenAlias}`;
 
-export const getDrizzlePgServiceToken = (name: string): string =>
-  `DRIZZLE_PG_SERVICE_${name}`;
+export const getDrizzlePgServiceToken = (
+  name = defaultTokenAlias,
+): string | typeof DrizzlePgService =>
+  !name || name === defaultTokenAlias
+    ? DrizzlePgService
+    : `DRIZZLE_PG_SERVICE_${name}`;
