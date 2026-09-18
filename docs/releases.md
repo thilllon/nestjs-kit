@@ -32,11 +32,11 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-The six established package identities already exist on npm; skip first-publication commands for them. `@nestjs-kit/nodemailer` is new and awaits its first publication. Its checked-in `0.0.0` is a development placeholder, and its explicit major changeset requests `1.0.0`. Wait for that version to merge before publishing.
+The six established package identities already exist on npm; skip first-publication commands for them. `@nestjs-kit/nodemailer` is new and awaits its first publication. Its first release version, `1.0.0`, has merged into `main`; npm publication still awaits owner authentication. It is temporarily listed in `.changeset/config.json` under `ignore` so the six established packages can publish independently through OIDC. Native Changesets excludes ignored packages from its publish plan and versioning; this is a temporary bootstrap hold, not a permanent release policy.
 
-For a new package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for that new package.
+For a new package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for that new package. For Nodemailer, verify its first published version and trusted publisher, then remove its temporary `ignore` entry through a checked PR. [Issue #458](https://github.com/thilllon/nestjs-kit/issues/458) tracks these prerequisites and removal.
 
-For the new Nodemailer package only, after its intended release version merges into `main`, use:
+For the new Nodemailer package only, use its release version checked into `main`:
 
 ```sh
 mise install
@@ -51,7 +51,7 @@ mise exec -- pnpm publish --access public --provenance=false
 
 Inspect the archive file list before publishing. The explicit `--provenance=false` overrides the package's CI-oriented `publishConfig.provenance` for this local first publication only; later CI publications retain provenance. Run this bootstrap only for an identity that does not yet exist; existing packages use the release workflow. Use your own npm account with package/scope write access and complete its authentication prompts.
 
-In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After all package trusted publishers are configured, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
+In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After trusted publishers are configured for every non-ignored package, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 
 ## Retries and maintenance
 
@@ -59,7 +59,7 @@ Changesets skips versions already present on npm, so a partial publication can r
 
 For a failed publication or tag push, rerun the failed job in the **original Release workflow run**. Its checkout remains pinned to the validated commit, including the tree comparison. Native `git-tag` uses the current checkout for missing tags and leaves existing tags unchanged; it does not reconstruct the publication commit from registry `gitHead`. Running it on a later checkout can tag the wrong revision. Use a new `workflow_dispatch` when enabling publication or intentionally releasing the latest validated main revision, not to repair an older release's tags.
 
-`pnpm exec changeset publish-plan` inspects the native publication plan without uploading packages. `pnpm release:publish` is the actual publication command; the `NPM_PUBLISH_ENABLED` gate belongs to GitHub Actions, not this local command. Keep unfinished workspace packages `private: true` until their first intended release is ready: native Changesets considers every public package version absent from the registry, including new packages. Do not merge placeholder public packages expecting a separate pending list to hide them.
+`pnpm exec changeset publish-plan` inspects the native publication plan without uploading packages. `pnpm release:publish` is the actual publication command; the `NPM_PUBLISH_ENABLED` gate belongs to GitHub Actions, not this local command. Keep unfinished workspace packages `private: true` until their first intended release is ready: native Changesets considers public package versions absent from the registry, including new packages, except packages explicitly listed in its `ignore` configuration. Do not merge placeholder public packages expecting a separate pending list to hide them.
 
 See the upstream [Changesets command documentation](https://github.com/changesets/changesets/blob/main/docs/command-line-options.md#publish) and [pnpm publish documentation](https://pnpm.io/cli/publish) for the maintained behavior. Investigate authentication or build failures before retrying; never replace an existing npm version.
 
@@ -77,4 +77,4 @@ GitHub documents that [job checks from dispatched workflows do not satisfy requi
 
 Only the release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. No personal token, separate GitHub App or protection bypass is configured. The merge still checks the validated PR head and original main base, and publication verifies the merged tree against the validated tree.
 
-Acceptance of this API-created Actions check by the protected bot PR is tracked in [#495](https://github.com/thilllon/nestjs-kit/issues/495). Until that real integration is verified, do not treat successful API creation as proof that the merge requirement is satisfied. Keep protections unchanged if GitHub rejects the check.
+This protected flow was verified by [release PR #497](https://github.com/thilllon/nestjs-kit/pull/497). [Full CI](https://github.com/thilllon/nestjs-kit/actions/runs/35381245044) passed on the exact PR head, and the [release workflow](https://github.com/thilllon/nestjs-kit/actions/runs/35381191397) reported its result and merged through `github-actions[bot]` under the active required-check rules without bypass actors or owner approval. Publication remained gated. The evidence is recorded in [#495](https://github.com/thilllon/nestjs-kit/issues/495) and [#477](https://github.com/thilllon/nestjs-kit/issues/477).
