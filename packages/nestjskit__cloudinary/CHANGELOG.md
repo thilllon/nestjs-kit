@@ -1,5 +1,11 @@
 # @nestjs-kit/cloudinary
 
+## 3.0.0
+
+### Major Changes
+
+- - @nestjs-kit/cloudinary: refactor(cloudinary)!: remove local Sharp preprocessing (#473)
+
 ## 2.0.0
 
 ### Major Changes
