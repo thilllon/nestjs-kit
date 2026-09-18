@@ -95,7 +95,7 @@ class AccountNotifications {
 export class MultiAccountModule {}
 ```
 
-Each registration owns its SDK configuration, client and shutdown hook. SDK options such as `origin` remain available per registration. `getPubNubClientToken(alias)` supports custom provider factories and testing. Named registrations export only their named token; omit `alias` (or use `"default"`) to retain ordinary `PubNubService` injection. Aliases must be non-empty without surrounding whitespace. The module stays local unless `isGlobal: true` is requested.
+Each registration owns its SDK configuration, client and shutdown hook. SDK options such as `origin` remain available per registration. `getPubNubClientToken(alias)` supports custom provider factories and testing. Named registrations export only their named token; omit `alias` (or use `""` or the reserved `"default"` alias) to retain ordinary `PubNubService` injection. Other aliases are exact, opaque names; use a unique name for each registration. The module stays local unless `isGlobal: true` is requested.
 
 ### Major release note
 

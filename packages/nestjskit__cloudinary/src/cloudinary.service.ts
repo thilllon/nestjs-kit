@@ -53,14 +53,19 @@ export class CloudinaryService {
       resource_type: options.resource_type,
     });
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = cloudinary.utils.api_sign_request(
+    const { signature } = cloudinary.utils.sign_request(
       {
         public_id: options.public_id,
         timestamp,
         folder: options.folder,
         eager: options.eager,
       },
-      apiSecret ?? this.options.api_secret ?? "",
+      {
+        ...this.sdkOptions,
+        api_secret: apiSecret ?? this.options.api_secret,
+        signature_algorithm: this.options.signature_algorithm ?? "sha1",
+        signature_version: this.options.signature_version ?? 2,
+      },
     );
 
     return {

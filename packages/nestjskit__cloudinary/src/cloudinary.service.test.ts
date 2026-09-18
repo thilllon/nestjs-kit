@@ -29,7 +29,9 @@ describe("Cloudinary service", () => {
     const config = vi.spyOn(cloudinary, "config");
     const ping = vi.spyOn(cloudinary.api, "ping");
     const module = await Test.createTestingModule({
-      imports: [CloudinaryModule.register({ cloud_name: "offline" })],
+      imports: [
+        CloudinaryModule.register({ alias: "", cloud_name: "offline" }),
+      ],
     }).compile();
     await module.init();
     expect(config).not.toHaveBeenCalled();
@@ -42,7 +44,11 @@ describe("Cloudinary service", () => {
       .mockResolvedValue({ status: "ok" });
     const module = await Test.createTestingModule({
       imports: [
-        CloudinaryModule.register({ cloud_name: "offline", pingOnInit: true }),
+        CloudinaryModule.register({
+          alias: "default",
+          cloud_name: "offline",
+          pingOnInit: true,
+        }),
       ],
     }).compile();
     await module.init();
@@ -175,6 +181,8 @@ describe("Cloudinary service", () => {
     expect(sign).toHaveBeenCalledWith(
       expect.objectContaining({ public_id: "asset" }),
       "secret",
+      "sha1",
+      2,
     );
   });
 });
@@ -195,6 +203,7 @@ it.each([false, true])(
         api_key: `${alias}-key`,
         api_secret: `${alias}-secret`,
         upload_prefix: `https://${alias}.example.com`,
+        signature_algorithm: alias === "first" ? "sha1" : "sha256",
       };
       return async
         ? CloudinaryModule.registerAsync({
@@ -242,12 +251,14 @@ it.each([false, true])(
           api_key: "first-key",
           api_secret: "first-secret",
           upload_prefix: "https://first.example.com",
+          signature_algorithm: "sha1",
         },
         {
           cloud_name: "second",
           api_key: "second-key",
           api_secret: "second-secret",
           upload_prefix: "https://second.example.com",
+          signature_algorithm: "sha256",
         },
       ]);
     }
@@ -260,7 +271,7 @@ it.each([false, true])(
         resource_type: "image",
       });
       expect(signed.signature).toBe(
-        createHash("sha1")
+        createHash(alias === "first" ? "sha1" : "sha256")
           .update(
             `public_id=asset&timestamp=${signed.timestamp}${alias}-secret`,
           )

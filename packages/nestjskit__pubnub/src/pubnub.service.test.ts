@@ -15,8 +15,8 @@ describe("PubNub module", () => {
         publishKey: "offline",
       };
       const registration = async
-        ? PubNubModule.registerAsync({ useFactory: () => options })
-        : PubNubModule.register(options);
+        ? PubNubModule.registerAsync({ alias: "", useFactory: () => options })
+        : PubNubModule.register({ ...options, alias: "default" });
       const module = await Test.createTestingModule({
         imports: [registration],
       }).compile();

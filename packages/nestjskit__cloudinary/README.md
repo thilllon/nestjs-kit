@@ -102,7 +102,7 @@ export class MultiAccountModule {}
 
 Set credentials for both accounts. Use a regional `upload_prefix` only for an account configured for that [Cloudinary data center](https://cloudinary.com/documentation/image_upload_api_reference#eu_or_ap_data_centers_and_endpoints_premium_feature). The configured prefix also determines the direct-upload URL returned by `createSignedUploadUrl()`.
 
-`getCloudinaryToken(alias)` is available for custom providers and testing. Named registrations export only their named service token. Omit `alias` (or use `"default"`) to preserve ordinary `CloudinaryService` injection. Aliases must be non-empty without surrounding whitespace. The existing global-by-default behavior remains; use `global: false` for module-local registrations. The adapter opens no persistent client connection to dispose.
+`getCloudinaryToken(alias)` is available for custom providers and testing. Named registrations export only their named service token. Omit `alias` (or use `""` or the reserved `"default"` alias) to preserve ordinary `CloudinaryService` injection. Other aliases are exact, opaque names; use a unique name for each registration. The existing global-by-default behavior remains; use `global: false` for module-local registrations. The adapter opens no persistent client connection to dispose.
 
 ## Sign a direct upload
 
