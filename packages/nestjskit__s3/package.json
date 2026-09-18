@@ -49,8 +49,8 @@
     "s3"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.mts",
     "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts",
     "dev": "tsdown --config ../../tsdown.config.mts --watch"
   },
   "module": "./dist/index.mjs",
