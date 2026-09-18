@@ -1,12 +1,11 @@
-import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
+import { Injectable, type OnModuleDestroy } from "@nestjs/common";
 import type { Client, Pool } from "pg";
-import { getPgConnectionToken } from "./drizzle-pg.interface";
 
 @Injectable()
 export class DrizzlePgService implements OnModuleDestroy {
-  constructor(
-    @Inject(getPgConnectionToken()) private readonly connection: Pool | Client,
-  ) {}
+  private closePromise?: Promise<void>;
+
+  constructor(private readonly connection: Pool | Client) {}
 
   async ping(): Promise<boolean> {
     try {
@@ -17,7 +16,13 @@ export class DrizzlePgService implements OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.connection.end();
+  onModuleDestroy(): Promise<void> {
+    this.closePromise ??= Promise.resolve()
+      .then(() => this.connection.end())
+      .catch((error: unknown) => {
+        this.closePromise = undefined;
+        throw error;
+      });
+    return this.closePromise;
   }
 }

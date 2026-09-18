@@ -9,6 +9,11 @@ import {
   PgListenModule,
 } from "./pg-listen.module";
 import { PgListenService } from "./pg-listen.service";
+import {
+  InjectPgListenService,
+  getPgListenServiceToken,
+  getPgListenSubscriberToken,
+} from "./index";
 
 vi.mock("pg-listen", () => ({ default: vi.fn() }));
 
@@ -77,6 +82,108 @@ describe("PgListenModule", () => {
     await module.get(PgListenService).onModuleDestroy();
     expect(subscriber.close).toHaveBeenCalledOnce();
   });
+
+  it.each([false, true])(
+    "isolates default and named registrations with real consumer injection (async=%s)",
+    async (async) => {
+      const audit = mockSubscriber();
+      const jobs = mockSubscriber();
+      const clients = { default: subscriber, audit, jobs };
+      vi.mocked(createSubscriber).mockImplementation(
+        (connection) =>
+          clients[
+            connection?.application_name as keyof typeof clients
+          ] as unknown as Subscriber,
+      );
+      @Module({
+        providers: [
+          { provide: "AUDIT_CONFIG", useValue: { application_name: "audit" } },
+        ],
+        exports: ["AUDIT_CONFIG"],
+      })
+      class ConfigurationModule {}
+      @Injectable()
+      class Consumer {
+        constructor(
+          @InjectPgListen() readonly defaultClient: Subscriber,
+          @InjectPgListen("") readonly emptyAliasClient: Subscriber,
+          @InjectPgListen("default") readonly explicitDefaultClient: Subscriber,
+          @InjectPgListen("audit") readonly auditClient: Subscriber,
+          @InjectPgListen("jobs") readonly jobsClient: Subscriber,
+          @InjectPgListenService() readonly defaultService: PgListenService,
+          @InjectPgListenService("audit")
+          readonly auditService: PgListenService,
+          @InjectPgListenService("jobs") readonly jobsService: PgListenService,
+        ) {}
+      }
+      const auditOptions = {
+        connection: { application_name: "audit" },
+        channels: ["audit"],
+        options: { retryTimeout: 1000 },
+      };
+      const module = await Test.createTestingModule({
+        imports: [
+          PgListenModule.register({
+            alias: "",
+            connection: { application_name: "default" },
+            channels: ["default"],
+          }),
+          async
+            ? PgListenModule.registerAsync({
+                alias: "audit",
+                imports: [ConfigurationModule],
+                inject: ["AUDIT_CONFIG"],
+                useFactory: async (connection: {
+                  application_name: string;
+                }) => ({ ...auditOptions, connection }),
+              })
+            : PgListenModule.register({ alias: "audit", ...auditOptions }),
+          PgListenModule.registerAsync({
+            alias: "jobs",
+            useFactory: () => ({
+              connection: { application_name: "jobs" },
+              channels: ["jobs"],
+              options: { retryTimeout: 2000 },
+            }),
+          }),
+        ],
+        providers: [Consumer],
+      }).compile();
+      const consumer = module.get(Consumer);
+      expect(consumer.defaultClient).toBe(subscriber);
+      expect(consumer.emptyAliasClient).toBe(subscriber);
+      expect(consumer.explicitDefaultClient).toBe(subscriber);
+      expect(consumer.auditClient).toBe(audit);
+      expect(consumer.jobsClient).toBe(jobs);
+      expect(consumer.defaultService).toBe(module.get(PgListenService));
+      expect(consumer.auditService.subscriber).toBe(audit);
+      expect(consumer.jobsService.subscriber).toBe(jobs);
+      expect(module.get(getPgListenSubscriberToken("audit"))).toBe(audit);
+      expect(module.get(getPgListenServiceToken("audit"))).toBe(
+        consumer.auditService,
+      );
+      expect(createSubscriber).toHaveBeenCalledWith(
+        auditOptions.connection,
+        auditOptions.options,
+      );
+      expect(createSubscriber).toHaveBeenCalledWith(
+        { application_name: "jobs" },
+        { retryTimeout: 2000 },
+      );
+      await module.init();
+      for (const [name, client] of Object.entries(clients)) {
+        expect(client.connect).toHaveBeenCalledOnce();
+        expect(client.listenTo.mock.calls).toEqual([[name]]);
+      }
+      await consumer.auditService.onModuleDestroy();
+      expect(audit.close).toHaveBeenCalledOnce();
+      expect(jobs.close).not.toHaveBeenCalled();
+      expect(subscriber.close).not.toHaveBeenCalled();
+      await module.close();
+      for (const client of Object.values(clients))
+        expect(client.close).toHaveBeenCalledOnce();
+    },
+  );
 
   it("supports async configuration with imported providers and no initial channels", async () => {
     @Module({
