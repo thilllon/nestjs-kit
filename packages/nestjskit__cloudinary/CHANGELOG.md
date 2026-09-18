@@ -1,5 +1,12 @@
 # @nestjs-kit/cloudinary
 
+## 3.0.1
+
+### Patch Changes
+
+- - @nestjs-kit/cloudinary: refactor: flatten package source directories (#478)
+  - @nestjs-kit/pubnub: refactor: flatten package source directories (#478)
+
 ## 3.0.0
 
 ### Major Changes

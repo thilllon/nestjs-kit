@@ -50,8 +50,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.test.json",
-    "build": "tsdown --config ../../tsdown.config.mts",
-    "dev": "tsdown --config ../../tsdown.config.mts --watch"
+    "build": "tsdown --config ../../tsdown.config.mts"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {

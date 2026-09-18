@@ -1,13 +1,19 @@
 name: CI
+run-name: ${{ inputs.run_key || github.event.pull_request.title || github.event.head_commit.message || 'CI' }}
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_call:
+  workflow_dispatch:
     inputs:
-      ref:
+      expected_sha:
+        description: Exact commit required by the release workflow
+        type: string
+        required: true
+      run_key:
+        description: Unique release validation identifier
         type: string
         required: true
 
@@ -23,9 +29,14 @@ jobs:
       LEFTHOOK: "0"
       TURBO_UI: stream
     steps:
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: jdx/mise-action@v4

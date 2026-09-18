@@ -14,7 +14,7 @@ mise exec -- pnpm install
 
 Use `mise exec --` before commands, or activate mise in your shell. The repository selects the latest Node.js LTS and pins stable pnpm, Lefthook, and Gitleaks. Do not update the lockfile with another package manager.
 
-The mise `postinstall` hook runs `lefthook install`, including on a repeated `mise install` when the tools are already present. `mise run setup` installs dependencies and refreshes hooks; `pnpm hooks:install` can repair hooks explicitly.
+The mise `postinstall` hook runs `lefthook install`, including on a repeated `mise install` when the tools are already present. `mise run setup` installs dependencies and refreshes hooks; `mise exec -- lefthook install` can repair hooks explicitly.
 
 ## Checks
 
@@ -28,7 +28,7 @@ pnpm test
 
 Run `pnpm format` to apply formatting. Biome covers all supported files throughout the repository, including root configuration and examples. Markdown and YAML use Prettier because [Biome does not yet support those languages](https://biomejs.dev/internals/language-support/). Generated files and dependencies follow `.gitignore`; source directories are not excluded. Prettier, commitlint, and Vitest use typed `.mts` configuration files.
 
-Run a single package's unit tests with, for example, `pnpm test:unit packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
+Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
 For real PostgreSQL integration tests, install Docker with Compose and run:
 
@@ -44,7 +44,7 @@ Lefthook checks lint, formatting, and staged secrets before a commit; before a p
 
 ## Pull requests and commits
 
-Use a Conventional Commit title so release automation can determine the change type:
+Use a Conventional Commit title to describe the change:
 
 - `fix(s3): preserve custom endpoint configuration`
 - `feat(cloudinary): support a new upload option`
@@ -53,7 +53,7 @@ Use a Conventional Commit title so release automation can determine the change t
 
 Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
-Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. See [releases](docs/releases.md) for how Conventional Commits become package-specific Changesets.
+Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
 
 ## Repository layout
 

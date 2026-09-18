@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/cloudinary",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Cloudinary uploads and signed URLs for NestJS",
   "license": "ISC",
   "author": "thilllon",
@@ -50,8 +50,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.test.json",
-    "build": "tsdown --config ../../tsdown.config.mts",
-    "dev": "tsdown --config ../../tsdown.config.mts --watch"
+    "build": "tsdown --config ../../tsdown.config.mts"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {

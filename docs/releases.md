@@ -1,21 +1,20 @@
 # Release automation
 
-Packages have independent versions. Changesets is the single versioning engine; Conventional Commits determine release intent. There is no second semantic-release process competing to bump the same files.
+Packages have independent versions. Changesets is the single versioning engine. Explicit Changeset files specify which packages to release and their bump types; Conventional Commits describe changes but do not infer versions.
 
-`release-prepare.mts` connects Conventional Commit analysis to Changesets. It runs through `tsx` and keeps only a source-commit checkpoint in `.changeset/release-state.json` so changes are versioned once. Publication uses the native `changeset publish` command, which detects this pnpm workspace and delegates to `pnpm publish`. No separate publisher or duplicate publication inventory is maintained. Regression tests exercise both preparation and native publishing against an isolated local registry.
+Publication uses the native `changeset publish` command, which detects this pnpm workspace and delegates to `pnpm publish`. Versioning uses native `changeset version`. No custom release scripts or source checkpoints are needed.
 
 ## From a change to npm
 
-1. Merge a PR with a Conventional Commit title into `main`.
-2. The release workflow examines commits since `.changeset/release-state.json` and identifies packages with publishable changes. Documentation, tests, and development-only dependency changes do not trigger releases.
-3. A breaking change (`!` or `BREAKING CHANGE`) requests a major bump; `feat` requests a minor bump; other publishable changes request a patch. Changesets updates only affected package versions and changelogs.
-4. Automation opens or refreshes `automation/releases`. It invokes the reusable CI workflow against that exact commit, then merges only if both its head and the original `main` base still match the validated revisions.
-5. When publishing is enabled, the workflow builds both module formats and runs tsdown’s strict publint/attw checks. `pnpm release:publish` runs Changesets, which compares each public package's current version with npm and publishes only missing versions through pnpm. Existing `publishConfig.provenance` settings retain npm provenance.
-6. After publication succeeds, `changeset git-tag` creates any missing current-version tags. The workflow pushes tags explicitly without pushing a branch.
+1. Include a Changeset in every PR with publishable package changes. Run `pnpm exec changeset`, select affected packages and bump types, and write a user-facing summary. The implementing agent includes this file when doing the work. Documentation, tests and repository-only tooling need no Changeset.
+2. Merge the PR with a Conventional Commit title into `main`. When Changeset files are present, the release workflow runs `pnpm exec changeset version`, which consumes them and updates affected versions and changelogs. It refreshes the lockfile and formatting, then checks the staged diff. With no pending Changesets, it creates no version PR.
+3. Automation opens or refreshes `automation/releases`. It dispatches CI on that branch, verifies the expected commit and waits for that uniquely identified run to pass. The `Validate` check therefore belongs to the release PR head. Automation merges only if both its head and the original `main` base still match the validated revisions.
+4. When publishing is enabled, the workflow builds both module formats and runs tsdown’s strict publint/attw checks. `pnpm release:publish` runs Changesets, which compares each public package's current version with npm and publishes only missing versions through pnpm. Existing `publishConfig.provenance` settings retain npm provenance.
+5. After publication succeeds, `changeset git-tag` creates any missing current-version tags. The workflow pushes tags explicitly without pushing a branch.
 
-Unchanged packages keep their versions. A runtime dependency update can trigger a release for its consuming package. Repository maintenance alone does not bump every package. Changes to the shared TypeScript and tsdown build configurations affect all public packages. Test-only configuration and fixtures do not trigger releases.
+Use major for breaking public API or runtime requirements, minor for compatible features, and patch for compatible fixes. Include affected packages for runtime dependency and shared build configuration changes. Unchanged packages keep their versions; Changesets may also update internal dependents according to its configuration.
 
-An explicit changeset can request a deliberate release, including a coordinated major release. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
+For a coordinated release, name every intended package in a Changeset. Multiple pending Changesets combine into one bump per package using the strongest requested bump; they do not bump the same package sequentially. Do not edit package versions directly.
 
 ## One-time owner setup
 
@@ -67,3 +66,9 @@ See the upstream [Changesets command documentation](https://github.com/changeset
 Dependabot groups npm and GitHub Actions version updates into one weekly multi-ecosystem PR. GitHub's security-update handling is separate and may create additional PRs; security updates are grouped within each ecosystem where supported.
 
 The owner handles any retirement or deletion of `@nestjs-tools/*` separately. This automation publishes only the current workspace packages.
+
+## Protected main branch
+
+All changes reach `main` through squash pull requests with the GitHub Actions `Validate` check passing and all review conversations resolved. Branches must be up to date. No actor bypasses these rules; mandatory reviewer approvals remain zero for solo maintenance. Force pushes and branch deletion are blocked.
+
+Release automation uses `workflow_dispatch`, which [can start a workflow with `GITHUB_TOKEN`](https://docs.github.com/en/actions/concepts/security/github_token), and gives only its validation job `actions: write`. The dispatched branch determines the CI run's commit; CI rejects a mismatched expected SHA before checkout. Dispatching a separate workflow lets the required check attach to the actual release head instead of the caller's base commit. The same full checks run when retrying publication without a version PR.
