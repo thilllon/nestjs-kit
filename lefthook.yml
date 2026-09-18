@@ -19,4 +19,4 @@ pre-push:
     build:
       run: mise exec -- pnpm build
     types:
-      run: mise exec -- pnpm check-types
+      run: mise exec -- pnpm typecheck

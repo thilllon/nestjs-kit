@@ -50,9 +50,10 @@
   ],
   "scripts": {
     "build": "tsdown --config ../../tsdown.config.mts",
-    "check-types": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json",
     "dev": "tsdown --config ../../tsdown.config.mts --watch"
   },
+  "module": "./dist/index.mjs",
   "peerDependencies": {
     "@nestjs/common": "^12.0.0",
     "reflect-metadata": "^0.2.2",
@@ -60,15 +61,14 @@
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0"
   },
+  "dependencies": {
+    "@types/pg": "^8.23.1"
+  },
   "devDependencies": {
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
     "@nestjs/testing": "12.0.3",
     "drizzle-orm": "0.45.2",
     "pg": "8.23.0"
-  },
-  "dependencies": {
-    "@types/pg": "^8.23.1"
-  },
-  "module": "./dist/index.mjs"
+  }
 }
