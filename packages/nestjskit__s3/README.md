@@ -62,7 +62,7 @@ S3Module.registerAsync({
   imports: [ConfigModule.forRoot()],
   inject: [ConfigService],
   useFactory: (config: ConfigService) => ({
-    region: config.getOrThrow<string>("AWS_REGION"),
+    region: config.getOrThrow<string>("S3_REGION"),
   }),
 });
 ```
