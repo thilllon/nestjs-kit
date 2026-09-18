@@ -1,39 +1,118 @@
 # nestjs-azure-storage-blob
 
-Azure Blob Storage for NestJS, including SAS URLs for direct browser uploads and access to the underlying Azure client.
+**Azure Blob Storage for NestJS.** Inject a storage client, issue signed URLs, and let browsers upload directly to Azure.
 
-[![npm](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
+[![npm version](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
+[![npm downloads](https://img.shields.io/npm/dm/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
+
+[Quick start](#quick-start) · [Browser uploads](#browser-uploads) · [Configuration](#configuration) · [API reference](#api-reference)
+
+## Install
 
 ```sh
 pnpm add nestjs-azure-storage-blob @azure/storage-blob
 ```
 
-The npm name remains unchanged. Supply an Azure Storage connection string through your application's configuration.
+Requires **Node.js 24+** and **NestJS 12**. Includes ESM, CommonJS, and TypeScript declarations.
 
-Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+## Quick start
 
-## Register
+Set `AZURE_STORAGE_CONNECTION_STRING` in your application environment. Register the module and inject `AzureStorageBlobService` into a provider:
 
 ```ts
-import { Module } from "@nestjs/common";
-import { AzureStorageBlobModule } from "nestjs-azure-storage-blob";
+import { Injectable, Module } from "@nestjs/common";
+import {
+  AzureStorageBlobModule,
+  AzureStorageBlobService,
+} from "nestjs-azure-storage-blob";
+
+const connection = process.env.AZURE_STORAGE_CONNECTION_STRING;
+if (!connection) {
+  throw new Error("AZURE_STORAGE_CONNECTION_STRING is required");
+}
+
+@Injectable()
+export class FilesService {
+  constructor(private readonly storage: AzureStorageBlobService) {}
+
+  createUpload(blobName: string) {
+    return this.storage.getBlockBlobSasUrl(
+      "uploads",
+      blobName,
+      { create: true },
+      { expiresOn: new Date(Date.now() + 5 * 60 * 1000) },
+    );
+  }
+}
 
 @Module({
-  imports: [
-    AzureStorageBlobModule.register({
-      connection: process.env.AZURE_STORAGE_CONNECTION_STRING!,
-    }),
-  ],
+  imports: [AzureStorageBlobModule.register({ connection })],
+  providers: [FilesService],
+  exports: [FilesService],
 })
-export class StorageModule {}
+export class FilesModule {}
 ```
 
-Set `AZURE_STORAGE_CONNECTION_STRING` before startup. Registration fails if the connection string is missing. The optional second argument accepts `{ global: true }` and a Nest provider `scope`.
+Create the `uploads` container before using it. `createUpload()` resolves to `{ sasUrl, headers }`; the URL permits creation of a new blob for five minutes. Add `write: true` when the operation must overwrite an existing blob.
 
-## Configure asynchronously
+## Browser uploads
 
-With `@nestjs/config` installed, place this registration in `imports`:
+Your application issues a short-lived SAS URL; the browser sends the file bytes directly to Azure:
+
+```text
+Browser → your authenticated endpoint → { sasUrl, headers }
+Browser ─────────── PUT file ─────────→ Azure Blob Storage
+```
+
+Return the result of `FilesService.createUpload()` from your own authenticated endpoint after authorizing the blob name. Then pass that result to the browser upload function:
+
+```ts
+type UploadTarget = {
+  sasUrl: string;
+  headers: Record<string, string | number>;
+};
+
+async function upload(file: File, target: UploadTarget): Promise<void> {
+  const headers = Object.fromEntries(
+    Object.entries(target.headers).map(([name, value]) => [
+      name,
+      String(value),
+    ]),
+  );
+
+  const response = await fetch(target.sasUrl, {
+    method: "PUT",
+    headers,
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload failed: ${response.status}`);
+  }
+}
+```
+
+Use the returned headers, including `x-ms-blob-type: BlockBlob`, and send the file directly rather than wrapping it in `FormData`. Configure Azure Storage CORS to allow your browser origin, `PUT`, and the request headers.
+
+SAS signing requires a connection string containing an **account key**. Keep that connection string on the server; only send the scoped, expiring SAS URL to the browser.
+
+### Upload and download URLs together
+
+```ts
+const transfer = await storage.getUploadable("uploads", "photo.jpg", 300_000);
+
+// transfer.upload:   { method, url, headers, expiresIn }
+// transfer.download: { method, url, expiresIn }
+```
+
+`expiresIn` is measured in **milliseconds** and defaults to five minutes. The upload URL grants `create`; the download URL grants `read`.
+
+## Configuration
+
+### Asynchronous registration
+
+With `@nestjs/config` installed, add this registration to your module's `imports`:
 
 ```ts
 import { ConfigModule, ConfigService } from "@nestjs/config";
@@ -44,59 +123,65 @@ AzureStorageBlobModule.registerAsync({
   inject: [ConfigService],
   useFactory: (config: ConfigService) => ({
     connection: config.getOrThrow<string>("AZURE_STORAGE_CONNECTION_STRING"),
+    storageOptions: {
+      retryOptions: { maxTries: 3 },
+    },
   }),
 });
 ```
 
-`useClass` and `useExisting` factories implement `createModuleOptions()`.
+`registerAsync()` also accepts `useClass` and `useExisting`. Their factory implements `ModuleOptionsFactory.createModuleOptions()` and returns module options or a promise of them.
 
-## Issue an upload URL
+| Option                              | Purpose                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `connection`                        | Required Azure Storage connection string.                                                               |
+| `storageOptions`                    | Azure SDK `StoragePipelineOptions`, such as retry settings.                                             |
+| Second argument: `{ global: true }` | Make the registered module available throughout the application. Global registration is off by default. |
+| Second argument: `{ scope }`        | Set the Nest provider scope of the storage client.                                                      |
 
-Register this service in the module that imports `AzureStorageBlobModule`:
+### Azure SDK access
+
+Use the underlying `BlobServiceClient` for operations outside the helper API, such as container creation:
 
 ```ts
+import { BlobServiceClient } from "@azure/storage-blob";
 import { Injectable } from "@nestjs/common";
-import { AzureStorageBlobService } from "nestjs-azure-storage-blob";
+import { InjectStorageBlob } from "nestjs-azure-storage-blob";
 
 @Injectable()
-export class UploadsService {
-  constructor(private readonly storage: AzureStorageBlobService) {}
+export class ContainersService {
+  constructor(
+    @InjectStorageBlob() private readonly client: BlobServiceClient,
+  ) {}
 
-  createUpload(blobName: string) {
-    return this.storage.getBlockBlobSasUrl(
-      "uploads",
-      blobName,
-      { create: true, write: true },
-      { expiresOn: new Date(Date.now() + 5 * 60 * 1000) },
-    );
+  create(name: string) {
+    return this.client.getContainerClient(name).createIfNotExists();
   }
 }
 ```
 
-Create the container first. An authenticated application endpoint can return this service's `{ sasUrl, headers }` result. Authorize the target blob and issue only the permissions and expiry needed for the operation. Signing these SAS URLs requires a connection string with an account key.
+Register this provider in a module that imports `AzureStorageBlobModule`. You can also obtain the same client through `AzureStorageBlobService.getClient()`.
 
-Upload the file bytes from a browser, without wrapping them in `FormData`:
+## API reference
 
-```ts
-async function upload(file: File, sasUrl: string) {
-  const response = await fetch(sasUrl, {
-    method: "PUT",
-    headers: { "x-ms-blob-type": "BlockBlob" },
-    body: file,
-  });
-  if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
-}
-```
+All methods below belong to [`AzureStorageBlobService`](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-azure-storage-blob/src/azure-storage-blob.service.ts). Optional arguments are marked with `?`.
 
-Configure Azure Storage CORS for the browser origin, method, and headers. File bytes go directly to Azure rather than through your NestJS server.
+| Method                                                                 | Result                                                                           |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `getBlockBlobSasUrl(container, blob, permissions?, options?)`          | Promise of `{ sasUrl, headers }` for one blob. Includes the upload header.       |
+| `getContainerSasUrl(container, permissions?, options?)`                | Promise of `{ sasUrl, headers }` for a container.                                |
+| `getAccountSasUrl(expiresOn?, permissions?, resourceTypes?, options?)` | `{ sasUrl, headers }` for account-level access; synchronous.                     |
+| `getUploadable(container, blob, expiresIn?)`                           | Promise of paired upload and download request details.                           |
+| `listFiles(prefix, container)`                                         | Promise of an array of Azure `BlobItem` objects.                                 |
+| `deleteFile(container, blob)`                                          | Delete a blob; returns the SDK response.                                         |
+| `deleteFileIfExists(container, blob)`                                  | Delete a blob if present; returns the SDK response.                              |
+| `downloadStream(container, blob)`                                      | Promise of the SDK download response, including `readableStreamBody` in Node.js. |
+| `getClient()`                                                          | The configured Azure `BlobServiceClient`.                                        |
 
-## Other operations
+Blob and container SAS URLs default to a **five-minute expiry** unless you provide `expiresOn` or a stored access policy `identifier`. Blob permissions default to `read` and `create`; container and account permissions default to `read`. Pass explicit permissions for the intended operation.
 
-- `getClient()`: access the configured `BlobServiceClient`.
-- `getContainerSasUrl()` / `getAccountSasUrl()`: create SAS response objects.
-- `getUploadable()`: return paired upload and download request details.
-- `listFiles(prefix, containerName)`: list blobs with a prefix.
-- `deleteFile()` / `deleteFileIfExists()`: remove a blob.
-- `downloadStream()`: get the SDK download response.
+For a complete list of types and less common helpers, see the [source](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-azure-storage-blob/src).
 
-[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
+## Project
+
+[Report an issue](https://github.com/thilllon/nestjs-kit/issues/new/choose) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [License](https://github.com/thilllon/nestjs-kit/blob/main/LICENSE)
