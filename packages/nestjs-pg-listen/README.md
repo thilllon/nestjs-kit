@@ -1,10 +1,12 @@
 # nestjs-pg-listen
 
-PostgreSQL LISTEN / NOTIFY for NestJS, powered by [pg-listen](https://github.com/andywer/pg-listen). Inject its typed subscriber while Nest manages connection startup, channel subscriptions, and shutdown.
-
+[![npm version](https://img.shields.io/npm/v/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen)
+[![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-This package is being prepared for its first release. After publication, install it into your NestJS application:
+PostgreSQL LISTEN / NOTIFY for NestJS, powered by [pg-listen](https://github.com/andywer/pg-listen). Inject its typed subscriber while Nest manages connection startup, channel subscriptions, and shutdown.
+
+Install it in your NestJS application:
 
 ```sh
 pnpm add nestjs-pg-listen pg-listen pg

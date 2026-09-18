@@ -1,10 +1,12 @@
 # @nestjs-kit/pubnub
 
-An injectable PubNub client for NestJS. `PubNubService` extends the SDK client, so publishing and subscription APIs remain available.
-
+[![npm version](https://img.shields.io/npm/v/%40nestjs-kit%2Fpubnub)](https://www.npmjs.com/package/@nestjs-kit/pubnub)
+[![npm monthly downloads](https://img.shields.io/npm/dm/%40nestjs-kit%2Fpubnub)](https://www.npmjs.com/package/@nestjs-kit/pubnub)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-This scoped package is being prepared for its first release. After publication:
+An injectable PubNub client for NestJS. `PubNubService` extends the SDK client, so publishing and subscription APIs remain available.
+
+Install it in your NestJS application:
 
 ```sh
 pnpm add @nestjs-kit/pubnub pubnub

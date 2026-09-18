@@ -1,8 +1,10 @@
 # @nestjs-kit/s3
 
-S3-compatible object storage through NestJS dependency injection, using AWS SDK v3 clients. Connect to AWS S3 or S3-compatible endpoints such as NetApp and Ceph with asynchronous configuration and named clients.
-
+[![npm version](https://img.shields.io/npm/v/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3)
+[![npm monthly downloads](https://img.shields.io/npm/dm/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
+
+S3-compatible object storage through NestJS dependency injection, using AWS SDK v3 clients. Connect to AWS S3 or S3-compatible endpoints such as NetApp and Ceph with asynchronous configuration and named clients.
 
 Install it in your NestJS application:
 

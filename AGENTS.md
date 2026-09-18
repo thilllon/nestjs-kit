@@ -55,3 +55,5 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - npm publishing uses trusted-publisher OIDC and provenance. Leave `NPM_PUBLISH_ENABLED` disabled until the owner completes npm setup; new packages need an owner-authenticated first publication before trust can be configured.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.
 - Keep README badges, package entry points, licenses and release instructions accurate. Never claim an unpublished package is already available on npm.
+
+- Package README headers must contain exactly three badges in this order: npm version, npm monthly downloads, CI. The root README header keeps only CI and License badges.
