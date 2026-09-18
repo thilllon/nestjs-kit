@@ -4,12 +4,12 @@
 [![npm monthly downloads](https://img.shields.io/npm/dm/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-Cloudinary uploads and upload signatures for NestJS, with optional image resizing through Sharp.
+Cloudinary uploads and upload signatures for NestJS. The adapter streams your buffer to Cloudinary without a local image-processing dependency.
 
 Install it in your NestJS application:
 
 ```sh
-pnpm add @nestjs-kit/cloudinary cloudinary sharp
+pnpm add @nestjs-kit/cloudinary cloudinary
 ```
 
 Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
@@ -79,6 +79,35 @@ export class MediaService {
 
 The result contains the upload URL, timestamp, signature, API key, and upload options. Send those fields with the file to Cloudinary; keep the API secret on the server. Authorize upload requests before issuing signatures.
 
-`uploadFile(file, uploadOptions?, resizeOptions?)` accepts buffered file data. Pass `{ width: 1200 }` as the third argument to resize an image before uploading. `instance` exposes the raw, shared Cloudinary SDK; when using multiple accounts, pass credentials explicitly to raw SDK operations. Wrapper methods use the module's own configuration.
+## Upload buffered files
+
+`uploadFile(file, uploadOptions?)` sends `file.buffer` unchanged through the Cloudinary SDK. Pass Cloudinary transformations explicitly in the upload options:
+
+```ts
+import { Injectable } from "@nestjs/common";
+import { CloudinaryService, type IFile } from "@nestjs-kit/cloudinary";
+
+@Injectable()
+export class ImagesService {
+  constructor(private readonly cloudinary: CloudinaryService) {}
+
+  upload(file: IFile) {
+    return this.cloudinary.uploadFile(file, {
+      resource_type: "image",
+      transformation: [{ width: 1200, crop: "limit" }],
+    });
+  }
+}
+```
+
+Register this provider in a module importing `CloudinaryModule`. These are [Cloudinary incoming transformations](https://cloudinary.com/documentation/eager_and_incoming_transformations): Cloudinary processes the uploaded asset on its servers. Use the SDK's `eager` option to generate additional transformed versions during upload. The original buffer still travels over the network; this does not reduce your application's upload size before transmission.
+
+### Upgrade note
+
+The third `uploadFile()` resize argument and `SharpInputOptions` type have been removed. Remove that argument from existing calls. No resize operation is applied automatically, and the adapter no longer installs or loads Sharp. If you need local preprocessing before upload, perform it in your application using your chosen library and provide the resulting buffer. Use Cloudinary upload transformation options only when server-side processing matches your intended behavior.
+
+### Raw SDK access
+
+`instance` exposes the raw, shared Cloudinary SDK; when using multiple accounts, pass credentials explicitly to raw SDK operations. Wrapper methods use the module's own configuration.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
