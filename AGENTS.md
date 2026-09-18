@@ -19,6 +19,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
 - Every library must build with tsdown to separate CJS and ESM outputs and matching declarations. Maintain conditional `require` and `import` exports.
 - Define `build` directly in each package's `package.json`; share options through `tsdown.config.mts`, not a build wrapper script.
+- For public API renames, audit exports, services, decorators, injection tokens, source paths and current examples together. Inspect the actual npm archive, including declarations and source maps, for stale names before publication; preserve historical changelogs.
 - Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks. For build changes, also verify real consumer imports and Nest injection in both formats.
 - Remove obsolete files and redundant wrappers after checking their references; prefer maintained tool features over custom validation scripts.
 - Use Turbo streaming output, never TUI. Include shared build configuration in cache inputs and release change detection.

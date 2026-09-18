@@ -4,7 +4,7 @@ S3-compatible object storage through NestJS dependency injection, using AWS SDK 
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-This scoped package is being prepared for its first release. After publication, install it in your NestJS application:
+Install it in your NestJS application:
 
 ```sh
 pnpm add @nestjs-kit/s3 @aws-sdk/client-s3
@@ -17,11 +17,11 @@ Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
 ```ts
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Injectable, Module } from "@nestjs/common";
-import { S3Module, InjectAwsS3Client } from "@nestjs-kit/s3";
+import { S3Module, InjectS3Client } from "@nestjs-kit/s3";
 
 @Injectable()
 export class FilesService {
-  constructor(@InjectAwsS3Client() private readonly client: S3Client) {}
+  constructor(@InjectS3Client() private readonly client: S3Client) {}
 
   download(bucket: string, key: string) {
     return this.client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -96,6 +96,6 @@ For example, `S3_ENDPOINT` can be `https://s3.storage.example.com`. Available S3
 
 ## Named clients
 
-Pass `{ alias: 'archive' }` as the second argument to `register` or `registerAsync`, then inject with `@InjectAwsS3Client('archive')`. Use distinct aliases for distinct clients. The same second argument accepts `{ global: true }` when application-wide registration is intended.
+Pass `{ alias: 'archive' }` as the second argument to `register` or `registerAsync`, then inject with `@InjectS3Client('archive')`. Use distinct aliases for distinct clients. The same second argument accepts `{ global: true }` when application-wide registration is intended.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

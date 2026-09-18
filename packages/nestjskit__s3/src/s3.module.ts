@@ -1,4 +1,4 @@
-import { AwsS3Service } from "./aws-s3.service";
+import { S3Service } from "./s3.service";
 import { DynamicModule, Module, Provider, Type } from "@nestjs/common";
 
 import type {
@@ -6,8 +6,8 @@ import type {
   ExtraModuleOptions,
   ModuleOptions,
   ModuleOptionsFactory,
-} from "./aws-s3.interface";
-import { getClientToken, getOptionsToken } from "./aws-s3.utils";
+} from "./s3.interface";
+import { getClientToken, getOptionsToken } from "./s3.utils";
 
 @Module({})
 export class S3Module {
@@ -104,7 +104,7 @@ export class S3Module {
     );
   }
 
-  private static createClient(options: ModuleOptions): AwsS3Service {
-    return new AwsS3Service(options);
+  private static createClient(options: ModuleOptions): S3Service {
+    return new S3Service(options);
   }
 }

@@ -16,7 +16,7 @@ Small NestJS modules for storage, media, PostgreSQL, and realtime messaging. Reg
 | `nestjs-drizzle-pg` [(npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                 | [![Monthly downloads for nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg?logo=npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                         | Drizzle ORM with PostgreSQL pools or clients                      | [README](packages/nestjs-drizzle-pg/README.md)         |
 | `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle      | [README](packages/nestjs-pg-listen/README.md)          |
 
-The new `@nestjs-kit/*` packages and `nestjs-pg-listen` are being prepared for their first release. Installation commands below and in their guides apply once published. Azure and Drizzle keep their existing npm names. Download badges for new packages populate after publication.
+The new `@nestjs-kit/cloudinary`, `@nestjs-kit/pubnub`, and `nestjs-pg-listen` packages are being prepared for their first release. Installation commands below and in their guides apply once published. Azure and Drizzle keep their existing npm names. Download badges for new packages populate after publication.
 
 ## Quick start
 
@@ -29,11 +29,11 @@ pnpm add @nestjs-kit/s3 @aws-sdk/client-s3
 ```ts
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Injectable, Module } from "@nestjs/common";
-import { S3Module, InjectAwsS3Client } from "@nestjs-kit/s3";
+import { S3Module, InjectS3Client } from "@nestjs-kit/s3";
 
 @Injectable()
 export class FilesService {
-  constructor(@InjectAwsS3Client() private readonly s3: S3Client) {}
+  constructor(@InjectS3Client() private readonly s3: S3Client) {}
 
   download(bucket: string, key: string) {
     return this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));

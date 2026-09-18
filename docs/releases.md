@@ -32,21 +32,21 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-The three new `@nestjs-kit/*` packages and `nestjs-pg-listen` need an initial owner-authenticated publication before their trusted publishers can be configured: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for each package. The existing Azure and Drizzle packages already have registry identities.
+New package identities need an initial owner-authenticated publication before their trusted publishers can be configured: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for each package. S3, Azure and Drizzle already have registry identities.
 
-For example, after the intended S3 release version has merged into `main`, start from an up-to-date checkout and run:
+For example, after the intended Cloudinary release version has merged into `main`, start from an up-to-date checkout and run:
 
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- pnpm --filter @nestjs-kit/s3 build
+mise exec -- pnpm --filter @nestjs-kit/cloudinary build
 mise exec -- npm login
-cd packages/nestjskit__s3
+cd packages/nestjskit__cloudinary
 mise exec -- npm pack --dry-run
 mise exec -- npm publish --access public --provenance=false
 ```
 
-Inspect the dry-run file list before publishing. The explicit `--provenance=false` overrides the package's CI-oriented `publishConfig.provenance` for this local first publication only; later CI publications retain provenance. Repeat the initial publication for `@nestjs-kit/cloudinary`, `@nestjs-kit/pubnub`, and `nestjs-pg-listen`, building and entering the corresponding package directory. Use your own npm account with package/scope write access and complete its authentication prompts.
+Inspect the dry-run file list before publishing. The explicit `--provenance=false` overrides the package's CI-oriented `publishConfig.provenance` for this local first publication only; later CI publications retain provenance. Repeat the initial publication for `@nestjs-kit/pubnub` and `nestjs-pg-listen`, building and entering the corresponding package directory. Use your own npm account with package/scope write access and complete its authentication prompts.
 
 In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After all package trusted publishers are configured, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 
