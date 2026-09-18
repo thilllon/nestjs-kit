@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/s3",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "AWS S3 and S3-compatible storage integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
