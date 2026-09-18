@@ -216,6 +216,10 @@ void bootstrap();
 
 For tests or standalone application contexts, call `app.close()` / `module.close()` when finished. If a client fails to connect during initialization, the module attempts to close it before propagating the startup error.
 
+### Named-token compatibility
+
+Named database, connection and service tokens now use separate role namespaces so aliases such as `CONNECTION_primary`, `SERVICE_primary` and names containing colons cannot collide. Use `getDrizzlePgToken(alias)`, `getPgConnectionToken(alias)` and `getDrizzlePgServiceToken(alias)`, or the corresponding injection decorators, instead of constructing token strings. Hard-coded named token strings from earlier releases must be replaced with these helpers. Unnamed, empty and `"default"` aliases retain their existing default tokens.
+
 ## API reference
 
 | API                                      | Purpose                                                          |
