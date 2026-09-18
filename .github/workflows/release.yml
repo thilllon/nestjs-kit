@@ -62,9 +62,32 @@ jobs:
 
   validate:
     needs: prepare
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: ${{ needs.prepare.outputs.sha || needs.prepare.outputs.base }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VALIDATED_SHA: ${{ needs.prepare.outputs.sha || needs.prepare.outputs.base }}
+      VALIDATED_REF: ${{ needs.prepare.outputs.changed == 'true' && 'automation/releases' || 'main' }}
+      RUN_KEY: release-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Dispatch CI on the exact release head
+        run: |
+          gh workflow run ci.yml --ref "$VALIDATED_REF" -f expected_sha="$VALIDATED_SHA" -f run_key="$RUN_KEY"
+          for attempt in {1..60}; do
+            run=$(gh run list --workflow ci.yml --event workflow_dispatch --branch "$VALIDATED_REF" --commit "$VALIDATED_SHA" --limit 100 --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"$RUN_KEY\") | .databaseId" | head -n 1)
+            if [ -n "$run" ]; then
+              gh run watch "$run" --exit-status --interval 10
+              test "$(gh run view "$run" --json headSha --jq .headSha)" = "$VALIDATED_SHA"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'The dispatched CI run was not found for the expected commit.' >&2
+          exit 1
 
   merge:
     needs: [prepare, validate]
@@ -87,7 +110,7 @@ jobs:
         run: |
           current=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
           test "$current" = "$BASE_SHA" || { echo 'main changed during validation; the next release run will refresh the PR.'; exit 1; }
-          gh pr merge "$RELEASE_PR" --squash --match-head-commit "$RELEASE_SHA" --delete-branch
+          gh pr merge "$RELEASE_PR" --squash --match-head-commit "$RELEASE_SHA" --delete-branch --body ''
           merged=$(gh pr view "$RELEASE_PR" --json mergeCommit --jq .mergeCommit.oid)
           test -n "$merged" && test "$merged" != null
           echo "sha=$merged" >> "$GITHUB_OUTPUT"
