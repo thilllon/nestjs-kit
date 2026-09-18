@@ -14,7 +14,7 @@ Two typed scripts connect those tools: `release-prepare.mts` detects publishable
 
 Unchanged packages keep their versions. A runtime dependency update can trigger a release for its consuming package. Repository maintenance alone does not bump every package. Changes to the shared TypeScript and tsdown build configurations affect all public packages. Test-only configuration and fixtures do not trigger releases.
 
-An explicit changeset can request a deliberate release, including a coordinated major migration. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
+An explicit changeset can request a deliberate release, including a coordinated major release. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
 
 ## One-time owner setup
 

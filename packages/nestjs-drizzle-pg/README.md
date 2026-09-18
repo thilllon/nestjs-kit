@@ -13,6 +13,8 @@ pnpm add -D @types/pg
 
 The npm name remains `nestjs-drizzle-pg`; it does not move to the new scope.
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register and query
 
 ```ts
@@ -73,4 +75,4 @@ Set `alias: 'analytics'` at the top level of `register` or `registerAsync`, and 
 
 `DrizzlePgService.ping()` checks the default connection. For a named service, inject `getDrizzlePgServiceToken('analytics')` through Nest's `@Inject()` decorator. Connections close when the module is destroyed; use `app.enableShutdownHooks()` to handle process shutdown signals.
 
-[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md)
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

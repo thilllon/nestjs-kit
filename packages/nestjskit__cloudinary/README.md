@@ -10,6 +10,8 @@ This scoped package is being prepared for its first release. After publication:
 pnpm add @nestjs-kit/cloudinary cloudinary sharp
 ```
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register
 
 ```ts
@@ -77,4 +79,4 @@ The result contains the upload URL, timestamp, signature, API key, and upload op
 
 `uploadFile(file, uploadOptions?, resizeOptions?)` accepts buffered file data. Pass `{ width: 1200 }` as the third argument to resize an image before uploading. `instance` exposes the raw, shared Cloudinary SDK; when using multiple accounts, pass credentials explicitly to raw SDK operations. Wrapper methods use the module's own configuration.
 
-[Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

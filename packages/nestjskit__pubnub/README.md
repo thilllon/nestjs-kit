@@ -10,6 +10,8 @@ This scoped package is being prepared for its first release. After publication:
 pnpm add @nestjs-kit/pubnub pubnub
 ```
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register
 
 ```ts
@@ -69,4 +71,4 @@ export class NotificationsService {
 
 The module closes its SDK client on destruction. Call `app.enableShutdownHooks()` during Nest bootstrap if shutdown signals should trigger that lifecycle hook.
 
-[Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

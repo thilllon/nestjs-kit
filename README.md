@@ -18,7 +18,7 @@ Small NestJS modules for storage, media, PostgreSQL, and realtime messaging. Reg
 | `nestjs-drizzle-pg`         | Drizzle ORM with PostgreSQL pools or clients                                    | [Drizzle + PostgreSQL](packages/nestjs-drizzle-pg/README.md)       |
 | `nestjs-pg-listen`          | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle                    | [PostgreSQL notifications](packages/nestjs-pg-listen/README.md)    |
 
-The new `@nestjs-kit/*` packages and `nestjs-pg-listen` are being prepared for their first release. Installation commands below and in their guides apply once published. Azure and Drizzle keep their existing npm names. See the [migration guide](docs/migration.md) when upgrading from the previous repository layout.
+The new `@nestjs-kit/*` packages and `nestjs-pg-listen` are being prepared for their first release. Installation commands below and in their guides apply once published. Azure and Drizzle keep their existing npm names.
 
 ## Quick start
 
