@@ -5,12 +5,18 @@
   "license": "ISC",
   "author": "thilllon",
   "type": "commonjs",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
@@ -43,9 +49,9 @@
     "cloudinary"
   ],
   "scripts": {
-    "build": "node ../../scripts/build-package.mjs",
+    "build": "tsdown --config ../../tsdown.config.mts",
     "check-types": "tsc -p tsconfig.test.json",
-    "dev": "tsc -p tsconfig.json --watch"
+    "dev": "tsdown --config ../../tsdown.config.mts --watch"
   },
   "peerDependencies": {
     "@nestjs/common": "^12.0.0",
@@ -60,5 +66,6 @@
     "@nestjs/testing": "12.0.3",
     "cloudinary": "2.11.0",
     "sharp": "0.35.4"
-  }
+  },
+  "module": "./dist/index.mjs"
 }

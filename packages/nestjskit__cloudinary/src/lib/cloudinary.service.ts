@@ -7,7 +7,7 @@ import {
 } from "cloudinary";
 import { Readable, pipeline } from "node:stream";
 import sharp from "sharp";
-import {
+import type {
   IFile,
   ModuleOptions,
   SharpInputOptions,

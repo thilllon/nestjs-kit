@@ -5,7 +5,7 @@ export default defineConfig({
   ...unitConfig,
   test: {
     ...unitConfig.test,
-    include: ["packages/*/src/**/*.e2e.spec.ts"],
+    include: ["packages/*/src/**/*.e2e.test.ts"],
     exclude: [],
     testTimeout: 15_000,
     hookTimeout: 15_000,
