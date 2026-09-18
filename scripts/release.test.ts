@@ -5,7 +5,7 @@ import {
   isReleaseFile,
   releaseType,
   runtimeManifest,
-} from "./release-prepare.mjs";
+} from "./release-prepare.mts";
 
 test("conventional commits choose independent semantic versions", () => {
   assert.equal(releaseType("feat(s3): support multipart"), "minor");
@@ -80,17 +80,17 @@ test("git history accumulates package changes and skips consumed releases", asyn
   );
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { planRelease } = await import("./release-prepare.mjs");
+  const { planRelease } = await import("./release-prepare.mts");
   const original = process.cwd();
   const temp = mkdtempSync(join(tmpdir(), "nestjs-kit-release-"));
-  const git = (...args) =>
+  const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: temp, encoding: "utf8" }).trim();
-  const write = (path, value) =>
+  const write = (path: string, value: unknown) =>
     writeFileSync(
       join(temp, path),
       typeof value === "string" ? value : JSON.stringify(value),
     );
-  const commit = (message) => {
+  const commit = (message: string) => {
     git("add", ".");
     git(
       "-c",
@@ -123,7 +123,7 @@ test("git history accumulates package changes and skips consumed releases", asyn
     process.chdir(temp);
     assert.deepEqual(planRelease().changes, []);
     // Empty pending state must skip orphan directories without registry access.
-    const { publish } = await import("./release-publish.mjs");
+    const { publish } = await import("./release-publish.mts");
     const previousGate = process.env.NPM_PUBLISH_ENABLED;
     const previousFetch = globalThis.fetch;
     process.env.NPM_PUBLISH_ENABLED = "true";
@@ -211,7 +211,7 @@ test("git history accumulates package changes and skips consumed releases", asyn
 });
 
 test("publication only accepts explicitly versioned packages in the persisted plan", async () => {
-  const { shouldPublish } = await import("./release-publish.mjs");
+  const { shouldPublish } = await import("./release-publish.mts");
   assert.equal(shouldPublish({ name: "new", version: "0.0.0" }, {}), false);
   assert.equal(
     shouldPublish({ name: "existing", version: "1.0.0" }, { other: "1.0.0" }),
@@ -239,14 +239,14 @@ test("publication only accepts explicitly versioned packages in the persisted pl
 });
 
 test("removed or private planned packages fail before any publication", async () => {
-  const { validatePending } = await import("./release-publish.mjs");
+  const { validatePending } = await import("./release-publish.mts");
   assert.throws(
     () => validatePending([], { removed: "1.0.0" }),
     /removed or made private/,
   );
   assert.throws(
     () =>
-      validatePending([{ name: "private", private: true }], {
+      validatePending([{ name: "private", version: "1.0.0", private: true }], {
         private: "1.0.0",
       }),
     /removed or made private/,
@@ -257,12 +257,12 @@ test("removed or private planned packages fail before any publication", async ()
 });
 
 test("tag recovery retries a failed push without recreating its local tag", async () => {
-  const { recoverTag } = await import("./release-publish.mjs");
+  const { recoverTag } = await import("./release-publish.mts");
   const head = "a".repeat(40);
   let tagExists = false;
   let createCount = 0;
   let pushCount = 0;
-  const git = (...args) => {
+  const git = (...args: string[]) => {
     if (args[0] === "tag" && args[1] === "--list")
       return tagExists ? "pkg@1.0.0" : "";
     if (args[0] === "rev-parse") return head;
@@ -305,8 +305,9 @@ test("real Changesets combines manual and automatic bumps and supports manual-on
   const { join } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const cli = fileURLToPath(import.meta.resolve("@changesets/cli/bin.js"));
+  const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
   const prepareScript = fileURLToPath(
-    new URL("./release-prepare.mjs", import.meta.url),
+    new URL("./release-prepare.mts", import.meta.url),
   );
   const temp = mkdtempSync(join(tmpdir(), "nestjs-kit-changesets-"));
   const git = (...args: string[]) =>
@@ -317,7 +318,10 @@ test("real Changesets combines manual and automatic bumps and supports manual-on
       typeof value === "string" ? value : JSON.stringify(value),
     );
   const read = (path: string) =>
-    JSON.parse(readFileSync(join(temp, path), "utf8"));
+    JSON.parse(readFileSync(join(temp, path), "utf8")) as Record<
+      string,
+      unknown
+    >;
   const commit = (message: string) => {
     git("add", ".");
     git(
@@ -334,7 +338,7 @@ test("real Changesets combines manual and automatic bumps and supports manual-on
     return git("rev-parse", "HEAD");
   };
   const prepare = () =>
-    execFileSync(process.execPath, [prepareScript], {
+    execFileSync(process.execPath, [tsxCli, prepareScript], {
       cwd: temp,
       encoding: "utf8",
       env: { ...process.env, CI: "true", LEFTHOOK: "0" },

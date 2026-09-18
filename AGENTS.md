@@ -20,6 +20,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks. For build changes, also verify real consumer imports and Nest injection in both formats.
 - Remove obsolete files and redundant wrappers after checking their references; prefer maintained tool features over custom validation scripts.
 - Use Turbo streaming output, never TUI. Include shared build configuration in cache inputs and release change detection.
+- Keep necessary executable scripts typed as `.mts` and run them through `tsx`; tests remain `*.test.ts`. Include both in the root typecheck and remove redundant setup wrappers.
 - Prefer typed `.mts` configuration wherever the tool supports it. Keep required native formats such as `biome.json`, `turbo.json`, and `mise.toml`.
 
 ## Formatting and tests

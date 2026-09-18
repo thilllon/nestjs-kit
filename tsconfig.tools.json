@@ -4,5 +4,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["*.mts", "scripts/test-setup.ts"]
+  "include": ["*.mts", "scripts/**/*.mts", "scripts/**/*.test.ts"]
 }

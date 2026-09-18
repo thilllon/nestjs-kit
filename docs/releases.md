@@ -2,6 +2,8 @@
 
 Packages have independent versions. Changesets is the single versioning engine; Conventional Commits determine release intent. There is no second semantic-release process competing to bump the same files.
 
+Two typed scripts connect those tools: `release-prepare.mts` detects publishable changes and creates the Changesets request; `release-publish.mts` enforces the persisted publication plan and retries only missing versions or tags. Both run through `tsx` and are typechecked with the repository tooling. Their regression tests use `release.test.ts`.
+
 ## From a change to npm
 
 1. Merge a PR with a Conventional Commit title into `main`.

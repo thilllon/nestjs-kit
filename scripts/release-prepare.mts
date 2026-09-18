@@ -7,10 +7,23 @@ import {
   writeFileSync,
 } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { validatePending } from "./release-publish.mjs";
+import {
+  validatePending,
+  type PackageManifest,
+  type ReleaseState,
+} from "./release-publish.mts";
 
-const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
-const json = (path) => JSON.parse(readFileSync(path, "utf8"));
+export type ReleaseType = "major" | "minor" | "patch";
+interface PackageChange {
+  name: string;
+  type: ReleaseType;
+  summaries: string[];
+}
+
+const git = (...args: string[]) =>
+  execFileSync("git", args, { encoding: "utf8" }).trim();
+const json = <T,>(path: string): T =>
+  JSON.parse(readFileSync(path, "utf8")) as T;
 const fields = [
   "name",
   "dependencies",
@@ -27,7 +40,7 @@ const fields = [
   "sideEffects",
   "scripts",
 ];
-export function runtimeManifest(manifest) {
+export function runtimeManifest(manifest: Partial<PackageManifest>): string {
   return JSON.stringify(
     Object.fromEntries(
       fields.map((field) => [
@@ -39,12 +52,12 @@ export function runtimeManifest(manifest) {
     ),
   );
 }
-export function releaseType(message) {
+export function releaseType(message: string): ReleaseType {
   if (/^[a-z]+(?:\([^\n]*\))?!:|^BREAKING[ -]CHANGE:/m.test(message))
     return "major";
   return /^feat(?:\([^\n]*\))?:/.test(message) ? "minor" : "patch";
 }
-export function isReleaseFile(path, directory) {
+export function isReleaseFile(path: string, directory: string): boolean {
   const relative = path.startsWith(`${directory}/`)
     ? path.slice(directory.length + 1)
     : "";
@@ -62,10 +75,12 @@ export function isReleaseFile(path, directory) {
     /^tsconfig.*\.json$/.test(relative)
   );
 }
-export function highestRelease(types) {
-  return ["major", "minor", "patch"].find((type) => types.includes(type));
+export function highestRelease(types: ReleaseType[]): ReleaseType | undefined {
+  return (["major", "minor", "patch"] as const).find((type) =>
+    types.includes(type),
+  );
 }
-function manifestAt(ref, directory) {
+function manifestAt(ref: string, directory: string): Partial<PackageManifest> {
   try {
     return JSON.parse(git("show", `${ref}:${directory}/package.json`));
   } catch {
@@ -73,7 +88,7 @@ function manifestAt(ref, directory) {
   }
 }
 export function planRelease() {
-  const state = json(".changeset/release-state.json");
+  const state = json<ReleaseState>(".changeset/release-state.json");
   const head = git("rev-parse", "HEAD");
   git("merge-base", "--is-ancestor", state.source, head);
   const commits = git(
@@ -84,8 +99,8 @@ export function planRelease() {
   )
     .split("\n")
     .filter(Boolean);
-  const changes = [];
-  const manifests = [];
+  const changes: PackageChange[] = [];
+  const manifests: PackageManifest[] = [];
   for (const entry of readdirSync("packages", { withFileTypes: true })) {
     if (
       !entry.isDirectory() ||
@@ -93,11 +108,11 @@ export function planRelease() {
     )
       continue;
     const directory = `packages/${entry.name}`;
-    const manifest = json(`${directory}/package.json`);
+    const manifest = json<PackageManifest>(`${directory}/package.json`);
     manifests.push(manifest);
     if (manifest.private) continue;
-    const types = [];
-    const summaries = [];
+    const types: ReleaseType[] = [];
+    const summaries: string[] = [];
     for (const commit of commits) {
       const files = git(
         "diff-tree",
@@ -122,19 +137,20 @@ export function planRelease() {
         continue;
       const message = git("show", "-s", "--format=%B", commit);
       types.push(releaseType(message));
-      summaries.push(message.split("\n")[0]);
+      summaries.push(message.split("\n")[0] ?? "");
     }
-    if (types.length)
+    const type = highestRelease(types);
+    if (type)
       changes.push({
         name: manifest.name,
-        type: highestRelease(types),
+        type,
         summaries,
       });
   }
   validatePending(manifests, state.pending ?? {});
   return { changes, head, manifests };
 }
-export function prepare() {
+export function prepare(): boolean {
   const { changes, head, manifests } = planRelease();
   const manualChangesets = readdirSync(".changeset").filter(
     (file) => file.endsWith(".md") && file.toLowerCase() !== "readme.md",
@@ -159,14 +175,18 @@ export function prepare() {
     );
   }
   execFileSync("pnpm", ["exec", "changeset", "version"], { stdio: "inherit" });
-  const pending = { ...json(".changeset/release-state.json").pending };
+  const pending = {
+    ...json<ReleaseState>(".changeset/release-state.json").pending,
+  };
   for (const entry of readdirSync("packages", { withFileTypes: true })) {
     if (
       !entry.isDirectory() ||
       !existsSync(`packages/${entry.name}/package.json`)
     )
       continue;
-    const manifest = json(`packages/${entry.name}/package.json`);
+    const manifest = json<PackageManifest>(
+      `packages/${entry.name}/package.json`,
+    );
     if (
       !manifest.private &&
       versionsBefore.get(manifest.name) !== manifest.version
