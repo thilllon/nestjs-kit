@@ -1,5 +1,11 @@
 # nestjs-azure-storage-blob
 
+## 2.0.0
+
+### Major Changes
+
+- 63448ab: Prepare the maintainer-requested coordinated major publication of the six existing integrations, including the current APIs, typed dual-module builds, and refreshed package documentation.
+
 ## 1.0.1
 
 ### Patch Changes

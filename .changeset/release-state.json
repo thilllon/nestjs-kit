@@ -1,11 +1,11 @@
 {
-  "source": "c60fc0a49edea00bfd42b97b3fae53dd1d145c70",
+  "source": "926f4f6b3486e055dae54382ba905894a0be488b",
   "pending": {
-    "nestjs-azure-storage-blob": "1.0.1",
-    "nestjs-drizzle-pg": "2.0.2",
-    "nestjs-pg-listen": "1.0.2",
-    "@nestjs-kit/cloudinary": "1.0.2",
-    "@nestjs-kit/pubnub": "1.0.2",
-    "@nestjs-kit/s3": "3.0.0"
+    "nestjs-azure-storage-blob": "2.0.0",
+    "nestjs-drizzle-pg": "3.0.0",
+    "nestjs-pg-listen": "2.0.0",
+    "@nestjs-kit/cloudinary": "3.0.0",
+    "@nestjs-kit/pubnub": "2.0.0",
+    "@nestjs-kit/s3": "4.0.0"
   }
 }
