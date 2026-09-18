@@ -1,30 +1,62 @@
 {
-	"name": "nestjs-azure-storage-blob",
-	"version": "0.0.1",
-	"description": "A NestJS module for Azure Storage Blob",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/thilllon/nestjs-tools.git"
-	},
-	"homepage": "https://github.com/thilllon/nestjs-tools/tree/main/packages/nestjs-azure-storage-blob",
-	"dependencies": {
-		"tslib": "^2.3.0"
-	},
-	"type": "commonjs",
-	"main": "./src/index.js",
-	"typings": "./src/index.d.ts",
-	"keywords": [
-		"nest",
-		"nestjs",
-		"storage",
-		"sas",
-		"blobSAS",
-		"containerSAS",
-		"accountSAS",
-		"azure",
-		"presigned url",
-		"uplaod",
-		"@azure/storage-blob",
-		"@nest/azure-storage"
-	]
+  "name": "nestjs-azure-storage-blob",
+  "version": "0.0.3",
+  "description": "Azure Blob Storage clients and SAS URLs for NestJS",
+  "license": "ISC",
+  "author": "thilllon",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/nestjs-azure-storage-blob"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-azure-storage-blob",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "nest",
+    "typescript",
+    "azure-storage-blob"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs",
+    "check-types": "tsc -p tsconfig.test.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^12.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "@azure/storage-blob": "^12.33.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "12.0.3",
+    "@nestjs/core": "12.0.3",
+    "@nestjs/testing": "12.0.3",
+    "@azure/storage-blob": "12.33.0"
+  }
 }

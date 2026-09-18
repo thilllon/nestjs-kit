@@ -1,46 +1,45 @@
-name: Continuous Integration
+name: CI
 
 on:
   push:
     branches: [main]
-    # paths-ignore: ['.github/**']
   pull_request:
     branches: [main]
-    # paths-ignore: ['.github/**']
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LEFTHOOK: "0"
+      TURBO_UI: stream
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
         with:
-          node-version: 20
-
-      - uses: pnpm/action-setup@v4
-        name: Install pnpm
-        with:
-          version: 8
-          run_install: false
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        name: Setup pnpm cache
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - run: pnpm nx run nestjs-tools-cloudinary:build
-      - run: pnpm nx run nestjs-pubnub:build
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Validate conventional PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm check-types
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm pack:check
+      - name: Scan tracked files for secrets
+        run: gitleaks git --redact --no-banner --log-opts='-1' .
