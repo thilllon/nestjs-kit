@@ -41,3 +41,6 @@ yarn-error.log*
 
 # Generated package archives
 *.tgz
+
+# Private local scripts and files
+.private/
