@@ -1,0 +1,68 @@
+{
+  "name": "nestjs-pg-listen",
+  "version": "0.0.0",
+  "description": "PostgreSQL LISTEN and NOTIFY lifecycle integration for NestJS",
+  "license": "ISC",
+  "author": "thilllon",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/nestjs-pg-listen"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-pg-listen",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "postgresql",
+    "pg-listen",
+    "listen",
+    "notify"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs",
+    "check-types": "tsc -p tsconfig.test.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^12.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "pg-listen": "^1.7.0",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "12.0.3",
+    "@nestjs/core": "12.0.3",
+    "@nestjs/testing": "12.0.3",
+    "pg-listen": "1.7.0",
+    "pg": "8.23.0"
+  },
+  "dependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}
