@@ -128,8 +128,6 @@ jobs:
   merge:
     needs: [prepare, validate]
     if: needs.prepare.outputs.changed == 'true'
-    outputs:
-      sha: ${{ steps.merge.outputs.sha }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -144,7 +142,6 @@ jobs:
       VALIDATED_TREE: ${{ needs.prepare.outputs.tree }}
     steps:
       - name: Merge only the validated commit on its validated base
-        id: merge
         run: |
           current=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
           test "$current" = "$BASE_SHA" || { echo 'main changed during validation; the next release run will refresh the PR.'; exit 1; }
@@ -152,7 +149,6 @@ jobs:
           merged=$(gh pr view "$RELEASE_PR" --json mergeCommit --jq .mergeCommit.oid)
           test -n "$merged" && test "$merged" != null
           test "$(gh api "repos/$GH_REPO/git/commits/$merged" --jq .tree.sha)" = "$VALIDATED_TREE"
-          echo "sha=$merged" >> "$GITHUB_OUTPUT"
       - name: Start publication from the new main event commit
         if: vars.NPM_PUBLISH_ENABLED == 'true'
         run: gh workflow run release.yml --ref main
