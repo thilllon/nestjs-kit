@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -14,13 +15,16 @@ const fields = [
   "name",
   "dependencies",
   "peerDependencies",
+  "peerDependenciesMeta",
   "optionalDependencies",
   "engines",
   "exports",
   "main",
+  "module",
   "types",
   "files",
   "type",
+  "sideEffects",
   "scripts",
 ];
 export function runtimeManifest(manifest) {
@@ -46,7 +50,8 @@ export function isReleaseFile(path, directory) {
     : "";
   if (
     !relative ||
-    /(?:^|\/)(?:__tests__|test|tests)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(
+    /^tsconfig\.(?:test|spec)(?:\.[^/]*)?\.json$/.test(relative) ||
+    /(?:^|\/)(?:__tests__|test|tests|fixtures|__fixture__|__fixtures__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(
       relative,
     )
   )
@@ -82,7 +87,11 @@ export function planRelease() {
   const changes = [];
   const manifests = [];
   for (const entry of readdirSync("packages", { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
+    if (
+      !entry.isDirectory() ||
+      !existsSync(`packages/${entry.name}/package.json`)
+    )
+      continue;
     const directory = `packages/${entry.name}`;
     const manifest = json(`${directory}/package.json`);
     manifests.push(manifest);
@@ -102,7 +111,7 @@ export function planRelease() {
         (file) =>
           isReleaseFile(file, directory) ||
           file === "tsconfig.base.json" ||
-          file === "scripts/build-package.mjs",
+          file === "tsdown.config.mts",
       );
       if (!relevant.length) continue;
       if (
@@ -123,30 +132,45 @@ export function planRelease() {
       });
   }
   validatePending(manifests, state.pending ?? {});
-  return { changes, head };
+  return { changes, head, manifests };
 }
 export function prepare() {
-  const { changes, head } = planRelease();
-  if (!changes.length) return false;
-  const frontmatter = changes
-    .map(({ name, type }) => `${JSON.stringify(name)}: ${type}`)
-    .join("\n");
-  const notes = changes
-    .map(
-      ({ name, summaries }) =>
-        `- ${name}: ${[...new Set(summaries)].join("; ")}`,
-    )
-    .join("\n");
-  writeFileSync(
-    ".changeset/automated-release.md",
-    `---\n${frontmatter}\n---\n\n${notes}\n`,
+  const { changes, head, manifests } = planRelease();
+  const manualChangesets = readdirSync(".changeset").filter(
+    (file) => file.endsWith(".md") && file.toLowerCase() !== "readme.md",
   );
+  if (!changes.length && !manualChangesets.length) return false;
+  const versionsBefore = new Map(
+    manifests.map((manifest) => [manifest.name, manifest.version]),
+  );
+  if (changes.length) {
+    const frontmatter = changes
+      .map(({ name, type }) => `${JSON.stringify(name)}: ${type}`)
+      .join("\n");
+    const notes = changes
+      .map(
+        ({ name, summaries }) =>
+          `- ${name}: ${[...new Set(summaries)].join("; ")}`,
+      )
+      .join("\n");
+    writeFileSync(
+      ".changeset/automated-release.md",
+      `---\n${frontmatter}\n---\n\n${notes}\n`,
+    );
+  }
   execFileSync("pnpm", ["exec", "changeset", "version"], { stdio: "inherit" });
   const pending = { ...json(".changeset/release-state.json").pending };
   for (const entry of readdirSync("packages", { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
+    if (
+      !entry.isDirectory() ||
+      !existsSync(`packages/${entry.name}/package.json`)
+    )
+      continue;
     const manifest = json(`packages/${entry.name}/package.json`);
-    if (changes.some(({ name }) => name === manifest.name))
+    if (
+      !manifest.private &&
+      versionsBefore.get(manifest.name) !== manifest.version
+    )
       pending[manifest.name] = manifest.version;
   }
   writeFileSync(
@@ -156,11 +180,7 @@ export function prepare() {
   execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], {
     stdio: "inherit",
   });
-  execFileSync(
-    "pnpm",
-    ["exec", "prettier", "--write", ".changeset", "packages", "pnpm-lock.yaml"],
-    { stdio: "inherit" },
-  );
+  execFileSync("pnpm", ["format"], { stdio: "inherit" });
   return true;
 }
 if (

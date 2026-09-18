@@ -119,5 +119,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm pack:check
       - run: pnpm release:publish

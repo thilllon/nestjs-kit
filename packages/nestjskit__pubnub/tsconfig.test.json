@@ -4,5 +4,5 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/__fixture__/**", "src/**/__fixtures__/**"]
+  "exclude": []
 }

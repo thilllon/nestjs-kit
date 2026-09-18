@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem with a package.
+title: "fix: "
+body:
+  - type: markdown
+    attributes:
+      value: For security vulnerabilities, follow [SECURITY.md](https://github.com/thilllon/nestjs-kit/blob/main/.github/SECURITY.md) instead of opening a public issue.
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      placeholder: "@nestjs-kit/s3@1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Node.js, NestJS, package manager, and operating system versions.
+      placeholder: "Node.js 24.x, NestJS 12.x, pnpm 12.x, Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Link a small repository or provide the code and commands needed to reproduce the problem. Remove credentials and personal information.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant error output or stack traces, with secrets removed.
+    validations:
+      required: true

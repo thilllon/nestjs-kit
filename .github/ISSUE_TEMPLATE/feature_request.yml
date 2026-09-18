@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a capability or improvement.
+title: "feat: "
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      description: Name the affected package, or describe a proposed new integration.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Current behavior and use case
+      description: Describe what you are trying to build and what the current API cannot do.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include a short example of how you would use the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe workarounds or other approaches you have tried.

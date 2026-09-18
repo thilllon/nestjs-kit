@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export function shouldPublish(pkg, pending) {
@@ -55,7 +55,11 @@ export async function publish() {
     readFileSync(".changeset/release-state.json", "utf8"),
   );
   const packages = readdirSync("packages", { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        existsSync(`packages/${entry.name}/package.json`),
+    )
     .map((entry) => ({
       ...JSON.parse(
         readFileSync(`packages/${entry.name}/package.json`, "utf8"),

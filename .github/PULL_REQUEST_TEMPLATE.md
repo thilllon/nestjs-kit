@@ -1,12 +1,13 @@
-**Please describe the changes this PR makes and why it should be merged:**
+## What changed and why?
 
-**Status and versioning classification:**
+Describe the user-visible behavior and link the issue (for example, `Closes #123`).
 
-<!--
-Please move lines that apply to you out of the comment:
-- Code changes have been tested against the Discord API, or there are no code changes
-- I know how to update typings and have done so, or typings don't need updating
-- This PR changes the library's interface (methods or parameters added)
-- This PR includes breaking changes (methods removed or renamed, parameters moved or removed)
-- This PR **only** includes non-code changes, like changes to documentation, README, etc.
--->
+## Validation
+
+- [ ] `pnpm lint` and `pnpm format:check`
+- [ ] `pnpm check-types`, `pnpm test`, and `pnpm build`
+- [ ] tsdown package/type validation (included in `pnpm build`)
+- [ ] Conventional Commit PR title; breaking changes use `!` or `BREAKING CHANGE:`
+- [ ] Public API changes have examples and migration notes
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md). Changesets are generated automatically for publishable package changes.

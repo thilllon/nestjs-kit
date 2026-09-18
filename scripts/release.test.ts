@@ -25,6 +25,11 @@ test("docs, tests and unrelated packages do not trigger publishing", () => {
     ".github/workflows/ci.yml",
     `${dir}/README.md`,
     `${dir}/src/client.spec.ts`,
+    `${dir}/src/client.test.ts`,
+    `${dir}/tsconfig.test.json`,
+    `${dir}/src/fixtures/example.ts`,
+    `${dir}/src/__fixture__/legacy.ts`,
+    `${dir}/src/__fixtures__/legacy.ts`,
     `${dir}/src/__tests__/client.ts`,
     "packages/nestjskit__cloudinary/src/index.ts",
   ])
@@ -51,14 +56,28 @@ test("version-only and development-only manifest changes do not release", () => 
   );
   assert.notEqual(
     runtimeManifest(base),
+    runtimeManifest({ ...base, module: "./dist/index.mjs" }),
+  );
+  for (const metadata of [
+    { sideEffects: false },
+    { peerDependenciesMeta: { sdk: { optional: true } } },
+  ]) {
+    assert.notEqual(
+      runtimeManifest(base),
+      runtimeManifest({ ...base, ...metadata }),
+    );
+  }
+  assert.notEqual(
+    runtimeManifest(base),
     runtimeManifest({ ...base, dependencies: { sdk: "^2" } }),
   );
 });
 
 test("git history accumulates package changes and skips consumed releases", async () => {
   const { execFileSync } = await import("node:child_process");
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } =
-    await import("node:fs");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import(
+    "node:fs"
+  );
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { planRelease } = await import("./release-prepare.mjs");
@@ -93,6 +112,9 @@ test("git history accumulates package changes and skips consumed releases", asyn
       write(`packages/${name}/package.json`, { name, version: "1.0.0" });
       write(`packages/${name}/src/index.ts`, "export {};");
     }
+    mkdirSync(join(temp, "packages", "orphan", "node_modules"), {
+      recursive: true,
+    });
     mkdirSync(join(temp, ".changeset"));
     const baseline = commit("chore: initial");
     write(".changeset/release-state.json", { source: baseline });
@@ -100,6 +122,21 @@ test("git history accumulates package changes and skips consumed releases", asyn
     commit("docs: explain setup");
     process.chdir(temp);
     assert.deepEqual(planRelease().changes, []);
+    // Empty pending state must skip orphan directories without registry access.
+    const { publish } = await import("./release-publish.mjs");
+    const previousGate = process.env.NPM_PUBLISH_ENABLED;
+    const previousFetch = globalThis.fetch;
+    process.env.NPM_PUBLISH_ENABLED = "true";
+    globalThis.fetch = () => {
+      throw new Error("Unexpected registry request for an empty release plan");
+    };
+    try {
+      await publish();
+    } finally {
+      if (previousGate === undefined) delete process.env.NPM_PUBLISH_ENABLED;
+      else process.env.NPM_PUBLISH_ENABLED = previousGate;
+      globalThis.fetch = previousFetch;
+    }
     write("packages/one/src/index.ts", "export const one = 1;");
     commit("feat(one): expose one");
     write("packages/two/src/index.ts", "export const two = 2;");
@@ -149,8 +186,8 @@ test("git history accumulates package changes and skips consumed releases", asyn
     );
     write(".changeset/release-state.json", { source: shared });
     mkdirSync(join(temp, "scripts"));
-    write("scripts/build-package.mjs", "// shared clean build\n");
-    const build = commit("build: clean package outputs before compiling");
+    write("tsdown.config.mts", "// shared bundle configuration\n");
+    const build = commit("build: update shared tsdown configuration");
     assert.deepEqual(
       planRelease().changes.map(({ name }) => name),
       ["one", "two"],
@@ -252,4 +289,118 @@ test("tag recovery retries a failed push without recreating its local tag", asyn
     () => recoverTag("pkg@1.0.0", "b".repeat(40), git),
     /different commit/,
   );
+});
+
+test("real Changesets combines manual and automatic bumps and supports manual-only releases", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const {
+    mkdtempSync,
+    mkdirSync,
+    writeFileSync,
+    readFileSync,
+    symlinkSync,
+    rmSync,
+  } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const cli = fileURLToPath(import.meta.resolve("@changesets/cli/bin.js"));
+  const prepareScript = fileURLToPath(
+    new URL("./release-prepare.mjs", import.meta.url),
+  );
+  const temp = mkdtempSync(join(tmpdir(), "nestjs-kit-changesets-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: temp, encoding: "utf8" }).trim();
+  const write = (path: string, value: unknown) =>
+    writeFileSync(
+      join(temp, path),
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
+  const read = (path: string) =>
+    JSON.parse(readFileSync(join(temp, path), "utf8"));
+  const commit = (message: string) => {
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Release Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "-qm",
+      message,
+    );
+    return git("rev-parse", "HEAD");
+  };
+  const prepare = () =>
+    execFileSync(process.execPath, [prepareScript], {
+      cwd: temp,
+      encoding: "utf8",
+      env: { ...process.env, CI: "true", LEFTHOOK: "0" },
+    });
+  try {
+    git("init", "-q");
+    mkdirSync(join(temp, "node_modules/.bin"), { recursive: true });
+    symlinkSync(cli, join(temp, "node_modules/.bin/changeset"));
+    mkdirSync(join(temp, ".changeset"));
+    mkdirSync(join(temp, "packages/orphan/node_modules"), { recursive: true });
+    write(".gitignore", "node_modules/\n");
+    write("package.json", {
+      name: "release-fixture",
+      private: true,
+      packageManager: "pnpm@12.4.2",
+      scripts: { format: 'node --eval ""' },
+    });
+    write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+    write(".changeset/config.json", {
+      changelog: false,
+      commit: false,
+      fixed: [],
+      linked: [],
+      access: "public",
+      baseBranch: "main",
+      updateInternalDependencies: "patch",
+      ignore: [],
+    });
+    for (const name of ["one", "two"]) {
+      mkdirSync(join(temp, "packages", name, "src"), { recursive: true });
+      write(`packages/${name}/package.json`, { name, version: "1.0.0" });
+      write(`packages/${name}/src/index.ts`, "export {};\n");
+    }
+    const baseline = commit("chore: initial fixture");
+    write(".changeset/release-state.json", { source: baseline });
+    write("packages/one/src/index.ts", "export const changed = true;\n");
+    write(
+      ".changeset/major.md",
+      '---\n"one": major\n"two": major\n---\n\nExplicit major release.\n',
+    );
+    commit("feat(one)!: replace public API");
+    assert.match(prepare(), /Prepared package releases/);
+    assert.equal(read("packages/one/package.json").version, "2.0.0");
+    assert.equal(read("packages/two/package.json").version, "2.0.0");
+    assert.deepEqual(read(".changeset/release-state.json").pending, {
+      one: "2.0.0",
+      two: "2.0.0",
+    });
+    commit("chore(release): version changed packages");
+    assert.match(prepare(), /No publishable package changes/);
+    write(
+      ".changeset/manual-only.md",
+      '---\n"two": patch\n---\n\nManual-only release request.\n',
+    );
+    commit("chore: request manual package release");
+    assert.match(prepare(), /Prepared package releases/);
+    assert.equal(read("packages/one/package.json").version, "2.0.0");
+    assert.equal(read("packages/two/package.json").version, "2.0.1");
+    assert.deepEqual(read(".changeset/release-state.json").pending, {
+      one: "2.0.0",
+      two: "2.0.1",
+    });
+    commit("chore(release): version manual request");
+    assert.match(prepare(), /No publishable package changes/);
+    assert.equal(git("status", "--porcelain"), "");
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
