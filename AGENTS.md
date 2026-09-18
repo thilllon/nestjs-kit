@@ -29,6 +29,8 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 ## Formatting and tests
 
+- Keep these small package adapters flat: source files and colocated tests belong directly in each package's `src/`, without a `src/lib/` wrapper.
+
 - Biome must cover every supported file throughout the repository, including root files and examples. Exclude generated/dependency state, not source directories.
 - Use Prettier only for unsupported Markdown/YAML. Keep formatters from rewriting each other's files.
 - Name all test files `*.test.ts`, with middleware E2E tests named `*.e2e.test.ts`. Use `fixtures` for any necessary fixture directories; remove stale fixture exclusions and unused assets.
