@@ -35,3 +35,9 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Agent-local state
+.omc/
+
+# Generated package archives
+*.tgz

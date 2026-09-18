@@ -1,14 +1,14 @@
 {
-	"compilerOptions": {
-		"outDir": "dist",
-		"target": "es2016",
-		"module": "commonjs",
-		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
-		"strict": true,
-		"skipLibCheck": true,
-		"emitDecoratorMetadata": true,
-		"experimentalDecorators": true,
-		"sourceMap": true
-	}
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "src/**/__fixture__/**",
+    "src/**/__fixtures__/**"
+  ]
 }

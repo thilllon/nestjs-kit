@@ -4,22 +4,20 @@ import { getPgConnectionToken } from "./drizzle-pg.interface";
 
 @Injectable()
 export class DrizzlePgService implements OnModuleDestroy {
-	constructor(
-		@Inject(getPgConnectionToken()) private readonly connection: Pool | Client,
-	) {}
+  constructor(
+    @Inject(getPgConnectionToken()) private readonly connection: Pool | Client,
+  ) {}
 
-	async ping(): Promise<boolean> {
-		try {
-			const result = await this.connection.query("SELECT 1");
-			return result.rowCount === 1;
-		} catch {
-			return false;
-		}
-	}
+  async ping(): Promise<boolean> {
+    try {
+      const result = await this.connection.query("SELECT 1");
+      return result.rowCount === 1;
+    } catch {
+      return false;
+    }
+  }
 
-	async onModuleDestroy(): Promise<void> {
-		// if ("end" in this.connection) {
-		// 	await this.connection.end();
-		// }
-	}
+  async onModuleDestroy(): Promise<void> {
+    await this.connection.end();
+  }
 }

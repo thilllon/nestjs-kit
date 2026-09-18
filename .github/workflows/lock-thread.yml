@@ -2,7 +2,7 @@ name: Lock Threads
 
 on:
   schedule:
-    - cron: '0 0 */7 * *'
+    - cron: "0 0 */7 * *"
   workflow_dispatch:
 
 permissions:
@@ -16,12 +16,12 @@ jobs:
   action:
     runs-on: ubuntu-latest
     steps:
-      - uses: dessant/lock-threads@v5
+      - uses: dessant/lock-threads@v6
         with:
           github-token: ${{ github.token }}
-          issue-inactive-days: '90'
-          add-issue-labels: 'wontfix'
-          exclude-any-issue-labels: 'help wanted'
+          issue-inactive-days: "90"
+          add-issue-labels: "wontfix"
+          exclude-any-issue-labels: "help wanted"
           issue-comment: >
             This issue has been automatically locked since there
             has not been any recent activity after it was closed.

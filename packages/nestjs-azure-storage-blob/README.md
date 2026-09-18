@@ -1,228 +1,100 @@
 # nestjs-azure-storage-blob
 
-Azure Storage for Blob module for Nest.js
+Azure Blob Storage for NestJS, including SAS URLs for direct browser uploads and access to the underlying Azure client.
 
-# Why this package is needed?
-
-- To use Nest.js with [@azure/storage-blob](https://www.npmjs.com/package/@azure/storage-blob)
-
-- [@nestjs/azure-storage](https://www.npmjs.com/package/@nestjs/azure-storage)
-  - does not provide the method to upload a file using presigned url
-  - does not provide multiple authentication methods
-  - does not provide method to upload files directly to Azure without passing through my server
-
-# Usage
-
-## Setup
-
-- Install packages
+[![npm](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
+[![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
 ```sh
-npm install nestjs-azure-storage-blob @azure/storage-blob
+pnpm add nestjs-azure-storage-blob @azure/storage-blob
 ```
 
-- Set environment variables(`.env`)
+The npm name remains unchanged. Supply an Azure Storage connection string through your application's configuration.
 
-```sh
-# required
-NEST_STORAGE_BLOB_CONNECTION="DefaultEndpointsProtocol=https;AccountName=<ACCOUNT_NAME>;AccountKey=<ACCOUNT_KEY>;EndpointSuffix=core.windows.net"
-
-# optional
-NEST_STORAGE_BLOB_CONTAINER="<CONTAINER_NAME>"
-```
-
-### Option 1
+## Register
 
 ```ts
-// app.module.ts
-
-import { Module } from '@nestjs/common';
-import { StorageBlobModule } from 'nestjs-azure-storage-blob';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { Module } from "@nestjs/common";
+import { AzureStorageBlobModule } from "nestjs-azure-storage-blob";
 
 @Module({
   imports: [
-    StorageBlobModule.forRoot({
-      connection: process.env.NEST_STORAGE_BLOB_CONNECTION,
-      isGlobal: true, // optional
+    AzureStorageBlobModule.register({
+      connection: process.env.AZURE_STORAGE_CONNECTION_STRING!,
     }),
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
-export class AppModule {}
+export class StorageModule {}
 ```
 
-### Option 2
+Set `AZURE_STORAGE_CONNECTION_STRING` before startup. Registration fails if the connection string is missing. The optional second argument accepts `{ global: true }` and a Nest provider `scope`.
+
+## Configure asynchronously
+
+With `@nestjs/config` installed, place this registration in `imports`:
 
 ```ts
-// app.module.ts
+import { ConfigModule, ConfigService } from "@nestjs/config";
+import { AzureStorageBlobModule } from "nestjs-azure-storage-blob";
 
-import { Module } from '@nestjs/common';
-import { StorageBlobModule } from 'nestjs-azure-storage-blob';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-
-@Module({
-  imports: [
-    StorageBlobModule.forRootAsync({
-      useFactory: () => ({
-        connection: process.env.NEST_STORAGE_BLOB_CONNECTION,
-      }),
-      isGlobal: true, // optional
-    }),
-  ],
-  controllers: [AppController],
-  providers: [AppService],
-})
-export class AppModule {}
+AzureStorageBlobModule.registerAsync({
+  imports: [ConfigModule.forRoot()],
+  inject: [ConfigService],
+  useFactory: (config: ConfigService) => ({
+    connection: config.getOrThrow<string>("AZURE_STORAGE_CONNECTION_STRING"),
+  }),
+});
 ```
 
-## Usage
+`useClass` and `useExisting` factories implement `createModuleOptions()`.
+
+## Issue an upload URL
+
+Register this service in the module that imports `AzureStorageBlobModule`:
 
 ```ts
-// app.controller.ts
+import { Injectable } from "@nestjs/common";
+import { AzureStorageBlobService } from "nestjs-azure-storage-blob";
 
-import { Controller, Get } from '@nestjs/common';
-import { StorageBlobService } from 'nestjs-azure-storage-blob';
+@Injectable()
+export class UploadsService {
+  constructor(private readonly storage: AzureStorageBlobService) {}
 
-@Controller()
-export class AppController {
-  constructor(private readonly storageBlobService: StorageBlobService) {}
-
-  @Get('/')
-  async getSas() {
-    const containerName = 'mycontainer';
-    const fileName = 'test.txt';
-    const expiresOn = new Date(new Date().getTime() + 1000 * 60 * 60 * 24);
-
-    const accountSasUrl = await this.storageBlobService.getAccountSasUrl();
-
-    const containerSasUrl = await this.storageBlobService.getContainerSasUrl(containerName);
-
-    const blobSasUrl = await this.storageBlobService.getBlockBlobSasUrl(
-      containerName,
-      fileName,
-      { add: true, create: true, read: true, delete: true },
-      { expiresOn },
+  createUpload(blobName: string) {
+    return this.storage.getBlockBlobSasUrl(
+      "uploads",
+      blobName,
+      { create: true, write: true },
+      { expiresOn: new Date(Date.now() + 5 * 60 * 1000) },
     );
-
-    return { accountSasUrl, containerSasUrl, blobSasUrl };
   }
 }
 ```
 
+Create the container first. An authenticated application endpoint can return this service's `{ sasUrl, headers }` result. Authorize the target blob and issue only the permissions and expiry needed for the operation. Signing these SAS URLs requires a connection string with an account key.
+
+Upload the file bytes from a browser, without wrapping them in `FormData`:
+
 ```ts
-// Example 1. Upload file from server-side
-
-// Get Blob SAS URL which will be endpoint of uploading file
-const res = await axios.get('https://<YOUR_SERVER>/block-blob-sas');
-const blobSasUrl = res.data.blobSasUrl;
-
-// Upload a file directly to Azure Blob Storage which reduces the load on the server
-const buffer = fs.readFileSync(path.join(process.cwd(), 'myimage.jpg'));
-
-if (buffer) {
-  await axios
-    // Do not use `FormData`
-    .put(blobSasUrl, buffer, {
-      headers: {
-        // Do not forget to set headers
-        'x-ms-blob-type': 'BlockBlob',
-      },
-    })
-    .then((res) => {
-      // 201 Created
-      console.log(res.status);
-    })
-    .catch((err: any) => {
-      console.error(err.message);
-    });
+async function upload(file: File, sasUrl: string) {
+  const response = await fetch(sasUrl, {
+    method: "PUT",
+    headers: { "x-ms-blob-type": "BlockBlob" },
+    body: file,
+  });
+  if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
 }
 ```
 
-```ts
-// Example 2. Upload file from browser-side
+Configure Azure Storage CORS for the browser origin, method, and headers. File bytes go directly to Azure rather than through your NestJS server.
 
-const onChange: ChangeEventHandler<HTMLInputElement> = async (ev) => {
-  const file = ev.file;
+## Other operations
 
-  // Get Blob SAS URL which will be endpoint of uploading file
-  const res = await axios.get('https://<YOUR_SERVER>/block-blob-sas');
-  const blobSasUrl = res.data.blobSasUrl;
+- `getClient()`: access the configured `BlobServiceClient`.
+- `getContainerSasUrl()` / `getAccountSasUrl()`: create SAS response objects.
+- `getUploadable()`: return paired upload and download request details.
+- `listFiles(prefix, containerName)`: list blobs with a prefix.
+- `deleteFile()` / `deleteFileIfExists()`: remove a blob.
+- `downloadStream()`: get the SDK download response.
 
-  axios
-    // Do not use `FormData`
-    .put(blobSasUrl, file, {
-      headers: {
-        // Do not forget to set headers
-        'x-ms-blob-type': 'BlockBlob',
-      },
-    })
-    .then((res) => {
-      // 201 Created
-      console.log(res.status);
-    })
-    .catch((err: any) => {
-      console.error(err.message);
-    });
-};
-```
-
-# Contribution
-
-## Install
-
-```sh
-# to test locally
-pnpm add link:./path/to/nestjs-azure-storage-blob
-```
-
-## Publish
-
-```sh
-# 2FA error occurs when using yarn on Windows machine
-pnpm release
-```
-
-## Test
-
-```sh
-# set environment variable at `./example/.env.test`
-NEST_STORAGE_BLOB_CONNECTION="DefaultEndpointsProtocol=https;AccountName=<ACCOUNT_NAME>;AccountKey=<ACCOUNT_KEY>;EndpointSuffix=core.windows.net"
-NEST_STORAGE_BLOB_CONTAINER="<CONTAINER_NAME>"
-```
-
-# Contributing
-
-1. [Fork it](https://help.github.com/articles/fork-a-repo/)
-2. Install dependencies (`pnpm install`)
-3. Create your feature branch (`git checkout -b my-new-feature`)
-4. Commit your changes (`git commit -am 'Added some feature'`)
-5. Test your changes (`pnpm test`)
-6. Push to the branch (`git push origin my-new-feature`)
-7. [Create new Pull Request](https://help.github.com/articles/creating-a-pull-request/)
-
-## Testing
-
-We use [Jest](https://github.com/facebook/jest) to write tests. Run our test suite with this command:
-
-```
-pnpm test
-```
-
-## Code Style
-
-We use [Prettier](https://prettier.io/) and tslint to maintain code style and best practices.
-Please make sure your PR adheres to the guides by running:
-
-```sh
-pnpm format
-```
-
-and
-
-```sh
-pnpm lint
-```
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md)
