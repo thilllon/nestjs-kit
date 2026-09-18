@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -15,6 +16,7 @@ import { pathToFileURL } from "node:url";
 // Inspect the actual tarball consumers install, not just the build directory.
 for (const folder of readdirSync("packages")) {
   const directory = resolve("packages", folder);
+  if (!existsSync(join(directory, "package.json"))) continue;
   const pkg = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
   if (pkg.private) continue;
   const temporary = mkdtempSync(join(tmpdir(), "nestjs-kit-pack-"));
