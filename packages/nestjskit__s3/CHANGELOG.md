@@ -1,5 +1,11 @@
 # @nestjs-kit/s3
 
+## 2.0.0
+
+### Major Changes
+
+- - @nestjs-kit/s3: feat(s3)!: rename module and suggest compatible region values (#445)
+
 ## 1.0.1
 
 ### Patch Changes
