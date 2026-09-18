@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/pubnub",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "PubNub realtime messaging integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
