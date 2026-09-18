@@ -9,14 +9,14 @@ Small NestJS modules for storage, media, PostgreSQL, and realtime messaging. Reg
 
 ## Pick an integration
 
-| Package                     | Use it for                                                                      | Guide                                                              |
-| --------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `@nestjs-kit/s3`            | Injecting AWS SDK v3 clients, including named clients and S3-compatible storage | [S3](packages/nestjskit__s3/README.md)                             |
-| `@nestjs-kit/cloudinary`    | Signing uploads and uploading media, with optional image resizing               | [Cloudinary](packages/nestjskit__cloudinary/README.md)             |
-| `@nestjs-kit/pubnub`        | Publishing and subscribing through an injectable PubNub client                  | [PubNub](packages/nestjskit__pubnub/README.md)                     |
-| `nestjs-azure-storage-blob` | Blob storage operations and direct uploads through SAS URLs                     | [Azure Blob Storage](packages/nestjs-azure-storage-blob/README.md) |
-| `nestjs-drizzle-pg`         | Drizzle ORM with PostgreSQL pools or clients                                    | [Drizzle + PostgreSQL](packages/nestjs-drizzle-pg/README.md)       |
-| `nestjs-pg-listen`          | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle                    | [PostgreSQL notifications](packages/nestjs-pg-listen/README.md)    |
+| Package                                                                                      | Use it for                                                                      | Guide                                                  |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `@nestjs-kit/s3` [(npm)](https://www.npmjs.com/package/@nestjs-kit/s3)                       | Injecting AWS SDK v3 clients, including named clients and S3-compatible storage | [README](packages/nestjskit__s3/README.md)             |
+| `@nestjs-kit/cloudinary` [(npm)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)       | Signing uploads and uploading media, with optional image resizing               | [README](packages/nestjskit__cloudinary/README.md)     |
+| `@nestjs-kit/pubnub` [(npm)](https://www.npmjs.com/package/@nestjs-kit/pubnub)               | Publishing and subscribing through an injectable PubNub client                  | [README](packages/nestjskit__pubnub/README.md)         |
+| `nestjs-azure-storage-blob` [(npm)](https://www.npmjs.com/package/nestjs-azure-storage-blob) | Blob storage operations and direct uploads through SAS URLs                     | [README](packages/nestjs-azure-storage-blob/README.md) |
+| `nestjs-drizzle-pg` [(npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                 | Drizzle ORM with PostgreSQL pools or clients                                    | [README](packages/nestjs-drizzle-pg/README.md)         |
+| `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle                    | [README](packages/nestjs-pg-listen/README.md)          |
 
 The new `@nestjs-kit/*` packages and `nestjs-pg-listen` are being prepared for their first release. Installation commands below and in their guides apply once published. Azure and Drizzle keep their existing npm names.
 
