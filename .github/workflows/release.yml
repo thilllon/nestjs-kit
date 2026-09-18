@@ -76,6 +76,7 @@ jobs:
     timeout-minutes: 25
     permissions:
       actions: write
+      checks: write
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
@@ -85,19 +86,41 @@ jobs:
       RUN_KEY: release-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Dispatch CI on the exact release head
+        id: ci
         run: |
+          workflow_id=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml" --jq .id)
           gh workflow run ci.yml --ref "$VALIDATED_REF" -f expected_sha="$VALIDATED_SHA" -f run_key="$RUN_KEY"
           for attempt in {1..60}; do
             run=$(gh run list --workflow ci.yml --event workflow_dispatch --branch "$VALIDATED_REF" --commit "$VALIDATED_SHA" --limit 100 --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"$RUN_KEY\") | .databaseId" | head -n 1)
             if [ -n "$run" ]; then
               gh run watch "$run" --exit-status --interval 10
-              test "$(gh run view "$run" --json headSha --jq .headSha)" = "$VALIDATED_SHA"
+              result=$(gh api "repos/$GH_REPO/actions/runs/$run")
+              jq -e --arg repo "$GH_REPO" --argjson workflow "$workflow_id" --arg sha "$VALIDATED_SHA" --arg key "$RUN_KEY" '
+                .repository.full_name == $repo and .workflow_id == $workflow and
+                .head_sha == $sha and .display_title == $key and
+                .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
+              ' <<< "$result"
+              test "$(gh api "repos/$GH_REPO/actions/runs/$run/jobs" --jq 'any(.jobs[]; .name == "Validate" and .conclusion == "success")')" = true
+              echo "url=$(jq -r .html_url <<< "$result")" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep 5
           done
           echo 'The dispatched CI run was not found for the expected commit.' >&2
           exit 1
+
+      - name: Report the verified CI result on the release head
+        if: needs.prepare.outputs.changed == 'true'
+        env:
+          CI_RUN_URL: ${{ steps.ci.outputs.url }}
+        run: |
+          gh api --method POST "repos/$GH_REPO/check-runs" \
+            -f name=Validate -f head_sha="$VALIDATED_SHA" \
+            -f status=completed -f conclusion=success \
+            -f details_url="$CI_RUN_URL" -f external_id="$RUN_KEY" \
+            -f 'output[title]=Full CI passed on the exact release commit' \
+            -f "output[summary]=Full CI succeeded for $VALIDATED_SHA. [View the complete CI run]($CI_RUN_URL). This report follows verified repository, workflow, commit and job results." \
+            --jq '{id, head_sha, conclusion, html_url}'
 
   merge:
     needs: [prepare, validate]
