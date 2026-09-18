@@ -1,10 +1,10 @@
 # nestjs-drizzle-pg
 
-Drizzle ORM with PostgreSQL in NestJS. Register a pool or a single client and inject a Drizzle database into application services.
-
-[![npm](https://img.shields.io/npm/v/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)
+[![npm version](https://img.shields.io/npm/v/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)
+[![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
-[![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](https://github.com/thilllon/nestjs-kit/blob/main/LICENSE)
+
+Drizzle ORM with PostgreSQL in NestJS. Register a pool or a single client and inject a Drizzle database into application services.
 
 ```sh
 pnpm add nestjs-drizzle-pg drizzle-orm pg

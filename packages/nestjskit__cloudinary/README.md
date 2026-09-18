@@ -1,8 +1,10 @@
 # @nestjs-kit/cloudinary
 
-Cloudinary uploads and upload signatures for NestJS, with optional image resizing through Sharp.
-
+[![npm version](https://img.shields.io/npm/v/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
+[![npm monthly downloads](https://img.shields.io/npm/dm/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
+
+Cloudinary uploads and upload signatures for NestJS, with optional image resizing through Sharp.
 
 This scoped package is being prepared for its first release. After publication:
 
