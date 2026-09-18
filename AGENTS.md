@@ -39,6 +39,12 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Default unit tests must not require cloud credentials or network services. PostgreSQL E2E runs separately with `pnpm test:e2e`.
 - Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
+## Multiple client registrations
+
+- Keep named client registrations isolated: credentials, endpoints, service options and lifecycle cleanup must belong to the selected alias. Preserve existing unnamed injection APIs.
+- Declare asynchronous registration aliases in module extras, outside the options factory. Document each adapter's call shape and require distinct aliases for clients injected together.
+- Verify multiple registrations in one real Nest consumer, including default/named coexistence and shutdown. Check CJS and ESM consumers for injection changes; use Compose E2E when database behavior is involved.
+
 ## Verification and Git workflow
 
 - Before implementation, record a plan and checklist in GitHub issues. Link implementation PRs to those issues and keep their status accurate.
