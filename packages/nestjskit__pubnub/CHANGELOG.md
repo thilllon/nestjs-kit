@@ -1,5 +1,11 @@
 # @nestjs-kit/pubnub
 
+## 1.0.2
+
+### Patch Changes
+
+- ecfac70: Refresh published READMEs with npm version, monthly download and CI badges, and remove completed first-publication notices.
+
 ## 1.0.1
 
 ### Patch Changes
