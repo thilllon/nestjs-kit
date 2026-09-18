@@ -1,13 +1,14 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { StoragePipelineOptions } from "@azure/storage-blob";
 import { ModuleMetadata, Scope, Type } from "@nestjs/common";
 
 export type ModuleOptions = {
   connection: string;
+  containerName?: string;
   storageOptions?: StoragePipelineOptions;
 };
 
 export interface ExtraModuleOptions {
+  alias?: string;
   global?: boolean;
   scope?: Scope;
 }
