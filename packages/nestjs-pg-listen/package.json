@@ -1,6 +1,6 @@
 {
   "name": "nestjs-pg-listen",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PostgreSQL LISTEN and NOTIFY lifecycle integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
