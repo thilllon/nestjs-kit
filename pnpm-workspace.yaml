@@ -7,3 +7,6 @@ minimumReleaseAgeExclude:
   - prettier@3.9.8
 
 autoInstallPeers: true
+
+# Checks must not mutate the lockfile or run competing installs from parallel hooks.
+verifyDepsBeforeRun: false
