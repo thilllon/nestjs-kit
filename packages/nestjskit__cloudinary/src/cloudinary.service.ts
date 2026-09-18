@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   UploadApiErrorResponse,
   UploadApiOptions,
@@ -11,7 +11,6 @@ import type {
   ModuleOptions,
   SignedUploadUrlOptions,
 } from "./cloudinary.interface";
-import { MODULE_OPTIONS_TOKEN } from "./cloudinary.module-definition";
 
 export const defaultCreateSignedUploadUrlOptions: Partial<SignedUploadUrlOptions> =
   {
@@ -21,18 +20,14 @@ export const defaultCreateSignedUploadUrlOptions: Partial<SignedUploadUrlOptions
 
 @Injectable()
 export class CloudinaryService {
-  public readonly cloudinary = cloudinary;
-
-  constructor(
-    @Inject(MODULE_OPTIONS_TOKEN) private readonly options: ModuleOptions,
-  ) {}
+  constructor(private readonly options: ModuleOptions) {}
 
   async onModuleInit(): Promise<void> {
     if (this.options.pingOnInit) await this.ping();
   }
 
   ping() {
-    return this.cloudinary.api.ping(this.sdkOptions);
+    return cloudinary.api.ping(this.sdkOptions);
   }
 
   private get sdkOptions() {
@@ -52,9 +47,13 @@ export class CloudinaryService {
     apiSecret?: string,
   ) {
     options = { ...defaultCreateSignedUploadUrlOptions, ...options };
-    const url = `https://api.cloudinary.com/v1_1/${this.options.cloud_name}/${options.resource_type}/upload`;
+    const url = cloudinary.utils.api_url("upload", {
+      ...this.sdkOptions,
+      upload_prefix: this.options.upload_prefix ?? "https://api.cloudinary.com",
+      resource_type: options.resource_type,
+    });
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = this.cloudinary.utils.api_sign_request(
+    const signature = cloudinary.utils.api_sign_request(
       {
         public_id: options.public_id,
         timestamp,
@@ -84,7 +83,7 @@ export class CloudinaryService {
     options?: UploadApiOptions,
   ): Promise<UploadApiResponse | UploadApiErrorResponse> {
     return new Promise((resolve, reject) => {
-      const upload = this.cloudinary.uploader.upload_stream(
+      const upload = cloudinary.uploader.upload_stream(
         { ...this.sdkOptions, ...options },
         (error, result) => {
           if (error) return reject(error);
@@ -97,9 +96,5 @@ export class CloudinaryService {
         if (error) reject(error);
       });
     });
-  }
-
-  get instance() {
-    return this.cloudinary;
   }
 }

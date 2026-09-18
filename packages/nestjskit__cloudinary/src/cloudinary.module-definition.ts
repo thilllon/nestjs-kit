@@ -1,5 +1,7 @@
-import { ConfigurableModuleBuilder } from "@nestjs/common";
+import { ConfigurableModuleBuilder, type DynamicModule } from "@nestjs/common";
 import type { ModuleOptions } from "./cloudinary.interface";
+import { CloudinaryService } from "./cloudinary.service";
+import { getCloudinaryToken } from "./cloudinary.tokens";
 
 export const {
   ConfigurableModuleClass,
@@ -7,8 +9,24 @@ export const {
   OPTIONS_TYPE,
   ASYNC_OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<ModuleOptions>()
-  .setExtras({ global: true }, (definition, extras) => ({
-    ...definition,
-    global: extras.global,
-  }))
+  .setExtras(
+    { alias: "default", global: true },
+    (definition, extras): DynamicModule => {
+      const token = getCloudinaryToken(extras.alias);
+      return {
+        ...definition,
+        global: extras.global,
+        providers: [
+          ...(definition.providers ?? []),
+          {
+            provide: token,
+            inject: [MODULE_OPTIONS_TOKEN],
+            useFactory: (options: ModuleOptions) =>
+              new CloudinaryService(options),
+          },
+        ],
+        exports: [...(definition.exports ?? []), token],
+      };
+    },
+  )
   .build();

@@ -53,6 +53,54 @@ PubNubModule.registerAsync({
 });
 ```
 
+## Multiple clients
+
+Give each registration a unique `alias` and inject the matching client. The alias belongs beside `useFactory` for async registration, not inside the returned SDK configuration.
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+import {
+  InjectPubNubClient,
+  PubNubModule,
+  PubNubService,
+} from "@nestjs-kit/pubnub";
+
+@Injectable()
+class AccountNotifications {
+  constructor(
+    @InjectPubNubClient("primary") readonly primary: PubNubService,
+    @InjectPubNubClient("secondary") readonly secondary: PubNubService,
+  ) {}
+}
+
+@Module({
+  imports: [
+    PubNubModule.register({
+      alias: "primary",
+      userId: "primary-notifications",
+      subscribeKey: process.env.PRIMARY_SUBSCRIBE_KEY!,
+      publishKey: process.env.PRIMARY_PUBLISH_KEY!,
+    }),
+    PubNubModule.registerAsync({
+      alias: "secondary",
+      useFactory: () => ({
+        userId: "secondary-notifications",
+        subscribeKey: process.env.SECONDARY_SUBSCRIBE_KEY!,
+        publishKey: process.env.SECONDARY_PUBLISH_KEY!,
+      }),
+    }),
+  ],
+  providers: [AccountNotifications],
+})
+export class MultiAccountModule {}
+```
+
+Each registration owns its SDK configuration, client and shutdown hook. SDK options such as `origin` remain available per registration. `getPubNubClientToken(alias)` supports custom provider factories and testing. Named registrations export only their named token; omit `alias` (or use `"default"`) to retain ordinary `PubNubService` injection. Aliases must be non-empty without surrounding whitespace. The module stays local unless `isGlobal: true` is requested.
+
+### Major release note
+
+This release establishes explicit named-client injection. Existing single-client `PubNubService` injection continues to work. Applications registering multiple clients should assign distinct aliases and use `InjectPubNubClient(alias)` instead of relying on import order to select a class provider.
+
 ## Publish a message
 
 Register this service in the module that imports `PubNubModule`:
