@@ -10,7 +10,7 @@ import type {
 import { getClientToken, getOptionsToken } from "./aws-s3.utils";
 
 @Module({})
-export class AwsS3Module {
+export class S3Module {
   static register(
     options: ModuleOptions,
     extras?: ExtraModuleOptions,
@@ -26,7 +26,7 @@ export class AwsS3Module {
     };
 
     return {
-      module: AwsS3Module,
+      module: S3Module,
       providers: [optionsProvider, clientProvider],
       exports: [optionsProvider, clientProvider],
       global: extras?.global,
@@ -45,7 +45,7 @@ export class AwsS3Module {
     const asyncProviders = this.createAsyncProviders(options, extras);
 
     return {
-      module: AwsS3Module,
+      module: S3Module,
       imports: options.imports,
       providers: [clientProvider, ...asyncProviders],
       exports: [clientProvider, ...asyncProviders],
