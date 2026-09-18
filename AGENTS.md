@@ -46,7 +46,8 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Run relevant checks: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, and `pnpm build` (including strict publint/attw checks). Run Compose E2E for middleware changes.
 - Lefthook pre-commit runs lint, formatting and staged Gitleaks; commit-msg runs commitlint; pre-push runs build and typecheck. GitHub CI uses `jdx/mise-action` and runs tests.
 - Use Conventional Commit titles/messages. Mark breaking public/runtime requirements with `!` or a `BREAKING CHANGE:` footer.
-- Do NOT append `Co-Authored-By` lines to commit messages.
+- Do NOT append `Co-Authored-By` lines to commit messages. Pass `--body ''` to `gh pr merge` to suppress generated squash-message trailers.
+- Main requires a squash PR, the GitHub Actions `Validate` check, resolved conversations and an up-to-date branch. There are no bypass actors; zero mandatory approvals support solo maintenance. Force pushes and deletion are forbidden. Automated release PRs dispatch CI on their exact head and wait for success before merging.
 - Merge only verified revisions. When the maintainer authorizes merging, continue through passing PRs without repeatedly asking for approval.
 - Check GitHub Code scanning between PRs. Record actionable warnings in issues, fix them in linked PRs, and confirm default-branch alerts are resolved after analysis. Do not dismiss warnings just to clear the dashboard.
 
