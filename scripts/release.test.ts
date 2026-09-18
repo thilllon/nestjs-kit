@@ -256,6 +256,40 @@ test("removed or private planned packages fail before any publication", async ()
   );
 });
 
+test("publication selection leaves other pending versions available for retry", async () => {
+  const { selectReleases } = await import("./release-publish.mts");
+  const packages = [
+    { name: "@scope/one", version: "1.0.0", directory: "packages/one" },
+    { name: "two", version: "2.0.0", directory: "packages/two" },
+    { name: "unchanged", version: "1.0.0", directory: "packages/unchanged" },
+    {
+      name: "private",
+      version: "1.0.0",
+      private: true,
+      directory: "packages/private",
+    },
+  ];
+  const pending = Object.freeze({ "@scope/one": "1.0.0", two: "2.0.0" });
+  assert.deepEqual(selectReleases(packages, pending), packages.slice(0, 2));
+  assert.deepEqual(selectReleases(packages, pending, ""), packages.slice(0, 2));
+  assert.deepEqual(selectReleases(packages, pending, " two, two "), [
+    packages[1],
+  ]);
+  assert.deepEqual(selectReleases(packages, pending, "@scope/one"), [
+    packages[0],
+  ]);
+  for (const selection of ["unknown", "unchanged", "private", "two,", " "]) {
+    assert.throws(
+      () => selectReleases(packages, pending, selection),
+      /not in the validated publication plan/,
+    );
+  }
+  assert.throws(
+    () => selectReleases(packages, { ...pending, two: "3.0.0" }, "@scope/one"),
+    /Invalid release plan version/,
+  );
+});
+
 test("tag recovery retries a failed push without recreating its local tag", async () => {
   const { recoverTag } = await import("./release-publish.mts");
   const head = "a".repeat(40);

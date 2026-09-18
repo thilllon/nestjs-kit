@@ -45,6 +45,24 @@ export function validatePending(
   }
 }
 
+export function selectReleases<T extends PackageManifest>(
+  packages: T[],
+  pending: PendingReleases,
+  selection?: string,
+): T[] {
+  validatePending(packages, pending);
+  const planned = packages.filter((pkg) => shouldPublish(pkg, pending));
+  if (selection === undefined || selection === "") return planned;
+  const names = new Set(selection.split(",").map((name) => name.trim()));
+  for (const name of names) {
+    if (!name || !planned.some((pkg) => pkg.name === name))
+      throw new Error(
+        `Package ${JSON.stringify(name)} is not in the validated publication plan`,
+      );
+  }
+  return planned.filter((pkg) => names.has(pkg.name));
+}
+
 export function recoverTag(
   tag: string,
   target: string | undefined,
@@ -90,12 +108,15 @@ export async function publish(): Promise<void> {
       ) as PackageManifest),
       directory: `packages/${entry.name}`,
     }));
-  validatePending(packages, pending);
+  const selected = selectReleases(
+    packages,
+    pending,
+    process.env.NPM_PUBLISH_PACKAGES,
+  );
   const head = execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
   }).trim();
-  for (const pkg of packages) {
-    if (!shouldPublish(pkg, pending)) continue;
+  for (const pkg of selected) {
     const response = await fetch(
       `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}`,
     );

@@ -106,6 +106,7 @@ jobs:
       LEFTHOOK: "0"
       TURBO_UI: stream
       NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
+      NPM_PUBLISH_PACKAGES: ${{ vars.NPM_PUBLISH_PACKAGES }}
     steps:
       - uses: actions/checkout@v7
         with:

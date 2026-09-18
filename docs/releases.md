@@ -50,6 +50,12 @@ Inspect the dry-run file list before publishing. The explicit `--provenance=fals
 
 In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After all package trusted publishers are configured, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 
+## Publish configured packages first
+
+When trusted publishers are ready for only part of the workspace, set the repository Actions variable `NPM_PUBLISH_PACKAGES` to a comma-separated list of those package names, for example `@nestjs-kit/s3,nestjs-azure-storage-blob,nestjs-drizzle-pg`. Then set `NPM_PUBLISH_ENABLED=true` and run **Release**. Every selected name must be a public package in the validated pending release plan; unknown names, unplanned packages and empty list entries fail before any registry or publish request.
+
+This list controls publication only. Version preparation still tracks all changed packages, and unselected pending versions remain available for a later run. Add a package to the list after its first publication and trusted-publisher setup are complete. Delete `NPM_PUBLISH_PACKAGES` once every package is configured to restore automatic publication of all pending packages. The global `NPM_PUBLISH_ENABLED` gate always applies.
+
 ## Retries and maintenance
 
 Run the release workflow with `workflow_dispatch` to retry a failed or newly enabled publication. The registry comparison skips versions already published, so a partially successful run can resume. Publication uses the immutable validated commit, and a retry without a new version PR still runs full CI. Pending releases persist by package and version; the development placeholder `0.0.0` is never published. A package with a pending release must be explicitly retired before it can be deleted or made private. Investigate authentication or build failures before retrying; never replace an existing npm version.
