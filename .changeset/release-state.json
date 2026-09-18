@@ -1,8 +1,8 @@
 {
-  "source": "ecfac707d32b9ba3dfab11890866998951481116",
+  "source": "c60fc0a49edea00bfd42b97b3fae53dd1d145c70",
   "pending": {
     "nestjs-azure-storage-blob": "1.0.1",
-    "nestjs-drizzle-pg": "2.0.1",
+    "nestjs-drizzle-pg": "2.0.2",
     "nestjs-pg-listen": "1.0.2",
     "@nestjs-kit/cloudinary": "1.0.2",
     "@nestjs-kit/pubnub": "1.0.2",
