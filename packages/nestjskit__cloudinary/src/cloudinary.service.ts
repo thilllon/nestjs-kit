@@ -61,7 +61,12 @@ export class CloudinaryService {
     }
     return {
       ...options,
+      api_key: options.api_key,
       api_secret: secret,
+      oauth_token: options.oauth_token,
+      api_proxy: options.api_proxy,
+      agent: options.agent,
+      extra_headers: options.extra_headers,
       upload_prefix: options.upload_prefix ?? "https://api.cloudinary.com",
       signature_algorithm: options.signature_algorithm ?? "sha1",
       signature_version: options.signature_version ?? 2,

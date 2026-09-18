@@ -54,6 +54,32 @@ describe("Cloudinary SDK request isolation", () => {
     expect(request).toHaveBeenCalledTimes(4);
   });
 
+  it("keeps per-upload authentication and routing overrides out of real SDK requests", async () => {
+    const request = captureRequests();
+    const service = new CloudinaryService(credentials);
+    await expect(
+      service.uploadFile(file, {
+        cloud_name: "other",
+        api_key: "other-key",
+        api_secret: "other-secret",
+        oauth_token: "other-oauth",
+        upload_prefix: "https://other.example.test",
+        api_proxy: "https://proxy.example.test",
+        extra_headers: { Authorization: "Bearer other-header" },
+        transformation: [{ width: 100, crop: "limit" }],
+      }),
+    ).rejects.toThrow("offline request boundary");
+    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.lastCall?.[0]).toMatchObject({
+      hostname: "api.cloudinary.com",
+      path: "/v1_1/local/image/upload",
+    });
+    expect(request.mock.lastCall?.[0]).not.toHaveProperty(
+      "headers.Authorization",
+    );
+    expect(request.mock.lastCall?.[0]).not.toHaveProperty("agent");
+  });
+
   it("supports an explicitly local OAuth token for ping and upload", async () => {
     const request = captureRequests();
     const service = new CloudinaryService({
