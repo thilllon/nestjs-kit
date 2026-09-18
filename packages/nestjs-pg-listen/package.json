@@ -1,6 +1,6 @@
 {
   "name": "nestjs-pg-listen",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "PostgreSQL LISTEN and NOTIFY lifecycle integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
@@ -50,8 +50,8 @@
     "notify"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.mts",
     "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts",
     "dev": "tsdown --config ../../tsdown.config.mts --watch"
   },
   "module": "./dist/index.mjs",

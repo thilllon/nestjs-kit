@@ -6,11 +6,9 @@ import {
   v2 as cloudinary,
 } from "cloudinary";
 import { Readable, pipeline } from "node:stream";
-import sharp from "sharp";
 import type {
   IFile,
   ModuleOptions,
-  SharpInputOptions,
   SignedUploadUrlOptions,
 } from "./cloudinary.interface";
 import { MODULE_OPTIONS_TOKEN } from "./cloudinary.module-definition";
@@ -80,19 +78,11 @@ export class CloudinaryService {
    * @param {IFile} file - IFile - This is the file object that is passed to the uploadFile method.
    * @param {UploadApiOptions} [options] - This is the options object that you can pass to the
    * uploader.upload_stream method.
-   * @param {SharpInputOptions} [sharpOptions] - This is an object that contains the options for sharp.
    */
   async uploadFile(
     file: IFile,
     options?: UploadApiOptions,
-    sharpOptions?: SharpInputOptions,
   ): Promise<UploadApiResponse | UploadApiErrorResponse> {
-    const buffer =
-      sharpOptions && file.mimetype.startsWith("image/")
-        ? await sharp(file.buffer, sharpOptions.options)
-            .resize({ width: sharpOptions.width, height: sharpOptions.height })
-            .toBuffer()
-        : file.buffer;
     return new Promise((resolve, reject) => {
       const upload = this.cloudinary.uploader.upload_stream(
         { ...this.sdkOptions, ...options },
@@ -103,7 +93,7 @@ export class CloudinaryService {
           resolve(result);
         },
       );
-      pipeline(Readable.from([buffer]), upload, (error) => {
+      pipeline(Readable.from([file.buffer]), upload, (error) => {
         if (error) reject(error);
       });
     });

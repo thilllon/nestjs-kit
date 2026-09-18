@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/pubnub",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "PubNub realtime messaging integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
@@ -49,8 +49,8 @@
     "pubnub"
   ],
   "scripts": {
-    "build": "tsdown --config ../../tsdown.config.mts",
     "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts",
     "dev": "tsdown --config ../../tsdown.config.mts --watch"
   },
   "module": "./dist/index.mjs",
