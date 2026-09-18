@@ -1,5 +1,11 @@
 # @nestjs-kit/s3
 
+## 3.0.0
+
+### Major Changes
+
+- - @nestjs-kit/s3: refactor(s3)!: remove remaining AWS-prefixed API names (#450)
+
 ## 2.0.0
 
 ### Major Changes
