@@ -171,13 +171,14 @@ describe("Cloudinary SDK request isolation", () => {
     const service = new CloudinaryService({
       cloud_name: "local",
       api_key: "key",
+      signature_algorithm: "sha256",
     });
     const signed = await service.createSignedUploadUrl(
       signedOptions,
       "override-secret",
     );
     expect(signed.signature).toBe(
-      createHash("sha1")
+      createHash("sha256")
         .update(`public_id=asset&timestamp=${signed.timestamp}override-secret`)
         .digest("hex"),
     );
