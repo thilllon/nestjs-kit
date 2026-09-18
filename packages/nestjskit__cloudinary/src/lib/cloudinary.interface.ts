@@ -1,6 +1,5 @@
 import type { ConfigOptions, ResourceType, SignApiOptions } from "cloudinary";
 import { Readable } from "node:stream";
-import { SharpOptions } from "sharp";
 
 export type ModuleOptions = ConfigOptions & {
   /** Check connectivity during module initialization. Disabled by default. */
@@ -54,12 +53,6 @@ export interface IFile {
    * `MemoryStorage` only: A Buffer containing the entire file.
    */
   buffer: Buffer;
-}
-
-export interface SharpInputOptions {
-  width?: number;
-  height?: number;
-  options?: SharpOptions;
 }
 
 export interface SignedUploadUrlOptions extends SignApiOptions {

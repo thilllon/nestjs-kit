@@ -75,11 +75,59 @@ describe("Cloudinary service", () => {
       "second",
     ]);
   });
-  it("rejects image transformation errors instead of leaving a pending promise", async () => {
-    const service = new CloudinaryService({});
+  it.each(["image/png", "application/pdf"])(
+    "uploads unchanged %s bytes and forwards Cloudinary transformations",
+    async (mimetype) => {
+      const chunks: Buffer[] = [];
+      const options: UploadApiOptions = {
+        transformation: [{ width: 1200, crop: "limit" }],
+        eager: [{ width: 200, height: 200, crop: "fill" }],
+      };
+      const upload = vi
+        .spyOn(uploader, "upload_stream")
+        .mockImplementation((_options, callback) => {
+          return new Writable({
+            write(chunk: Buffer, _encoding, done) {
+              chunks.push(chunk);
+              done();
+            },
+            final(done) {
+              callback?.(undefined, { public_id: "uploaded" } as never);
+              done();
+            },
+          }) as UploadStream;
+        });
+      const result = await new CloudinaryService({
+        cloud_name: "account",
+      }).uploadFile({ ...file, mimetype }, options);
+      expect(Buffer.concat(chunks)).toEqual(file.buffer);
+      expect(upload).toHaveBeenCalledWith(
+        { cloud_name: "account", ...options },
+        expect.any(Function),
+      );
+      expect(result).toEqual({ public_id: "uploaded" });
+    },
+  );
+  it("rejects SDK upload callback errors", async () => {
+    vi.spyOn(uploader, "upload_stream").mockImplementation(
+      (_options, callback) => {
+        return new Writable({
+          write(_chunk, _encoding, done) {
+            done();
+          },
+          final(done) {
+            callback?.(
+              { message: "upload denied", name: "Error", http_code: 403 },
+              undefined,
+            );
+            done();
+          },
+        }) as UploadStream;
+      },
+    );
     await expect(
-      service.uploadFile({ ...file, mimetype: "image/png" }, {}, { width: 10 }),
-    ).rejects.toThrow();
+      new CloudinaryService({}).uploadFile(file),
+    ).rejects.toMatchObject({ message: "upload denied", http_code: 403 });
   });
   it("rejects upload stream failures", async () => {
     vi.spyOn(uploader, "upload_stream").mockImplementation(
