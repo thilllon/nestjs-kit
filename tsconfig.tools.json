@@ -2,7 +2,9 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "rootDir": "."
   },
-  "include": ["*.mts", "scripts/**/*.mts", "scripts/**/*.test.ts"]
+  "include": ["*.mts", "scripts/**/*.mts", "scripts/**/*.test.ts"],
+  "exclude": []
 }

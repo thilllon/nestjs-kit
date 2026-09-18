@@ -16,6 +16,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
+- Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
 - Every library must build with tsdown to separate CJS and ESM outputs and matching declarations. Maintain conditional `require` and `import` exports.
 - Define `build` directly in each package's `package.json`; share options through `tsdown.config.mts`, not a build wrapper script.
 - Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks. For build changes, also verify real consumer imports and Nest injection in both formats.

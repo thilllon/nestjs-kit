@@ -1,6 +1,7 @@
 {
   "name": "nestjs-kit",
   "private": true,
+  "type": "module",
   "license": "ISC",
   "packageManager": "pnpm@12.4.2",
   "engines": {
@@ -26,7 +27,6 @@
     "release:prepare": "tsx scripts/release-prepare.mts",
     "release:publish": "tsx scripts/release-publish.mts"
   },
-  "type": "module",
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
     "@biomejs/biome": "2.5.14",
