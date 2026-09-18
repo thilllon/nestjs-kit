@@ -10,6 +10,8 @@ This scoped package is being prepared for its first release. After publication, 
 pnpm add @nestjs-kit/s3 @aws-sdk/client-s3
 ```
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register and inject
 
 ```ts
@@ -59,4 +61,4 @@ AwsS3Module.registerAsync({
 
 Pass `{ alias: 'archive' }` as the second argument to `register` or `registerAsync`, then inject with `@InjectAwsS3Client('archive')`. Use distinct aliases for distinct clients. The same second argument accepts `{ global: true }` when application-wide registration is intended.
 
-[Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

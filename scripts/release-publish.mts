@@ -2,7 +2,27 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export function shouldPublish(pkg, pending) {
+export interface PackageManifest {
+  name: string;
+  version: string;
+  private?: boolean;
+  scripts?: Record<string, string>;
+  [field: string]: unknown;
+}
+
+export type PendingReleases = Record<string, string>;
+export interface ReleaseState {
+  source: string;
+  pending?: PendingReleases;
+}
+interface RegistryMetadata {
+  versions?: Record<string, { gitHead?: string }>;
+}
+
+export function shouldPublish(
+  pkg: PackageManifest,
+  pending: PendingReleases,
+): boolean {
   if (pkg.private || !pending[pkg.name]) return false;
   if (pkg.version !== pending[pkg.name] || pkg.version === "0.0.0")
     throw new Error(
@@ -11,7 +31,10 @@ export function shouldPublish(pkg, pending) {
   return true;
 }
 
-export function validatePending(packages, pending) {
+export function validatePending(
+  packages: PackageManifest[],
+  pending: PendingReleases,
+): void {
   for (const name of Object.keys(pending)) {
     const pkg = packages.find((pkg) => pkg.name === name);
     if (!pkg || pkg.private)
@@ -23,9 +46,10 @@ export function validatePending(packages, pending) {
 }
 
 export function recoverTag(
-  tag,
-  target,
-  git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim(),
+  tag: string,
+  target: string | undefined,
+  git = (...args: string[]) =>
+    execFileSync("git", args, { encoding: "utf8" }).trim(),
 ) {
   if (!target) {
     console.log(
@@ -46,14 +70,14 @@ export function recoverTag(
   git("push", "origin", `refs/tags/${tag}`);
 }
 
-export async function publish() {
+export async function publish(): Promise<void> {
   if (process.env.NPM_PUBLISH_ENABLED !== "true")
     throw new Error(
       "Publishing is disabled. Configure npm trusted publishers before enabling NPM_PUBLISH_ENABLED.",
     );
   const { pending = {} } = JSON.parse(
     readFileSync(".changeset/release-state.json", "utf8"),
-  );
+  ) as ReleaseState;
   const packages = readdirSync("packages", { withFileTypes: true })
     .filter(
       (entry) =>
@@ -61,9 +85,9 @@ export async function publish() {
         existsSync(`packages/${entry.name}/package.json`),
     )
     .map((entry) => ({
-      ...JSON.parse(
+      ...(JSON.parse(
         readFileSync(`packages/${entry.name}/package.json`, "utf8"),
-      ),
+      ) as PackageManifest),
       directory: `packages/${entry.name}`,
     }));
   validatePending(packages, pending);
@@ -79,7 +103,10 @@ export async function publish() {
       throw new Error(
         `Registry lookup failed: ${pkg.name} (${response.status})`,
       );
-    const metadata = response.status === 404 ? {} : await response.json();
+    const metadata: RegistryMetadata =
+      response.status === 404
+        ? {}
+        : ((await response.json()) as RegistryMetadata);
     const published = metadata.versions?.[pkg.version];
     if (published) {
       console.log(`Already published: ${pkg.name}@${pkg.version}`);

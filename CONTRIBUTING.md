@@ -51,7 +51,7 @@ Use a Conventional Commit title so release automation can determine the change t
 - `docs: clarify installation`
 - `feat(pubnub)!: require the current SDK configuration`
 
-Explain breaking changes in the PR description and migration guide. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
+Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
 Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. See [releases](docs/releases.md) for how Conventional Commits become package-specific Changesets.
 
@@ -62,7 +62,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
 - `.github/workflows`: CI, dependency maintenance, and releases.
-- `docs`: migration and maintainer guides.
+- `docs`: maintainer guides.
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
 

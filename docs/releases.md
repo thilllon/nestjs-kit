@@ -2,6 +2,8 @@
 
 Packages have independent versions. Changesets is the single versioning engine; Conventional Commits determine release intent. There is no second semantic-release process competing to bump the same files.
 
+Two typed scripts connect those tools: `release-prepare.mts` detects publishable changes and creates the Changesets request; `release-publish.mts` enforces the persisted publication plan and retries only missing versions or tags. Both run through `tsx` and are typechecked with the repository tooling. Their regression tests use `release.test.ts`.
+
 ## From a change to npm
 
 1. Merge a PR with a Conventional Commit title into `main`.
@@ -12,7 +14,7 @@ Packages have independent versions. Changesets is the single versioning engine; 
 
 Unchanged packages keep their versions. A runtime dependency update can trigger a release for its consuming package. Repository maintenance alone does not bump every package. Changes to the shared TypeScript and tsdown build configurations affect all public packages. Test-only configuration and fixtures do not trigger releases.
 
-An explicit changeset can request a deliberate release, including a coordinated major migration. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
+An explicit changeset can request a deliberate release, including a coordinated major release. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
 
 ## One-time owner setup
 

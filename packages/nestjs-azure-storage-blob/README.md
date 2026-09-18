@@ -11,6 +11,8 @@ pnpm add nestjs-azure-storage-blob @azure/storage-blob
 
 The npm name remains unchanged. Supply an Azure Storage connection string through your application's configuration.
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register
 
 ```ts
@@ -97,4 +99,4 @@ Configure Azure Storage CORS for the browser origin, method, and headers. File b
 - `deleteFile()` / `deleteFileIfExists()`: remove a blob.
 - `downloadStream()`: get the SDK download response.
 
-[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [Migration guide](https://github.com/thilllon/nestjs-kit/blob/main/docs/migration.md)
+[Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

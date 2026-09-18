@@ -20,6 +20,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks. For build changes, also verify real consumer imports and Nest injection in both formats.
 - Remove obsolete files and redundant wrappers after checking their references; prefer maintained tool features over custom validation scripts.
 - Use Turbo streaming output, never TUI. Include shared build configuration in cache inputs and release change detection.
+- Keep necessary executable scripts typed as `.mts` and run them through `tsx`; tests remain `*.test.ts`. Include both in the root typecheck and remove redundant setup wrappers.
 - Prefer typed `.mts` configuration wherever the tool supports it. Keep required native formats such as `biome.json`, `turbo.json`, and `mise.toml`.
 
 ## Formatting and tests
@@ -30,7 +31,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Write unit tests for meaningful behavior: signing rules, configuration isolation, lifecycle management, error propagation and regressions. Do not add trivial framework/getter tests or tests mirroring the implementation.
 - Where middleware integration needs E2E coverage, provide Docker Compose services with health checks and `docker:up` / `docker:down` scripts. Use isolated local services; always clean up after tests.
 - Default unit tests must not require cloud credentials or network services. PostgreSQL E2E runs separately with `pnpm test:e2e`.
-- Maintain working package examples and migration notes for public behavior changes.
+- Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
 ## Verification and Git workflow
 

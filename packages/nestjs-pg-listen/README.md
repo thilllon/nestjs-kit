@@ -10,6 +10,8 @@ This package is being prepared for its first release. After publication, install
 pnpm add nestjs-pg-listen pg-listen pg
 ```
 
+Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+
 ## Register and receive notifications
 
 ```ts
