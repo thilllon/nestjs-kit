@@ -24,7 +24,19 @@ pnpm build
 pnpm test
 ```
 
-Run `pnpm format` to apply formatting. Run a single package's tests with, for example, `pnpm --filter @nestjs-kit/s3 test`. Tests use mocks and should run without cloud credentials or live PostgreSQL. Add focused regression coverage when changing behavior and update the package README when changing its public API.
+Run `pnpm format` to apply formatting. Biome covers all supported files throughout the repository, including root configuration and examples. Markdown and YAML use Prettier because [Biome does not yet support those languages](https://biomejs.dev/internals/language-support/). Generated files and dependencies follow `.gitignore`; source directories are not excluded. Prettier, commitlint, and Vitest use typed `.mts` configuration files.
+
+Run a single package's unit tests with, for example, `pnpm test:unit packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database.
+
+For real PostgreSQL integration tests, install Docker with Compose and run:
+
+```sh
+pnpm docker:up
+pnpm test:e2e
+pnpm docker:down
+```
+
+Compose starts an isolated PostgreSQL instance on `127.0.0.1:55432` and waits for its health check. The E2E suite verifies Drizzle queries, actual LISTEN/NOTIFY delivery, and connection cleanup. If the port is occupied, set `PGPORT` consistently for both Compose and the test command. Always stop the test services afterward; CI does so even on failure.
 
 Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
 
@@ -46,6 +58,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjskit__*`: packages published under `@nestjs-kit/*`.
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
+- `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: migration and maintainer guides.
 

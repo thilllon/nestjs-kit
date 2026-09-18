@@ -11,6 +11,10 @@ multi-ecosystem-groups:
 updates:
   - package-ecosystem: npm
     directory: /
+    # Keep runtime declarations aligned with the selected Node LTS major.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     groups:

@@ -191,13 +191,4 @@ describe("PgListenModule", () => {
     expect(handler).toHaveBeenCalledWith(error);
     await module.close();
   });
-
-  it("registers globally only when explicitly requested", () => {
-    expect(PgListenModule.register({}).global).toBe(false);
-    expect(PgListenModule.register({ isGlobal: true }).global).toBe(true);
-    expect(
-      PgListenModule.registerAsync({ isGlobal: true, useFactory: () => ({}) })
-        .global,
-    ).toBe(true);
-  });
 });
