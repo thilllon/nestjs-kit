@@ -98,6 +98,72 @@ For example, `S3_ENDPOINT` can be `https://s3.storage.example.com`. Available S3
 
 ## Named clients
 
-Pass `{ alias: 'archive' }` as the second argument to `register` or `registerAsync`, then inject with `@InjectS3Client('archive')`. Use distinct aliases for distinct clients. The same second argument accepts `{ global: true }` when application-wide registration is intended.
+Register the module once per endpoint and give each registration a distinct alias. A single consumer can inject both clients; each keeps its own endpoint, credentials and connection cleanup.
+
+This example uses `@nestjs/config` to load separate credentials for two S3-compatible services:
+
+```ts
+import { S3Client } from "@aws-sdk/client-s3";
+import { Injectable, Module } from "@nestjs/common";
+import { ConfigModule, ConfigService } from "@nestjs/config";
+import { InjectS3Client, S3Module } from "@nestjs-kit/s3";
+
+@Injectable()
+export class StorageService {
+  constructor(
+    @InjectS3Client("primary") readonly primary: S3Client,
+    @InjectS3Client("backup") readonly backup: S3Client,
+  ) {}
+}
+
+@Module({
+  imports: [
+    ConfigModule.forRoot(),
+    S3Module.registerAsync(
+      {
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          endpoint: config.getOrThrow<string>("PRIMARY_S3_ENDPOINT"),
+          region: config.getOrThrow<string>("PRIMARY_S3_REGION"),
+          forcePathStyle: true,
+          credentials: {
+            accessKeyId: config.getOrThrow<string>("PRIMARY_S3_ACCESS_KEY_ID"),
+            secretAccessKey: config.getOrThrow<string>(
+              "PRIMARY_S3_SECRET_ACCESS_KEY",
+            ),
+          },
+        }),
+      },
+      { alias: "primary" },
+    ),
+    S3Module.registerAsync(
+      {
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          endpoint: config.getOrThrow<string>("BACKUP_S3_ENDPOINT"),
+          region: config.getOrThrow<string>("BACKUP_S3_REGION"),
+          forcePathStyle: true,
+          credentials: {
+            accessKeyId: config.getOrThrow<string>("BACKUP_S3_ACCESS_KEY_ID"),
+            secretAccessKey: config.getOrThrow<string>(
+              "BACKUP_S3_SECRET_ACCESS_KEY",
+            ),
+          },
+        }),
+      },
+      { alias: "backup" },
+    ),
+  ],
+  providers: [StorageService],
+  exports: [StorageService],
+})
+export class StorageModule {}
+```
+
+The same `{ alias: "primary" }` second argument works with `register(options)` and with `useFactory`, `useClass` or `useExisting` async configuration. Keep the alias outside the factory result: Nest needs it when building injection tokens. Distinct endpoints must use distinct aliases; registering two unnamed clients does not make them independently selectable.
+
+An unnamed registration remains injectable with `@InjectS3Client()` and can coexist with named clients. The second argument also accepts `{ global: true }`; naming still determines which client is injected. Nest closes each registered client when the application shuts down. This API already supported named connections before the coordinated multi-connection major release.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
