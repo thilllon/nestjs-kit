@@ -12,6 +12,10 @@
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
-  }
+    "types": ["node"],
+    "rootDir": "${configDir}/src",
+    "outDir": "${configDir}/dist"
+  },
+  "include": ["${configDir}/src/**/*.ts"],
+  "exclude": ["${configDir}/src/**/*.test.ts"]
 }
