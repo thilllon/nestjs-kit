@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      sha: ${{ steps.pr.outputs.sha }}
+      pr: ${{ steps.pr.outputs.pr }}
+      base: ${{ steps.base.outputs.sha }}
+      tree: ${{ steps.pr.outputs.tree || steps.base.outputs.tree }}
+    env:
+      LEFTHOOK: "0"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: base
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - id: prepare
+        run: pnpm release:prepare
+      - name: Create or refresh release PR
+        id: pr
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B automation/releases
+          git add .changeset packages pnpm-lock.yaml
+          git commit -m 'chore(release): version changed packages'
+          git push --force-with-lease origin automation/releases
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            gh pr create --head automation/releases --base main --title 'chore(release): version changed packages' --body 'Automated Changesets version updates. The release workflow runs full CI against this exact commit before merging. npm publishing remains disabled until NPM_PUBLISH_ENABLED=true.'
+            pr=$(gh pr list --head automation/releases --base main --state open --json number --jq '.[0].number')
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha || needs.prepare.outputs.base }}
+
+  merge:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.changed == 'true'
+    outputs:
+      sha: ${{ steps.merge.outputs.sha }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_PR: ${{ needs.prepare.outputs.pr }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+      BASE_SHA: ${{ needs.prepare.outputs.base }}
+    steps:
+      - name: Merge only the validated commit on its validated base
+        id: merge
+        run: |
+          current=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+          test "$current" = "$BASE_SHA" || { echo 'main changed during validation; the next release run will refresh the PR.'; exit 1; }
+          gh pr merge "$RELEASE_PR" --squash --match-head-commit "$RELEASE_SHA" --delete-branch
+          merged=$(gh pr view "$RELEASE_PR" --json mergeCommit --jq .mergeCommit.oid)
+          test -n "$merged" && test "$merged" != null
+          echo "sha=$merged" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [prepare, validate, merge]
+    if: >-
+      always() && vars.NPM_PUBLISH_ENABLED == 'true' &&
+      needs.prepare.result == 'success' && needs.validate.result == 'success' &&
+      (needs.merge.result == 'success' || needs.prepare.outputs.changed == 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      LEFTHOOK: "0"
+      TURBO_UI: stream
+      NPM_PUBLISH_ENABLED: ${{ vars.NPM_PUBLISH_ENABLED }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.merge.outputs.sha || needs.prepare.outputs.base }}
+          fetch-depth: 0
+      - name: Verify merged tree matches validated tree
+        env:
+          VALIDATED_TREE: ${{ needs.prepare.outputs.tree }}
+        run: test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATED_TREE"
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm release:publish

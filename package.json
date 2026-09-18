@@ -15,13 +15,16 @@
     "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
     "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
     "check-types": "tsc -p tsconfig.tools.json && turbo run check-types",
-    "test": "vitest run",
+    "test": "vitest run && pnpm test:release",
     "test:unit": "vitest run",
     "hooks:install": "mise exec -- lefthook install",
     "commitlint": "commitlint",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down --volumes --remove-orphans",
-    "test:e2e": "vitest run --config vitest.e2e.config.mts"
+    "test:e2e": "vitest run --config vitest.e2e.config.mts",
+    "test:release": "node --test scripts/release.test.ts",
+    "release:prepare": "node scripts/release-prepare.mjs",
+    "release:publish": "node scripts/release-publish.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
@@ -44,5 +47,6 @@
     "typescript": "7.0.2",
     "unplugin-swc": "1.6.0",
     "vitest": "5.0.1"
-  }
+  },
+  "type": "module"
 }

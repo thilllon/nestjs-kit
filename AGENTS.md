@@ -46,6 +46,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 ## Releases and maintenance
 
 - Changesets is the single versioning engine. Conventional Commit analysis and publishable package changes drive independent version bumps and changelogs.
+- Honor explicit maintainer-requested coordinated releases through a changeset; combine manual and automatic requests into one bump per package.
 - Only changed packages are versioned/published. Do not introduce a competing semantic-release publisher or release unchanged packages for documentation-only edits.
 - npm publishing uses trusted-publisher OIDC and provenance. Leave `NPM_PUBLISH_ENABLED` disabled until the owner completes npm setup; new packages need an owner-authenticated first publication before trust can be configured.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.

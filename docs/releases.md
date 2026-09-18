@@ -8,9 +8,11 @@ Packages have independent versions. Changesets is the single versioning engine; 
 2. The release workflow examines commits since `.changeset/release-state.json` and identifies packages with publishable changes. Documentation, tests, and development-only dependency changes do not trigger releases.
 3. A breaking change (`!` or `BREAKING CHANGE`) requests a major bump; `feat` requests a minor bump; other publishable changes request a patch. Changesets updates only affected package versions and changelogs.
 4. Automation opens or refreshes `automation/releases`. It invokes the reusable CI workflow against that exact commit, then merges only if both its head and the original `main` base still match the validated revisions.
-5. When publishing is enabled, the workflow builds and checks package archives, compares the planned package versions in the release state with npm, and publishes only those planned versions absent from the registry. Published versions receive Git tags and npm provenance.
+5. When publishing is enabled, the workflow builds both module formats and runs tsdown’s strict publint/attw checks, compares the planned package versions in the release state with npm, and publishes only those planned versions absent from the registry. Published versions receive Git tags and npm provenance.
 
-Unchanged packages keep their versions. A runtime dependency update can trigger a release for its consuming package. Repository maintenance alone does not bump every package. Changes to the shared TypeScript build configuration affect all public packages.
+Unchanged packages keep their versions. A runtime dependency update can trigger a release for its consuming package. Repository maintenance alone does not bump every package. Changes to the shared TypeScript and tsdown build configurations affect all public packages. Test-only configuration and fixtures do not trigger releases.
+
+An explicit changeset can request a deliberate release, including a coordinated major migration. Changesets combines that request with automatically detected changes into one bump per package; it does not apply both bumps sequentially.
 
 ## One-time owner setup
 

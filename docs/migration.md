@@ -1,5 +1,11 @@
 # Migrating to NestJS Kit
 
+## Runtime and major versions
+
+All libraries require Node.js 24 or newer and NestJS 12. Repository development requires Node.js 24.11 or newer for the build tools; mise selects the current LTS. Libraries provide both ESM and CommonJS entry points with matching TypeScript declarations.
+
+The coordinated modernization release prepares `nestjs-azure-storage-blob@1.0.0`, `nestjs-drizzle-pg@2.0.0`, and `1.0.0` for each new `@nestjs-kit/*` package and `nestjs-pg-listen`. These are repository release versions; npm availability depends on completion of the owner’s publishing setup.
+
 ## Package names and directories
 
 | Previous name                    | New npm name             | Repository directory                 |
