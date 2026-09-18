@@ -54,7 +54,7 @@ export const {
           useFactory: (
             options: DrizzlePgModuleOptions,
             connection: Pool | Client,
-          ): NodePgDatabase<Record<string, never>> => {
+          ): NodePgDatabase<Record<string, unknown>> => {
             return drizzle(connection, options.drizzleConfig ?? {});
           },
         },

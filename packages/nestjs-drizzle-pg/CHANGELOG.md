@@ -1,5 +1,11 @@
 # nestjs-drizzle-pg
 
+## 2.0.2
+
+### Patch Changes
+
+- - nestjs-drizzle-pg: fix(drizzle): accept typed schemas and improve README (#463)
+
 ## 2.0.1
 
 ### Patch Changes
