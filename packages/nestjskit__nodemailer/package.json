@@ -1,0 +1,68 @@
+{
+  "name": "@nestjs-kit/nodemailer",
+  "version": "0.0.0",
+  "description": "Nodemailer transporters with NestJS dependency injection and lifecycle management",
+  "license": "ISC",
+  "author": "thilllon",
+  "type": "commonjs",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/nestjskit__nodemailer"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjskit__nodemailer",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "nodemailer",
+    "email",
+    "smtp"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts"
+  },
+  "module": "./dist/index.mjs",
+  "peerDependencies": {
+    "@nestjs/common": "^12.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "nodemailer": "^10.0.10"
+  },
+  "devDependencies": {
+    "@nestjs/common": "12.0.3",
+    "@nestjs/core": "12.0.3",
+    "@nestjs/testing": "12.0.3",
+    "nodemailer": "10.0.10"
+  }
+}
