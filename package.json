@@ -14,7 +14,7 @@
     "lint:fix": "biome lint --write .",
     "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
     "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
-    "check-types": "tsc -p tsconfig.tools.json && turbo run check-types",
+    "typecheck": "tsc -p tsconfig.tools.json && turbo run typecheck",
     "test": "vitest run && pnpm test:release",
     "test:unit": "vitest run",
     "hooks:install": "mise exec -- lefthook install",
@@ -26,6 +26,7 @@
     "release:prepare": "tsx scripts/release-prepare.mts",
     "release:publish": "tsx scripts/release-publish.mts"
   },
+  "type": "module",
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.5",
     "@biomejs/biome": "2.5.14",
@@ -48,6 +49,5 @@
     "typescript": "7.0.2",
     "unplugin-swc": "1.6.0",
     "vitest": "5.0.1"
-  },
-  "type": "module"
+  }
 }

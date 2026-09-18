@@ -21,7 +21,7 @@ The mise `postinstall` hook runs `lefthook install`, including on a repeated `mi
 ```sh
 pnpm lint
 pnpm format:check
-pnpm check-types
+pnpm typecheck
 pnpm build
 pnpm test
 ```

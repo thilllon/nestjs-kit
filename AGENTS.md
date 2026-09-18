@@ -14,6 +14,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Use mise and the current Node.js LTS. pnpm has no LTS channel: pin a supported stable version and keep the lockfile current.
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
+- Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Every library must build with tsdown to separate CJS and ESM outputs and matching declarations. Maintain conditional `require` and `import` exports.
 - Define `build` directly in each package's `package.json`; share options through `tsdown.config.mts`, not a build wrapper script.
@@ -37,7 +38,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Before implementation, record a plan and checklist in GitHub issues. Link implementation PRs to those issues and keep their status accurate.
 - Parallelize independent work when requested; isolate overlapping edits and validate the integrated result.
-- Run relevant checks: `pnpm lint`, `pnpm format:check`, `pnpm check-types`, `pnpm test`, and `pnpm build` (including strict publint/attw checks). Run Compose E2E for middleware changes.
+- Run relevant checks: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, and `pnpm build` (including strict publint/attw checks). Run Compose E2E for middleware changes.
 - Lefthook pre-commit runs lint, formatting and staged Gitleaks; commit-msg runs commitlint; pre-push runs build and typecheck. GitHub CI uses `jdx/mise-action` and runs tests.
 - Use Conventional Commit titles/messages. Mark breaking public/runtime requirements with `!` or a `BREAKING CHANGE:` footer.
 - Do NOT append `Co-Authored-By` lines to commit messages.
