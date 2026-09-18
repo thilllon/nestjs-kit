@@ -14,6 +14,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Use mise and the current Node.js LTS. pnpm has no LTS channel: pin a supported stable version and keep the lockfile current.
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
+- Order existing package.json scripts with `typecheck`, `build`, then `dev` first in the root and every package; do not add missing commands just for ordering.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
