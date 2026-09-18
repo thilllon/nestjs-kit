@@ -1,6 +1,6 @@
 # NestJS Kit
 
-Small NestJS modules for storage, media, PostgreSQL, and realtime messaging. Register the integration you need, inject it into your service, and keep using the underlying SDK.
+Small NestJS modules for storage, media, PostgreSQL, email, and realtime messaging. Register the integration you need, inject it into your service, and keep using the underlying SDK.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main&label=CI)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
@@ -15,8 +15,9 @@ Small NestJS modules for storage, media, PostgreSQL, and realtime messaging. Reg
 | `nestjs-azure-storage-blob` [(npm)](https://www.npmjs.com/package/nestjs-azure-storage-blob) | [![Monthly downloads for nestjs-azure-storage-blob](https://img.shields.io/npm/dm/nestjs-azure-storage-blob?logo=npm)](https://www.npmjs.com/package/nestjs-azure-storage-blob) | Blob storage operations and direct uploads through SAS URLs       | [README](packages/nestjs-azure-storage-blob/README.md) |
 | `nestjs-drizzle-pg` [(npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                 | [![Monthly downloads for nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg?logo=npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                         | Drizzle ORM with PostgreSQL pools or clients                      | [README](packages/nestjs-drizzle-pg/README.md)         |
 | `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle      | [README](packages/nestjs-pg-listen/README.md)          |
+| `@nestjs-kit/nodemailer` (first release pending)                                             | [![Monthly downloads for @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)      | Email delivery through configurable Nodemailer transports         | [README](packages/nestjskit__nodemailer/README.md)     |
 
-All six packages are available on npm. Azure and Drizzle keep their existing npm names.
+The six existing integrations are available on npm; Nodemailer is awaiting its first release. Azure and Drizzle keep their existing npm names.
 
 ## Quick start
 
