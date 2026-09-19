@@ -1,5 +1,11 @@
 # @nestjs-kit/s3
 
+## 7.0.0
+
+### Major Changes
+
+- 1db2a0a: Expose registration options through getS3OptionsToken(alias) instead of MODULE_OPTIONS_TOKEN or the generic getOptionsToken helper. Providers and the service constructor use the same namespaced helper; existing token values and named/default registration isolation remain unchanged.
+
 ## 6.0.0
 
 ### Major Changes
