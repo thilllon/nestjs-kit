@@ -1,19 +1,18 @@
 import { EventEmitter } from "node:events";
-import { Injectable, Logger, Module, type OnModuleInit } from "@nestjs/common";
+import {
+  ConsoleLogger,
+  Inject,
+  Injectable,
+  Logger,
+  Module,
+  type OnModuleInit,
+} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import createSubscriber, { type Subscriber } from "pg-listen";
-import {
-  InjectPgListen,
-  PG_LISTEN_SUBSCRIBER,
-  PgListenModule,
-} from "./pg-listen.module";
+import { PG_LISTEN_SUBSCRIBER, PgListenModule } from "./pg-listen.module";
 import { PgListenService } from "./pg-listen.service";
-import {
-  InjectPgListenService,
-  getPgListenServiceToken,
-  getPgListenSubscriberToken,
-} from "./index";
+import { getPgListenServiceToken, getPgListenSubscriberToken } from "./index";
 
 vi.mock("pg-listen", () => ({ default: vi.fn() }));
 
@@ -51,7 +50,10 @@ describe("PgListenModule", () => {
     const received = vi.fn();
     @Injectable()
     class Consumer implements OnModuleInit {
-      constructor(@InjectPgListen() readonly client: Subscriber) {}
+      constructor(
+        @Inject(getPgListenSubscriberToken()) readonly client: Subscriber,
+      ) {}
+
       onModuleInit() {
         this.client.notifications.on("updates", received);
       }
@@ -105,15 +107,22 @@ describe("PgListenModule", () => {
       @Injectable()
       class Consumer {
         constructor(
-          @InjectPgListen() readonly defaultClient: Subscriber,
-          @InjectPgListen("") readonly emptyAliasClient: Subscriber,
-          @InjectPgListen("default") readonly explicitDefaultClient: Subscriber,
-          @InjectPgListen("audit") readonly auditClient: Subscriber,
-          @InjectPgListen("jobs") readonly jobsClient: Subscriber,
-          @InjectPgListenService() readonly defaultService: PgListenService,
-          @InjectPgListenService("audit")
+          @Inject(getPgListenSubscriberToken())
+          readonly defaultClient: Subscriber,
+          @Inject(getPgListenSubscriberToken(""))
+          readonly emptyAliasClient: Subscriber,
+          @Inject(getPgListenSubscriberToken("default"))
+          readonly explicitDefaultClient: Subscriber,
+          @Inject(getPgListenSubscriberToken("audit"))
+          readonly auditClient: Subscriber,
+          @Inject(getPgListenSubscriberToken("jobs"))
+          readonly jobsClient: Subscriber,
+          @Inject(getPgListenServiceToken())
+          readonly defaultService: PgListenService,
+          @Inject(getPgListenServiceToken("audit"))
           readonly auditService: PgListenService,
-          @InjectPgListenService("jobs") readonly jobsService: PgListenService,
+          @Inject(getPgListenServiceToken("jobs"))
+          readonly jobsService: PgListenService,
         ) {}
       }
       const auditOptions = {
@@ -180,8 +189,9 @@ describe("PgListenModule", () => {
       expect(jobs.close).not.toHaveBeenCalled();
       expect(subscriber.close).not.toHaveBeenCalled();
       await module.close();
-      for (const client of Object.values(clients))
+      for (const client of Object.values(clients)) {
         expect(client.close).toHaveBeenCalledOnce();
+      }
     },
   );
 
@@ -281,6 +291,111 @@ describe("PgListenModule", () => {
     await Promise.all([assertion, shutdown]);
     await module.close();
     expect(subscriber.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(["overrideLogger", "useLogger"] as const)(
+    "routes its default logger through Nest %s, including startup cleanup errors",
+    async (mode) => {
+      const logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const module = await Test.createTestingModule({
+        imports: [PgListenModule.register({})],
+      }).compile();
+      try {
+        if (mode === "overrideLogger") {
+          Logger.overrideLogger(logger);
+        } else {
+          module.useLogger(logger);
+        }
+        const runtimeError = new Error("subscriber reconnect exhausted");
+        subscriber.events.emit("error", runtimeError);
+        expect(logger.error).toHaveBeenCalledWith(
+          runtimeError.message,
+          runtimeError.stack,
+          PgListenService.name,
+        );
+        const startupError = new Error("startup connection failed");
+        const cleanupError = new Error("startup cleanup failed");
+        subscriber.connect.mockRejectedValueOnce(startupError);
+        subscriber.close.mockRejectedValueOnce(cleanupError);
+        await expect(module.init()).rejects.toBe(startupError);
+        expect(logger.error).toHaveBeenCalledWith(
+          "Failed to close PostgreSQL subscriber after startup failure",
+          cleanupError,
+          PgListenService.name,
+        );
+        await module.get(PgListenService).onModuleDestroy();
+      } finally {
+        Logger.overrideLogger(new ConsoleLogger());
+      }
+    },
+  );
+
+  it("isolates injected loggers and preserves errors and cleanup for named registrations", async () => {
+    const audit = mockSubscriber();
+    const jobs = mockSubscriber();
+    vi.mocked(createSubscriber).mockImplementation(
+      (connection) =>
+        (connection?.application_name === "audit"
+          ? audit
+          : jobs) as unknown as Subscriber,
+    );
+    const auditLogger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const jobsLogger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const loggerToken = Symbol("AUDIT_LOGGER");
+    @Module({
+      providers: [{ provide: loggerToken, useValue: auditLogger }],
+      exports: [loggerToken],
+    })
+    class LoggingModule {}
+    const module = await Test.createTestingModule({
+      imports: [
+        PgListenModule.registerAsync({
+          alias: "audit",
+          imports: [LoggingModule],
+          inject: [loggerToken],
+          useFactory: (logger: typeof auditLogger) => ({
+            logger,
+            connection: { application_name: "audit" },
+          }),
+        }),
+        PgListenModule.register({ alias: "jobs", logger: jobsLogger }),
+      ],
+    }).compile();
+    const auditService = module.get<PgListenService>(
+      getPgListenServiceToken("audit"),
+    );
+    const jobsService = module.get<PgListenService>(
+      getPgListenServiceToken("jobs"),
+    );
+    const auditError = new Error("audit exhausted");
+    const jobsError = new Error("jobs exhausted");
+    audit.events.emit("error", auditError);
+    jobs.events.emit("error", jobsError);
+    expect(auditLogger.error).toHaveBeenCalledExactlyOnceWith(
+      auditError.message,
+      auditError.stack,
+    );
+    expect(jobsLogger.error).toHaveBeenCalledExactlyOnceWith(
+      jobsError.message,
+      jobsError.stack,
+    );
+    const startupError = new Error("audit unavailable");
+    const cleanupError = new Error("audit cleanup failed");
+    audit.connect.mockRejectedValueOnce(startupError);
+    audit.close.mockRejectedValueOnce(cleanupError);
+    await expect(auditService.onApplicationBootstrap()).rejects.toBe(
+      startupError,
+    );
+    expect(auditLogger.error).toHaveBeenLastCalledWith(
+      "Failed to close PostgreSQL subscriber after startup failure",
+      cleanupError,
+    );
+    expect(jobsLogger.error).toHaveBeenCalledTimes(1);
+    await jobsService.onApplicationBootstrap();
+    expect(jobs.close).not.toHaveBeenCalled();
+    await module.close();
+    expect(audit.close).toHaveBeenCalledTimes(2);
+    expect(jobs.close).toHaveBeenCalledOnce();
   });
 
   it("logs fatal error events and permits additional application error handlers", async () => {

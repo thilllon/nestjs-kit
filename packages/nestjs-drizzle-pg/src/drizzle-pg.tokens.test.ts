@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -6,9 +6,9 @@ import { expect, it, vi } from "vitest";
 import {
   DrizzlePgModule,
   DrizzlePgService,
-  InjectDrizzlePg,
-  InjectDrizzlePgService,
-  InjectPgConnection,
+  getDrizzlePgToken,
+  getDrizzlePgServiceToken,
+  getPgConnectionToken,
 } from "./index";
 
 it.each([false, true])(
@@ -26,6 +26,9 @@ it.each([false, true])(
       "service:primary",
       "default:",
       "DEFAULT",
+      "database_primary",
+      "connection_primary",
+      "service_default",
     ];
     @Injectable()
     class Consumer {
@@ -35,9 +38,13 @@ it.each([false, true])(
       }
     }
     for (const [index, alias] of aliases.entries()) {
-      InjectDrizzlePg(alias)(Consumer, undefined, index * 3);
-      InjectPgConnection(alias)(Consumer, undefined, index * 3 + 1);
-      InjectDrizzlePgService(alias)(Consumer, undefined, index * 3 + 2);
+      Inject(getDrizzlePgToken(alias))(Consumer, undefined, index * 3);
+      Inject(getPgConnectionToken(alias))(Consumer, undefined, index * 3 + 1);
+      Inject(getDrizzlePgServiceToken(alias))(
+        Consumer,
+        undefined,
+        index * 3 + 2,
+      );
     }
     const registrations = aliases.map((alias, index) => {
       const options = {
@@ -53,7 +60,9 @@ it.each([false, true])(
           })
         : DrizzlePgModule.register({ ...options, alias });
     });
-    if (reverse) registrations.reverse();
+    if (reverse) {
+      registrations.reverse();
+    }
     const app = await Test.createTestingModule({
       imports: registrations,
       providers: [Consumer],
@@ -79,6 +88,8 @@ it.each([false, true])(
     } finally {
       await app.close();
     }
-    for (const close of closing) expect(close).toHaveBeenCalledOnce();
+    for (const close of closing) {
+      expect(close).toHaveBeenCalledOnce();
+    }
   },
 );

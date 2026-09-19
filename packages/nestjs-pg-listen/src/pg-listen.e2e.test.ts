@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { Injectable, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { Client } from "pg";
 import type { Subscriber } from "pg-listen";
 import { expect, it } from "vitest";
 import {
-  InjectPgListen,
-  InjectPgListenService,
+  getPgListenSubscriberToken,
+  getPgListenServiceToken,
   PgListenModule,
   PgListenService,
 } from "./index";
@@ -26,7 +26,11 @@ it("delivers JSON notifications from an independent SQL connection and releases 
   };
   @Injectable()
   class Notifications implements OnModuleInit {
-    constructor(@InjectPgListen() private readonly subscriber: Subscriber) {}
+    constructor(
+      @Inject(getPgListenSubscriberToken())
+      private readonly subscriber: Subscriber,
+    ) {}
+
     onModuleInit() {
       this.subscriber.notifications.on(channel, (payload: unknown) =>
         received.push(payload),
@@ -102,10 +106,13 @@ it("keeps named subscribers, channel delivery and connection shutdown independen
   @Injectable()
   class Notifications implements OnModuleInit {
     constructor(
-      @InjectPgListen() readonly defaultClient: Subscriber,
-      @InjectPgListen("audit") readonly auditClient: Subscriber,
-      @InjectPgListenService("audit") readonly auditService: PgListenService,
+      @Inject(getPgListenSubscriberToken()) readonly defaultClient: Subscriber,
+      @Inject(getPgListenSubscriberToken("audit"))
+      readonly auditClient: Subscriber,
+      @Inject(getPgListenServiceToken("audit"))
+      readonly auditService: PgListenService,
     ) {}
+
     onModuleInit() {
       // Observe both channels on both clients to catch accidental subscription sharing.
       for (const channel of [defaultChannel, auditChannel]) {

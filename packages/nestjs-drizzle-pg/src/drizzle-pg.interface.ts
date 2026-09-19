@@ -19,16 +19,16 @@ export const defaultTokenAlias = "default";
 export const getDrizzlePgToken = (name = defaultTokenAlias): string =>
   !name || name === defaultTokenAlias
     ? "DRIZZLE_PG_default"
-    : `DRIZZLE_PG:database:${name}`;
+    : `DRIZZLE_PG:database_${name}`;
 
 export const getPgConnectionToken = (name = defaultTokenAlias): string =>
   !name || name === defaultTokenAlias
     ? "DRIZZLE_PG_CONNECTION_default"
-    : `DRIZZLE_PG:connection:${name}`;
+    : `DRIZZLE_PG:connection_${name}`;
 
 export const getDrizzlePgServiceToken = (
   name = defaultTokenAlias,
 ): string | typeof DrizzlePgService =>
   !name || name === defaultTokenAlias
     ? DrizzlePgService
-    : `DRIZZLE_PG:service:${name}`;
+    : `DRIZZLE_PG:service_${name}`;

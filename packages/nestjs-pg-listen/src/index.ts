@@ -1,8 +1,6 @@
 export {
   PgListenModule,
   PG_LISTEN_SUBSCRIBER,
-  InjectPgListen,
-  InjectPgListenService,
 } from "./pg-listen.module";
 export { PgListenService } from "./pg-listen.service";
 export {

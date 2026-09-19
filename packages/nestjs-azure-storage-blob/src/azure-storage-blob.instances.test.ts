@@ -6,11 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AzureStorageBlobModule,
   AzureStorageBlobService,
-  InjectAzureStorageBlobService,
-  InjectStorageBlob,
-  type ModuleOptions,
   getAzureStorageBlobServiceToken,
   getStorageBlobClientToken,
+  type ModuleOptions,
 } from "./index";
 
 const optionsFor = (account: string): ModuleOptions => ({
@@ -39,13 +37,16 @@ class ConfigurationModule {}
 @Injectable()
 class MultipleAccounts {
   constructor(
-    @InjectStorageBlob() readonly defaultClient: BlobServiceClient,
+    @Inject(getStorageBlobClientToken())
+    readonly defaultClient: BlobServiceClient,
     readonly defaultService: AzureStorageBlobService,
-    @InjectStorageBlob("first") readonly firstClient: BlobServiceClient,
-    @InjectAzureStorageBlobService("first")
+    @Inject(getStorageBlobClientToken("first"))
+    readonly firstClient: BlobServiceClient,
+    @Inject(getAzureStorageBlobServiceToken("first"))
     readonly firstService: AzureStorageBlobService,
-    @InjectStorageBlob("second") readonly secondClient: BlobServiceClient,
-    @InjectAzureStorageBlobService("second")
+    @Inject(getStorageBlobClientToken("second"))
+    readonly secondClient: BlobServiceClient,
+    @Inject(getAzureStorageBlobServiceToken("second"))
     readonly secondService: AzureStorageBlobService,
   ) {}
 }
@@ -88,13 +89,15 @@ describe("Azure account isolation", () => {
     async (mode) => {
       const named = (["first", "second"] as const).map((alias) => {
         const options = optionsFor(alias);
-        if (mode === "sync")
+        if (mode === "sync") {
           return AzureStorageBlobModule.register(options, { alias });
-        if (mode === "factory")
+        }
+        if (mode === "factory") {
           return AzureStorageBlobModule.registerAsync(
             { useFactory: async () => options },
             { alias },
           );
+        }
         const configuration =
           alias === "first" ? FirstConfiguration : SecondConfiguration;
         return AzureStorageBlobModule.registerAsync(
@@ -154,6 +157,7 @@ describe("Azure account isolation", () => {
       @Injectable({ scope: Scope.REQUEST })
       class RequestConfiguration {
         constructor(@Inject(REQUEST) readonly request: { account: string }) {}
+
         createModuleOptions() {
           return optionsFor(this.request.account);
         }
