@@ -274,3 +274,7 @@ For a complete list of types and less common helpers, see the [source](https://g
 ## Injection API changes
 
 Package-specific injection decorators have been removed. Import `Inject` from `@nestjs/common` and pass `getStorageBlobClientToken(alias)` or `getAzureStorageBlobServiceToken(alias)`. Unnamed and empty aliases preserve the original default tokens and service class. Nonempty aliases now use an underscore suffix (`STORAGE_BLOB_CLIENT_<alias>`, `STORAGE_BLOB_OPTIONS_<alias>`, `STORAGE_BLOB_SERVICE_<alias>`), replacing the previous colon separator. Use the public helpers rather than constructing token strings.
+
+## Options tokens
+
+Use `getAzureStorageBlobOptionsToken(alias?)` when a custom provider needs a registration’s options token. It replaces the generic `MODULE_OPTIONS_TOKEN` export and `getStorageBlobOptionsToken()`. Default and named token values are unchanged, and named option providers remain exported by their corresponding registration. The helper has no service dependency, so it is safe in injection decorators in both module formats.

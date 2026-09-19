@@ -15,7 +15,7 @@ import {
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   MODULE_CLIENT_TOKEN,
-  MODULE_OPTIONS_TOKEN,
+  getAzureStorageBlobOptionsToken,
 } from "./azure-storage-blob.constants";
 import type {
   GetAccountSasUrlResponse,
@@ -35,7 +35,9 @@ export class AzureStorageBlobService {
   constructor(
     @Inject(MODULE_CLIENT_TOKEN)
     private readonly blobServiceClient: BlobServiceClient,
-    @Optional() @Inject(MODULE_OPTIONS_TOKEN) options?: ModuleOptions,
+    @Optional()
+    @Inject(getAzureStorageBlobOptionsToken())
+    options?: ModuleOptions,
   ) {
     this.containerName =
       options?.containerName ?? process.env.NESTJS_STORAGE_BLOB_CONTAINER;
