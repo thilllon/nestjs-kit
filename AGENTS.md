@@ -2,6 +2,11 @@
 
 Keep this file current as maintainer decisions change. `CLAUDE.md` imports this file; do not duplicate the rules there.
 
+## Repository language
+
+- Write repository documentation, code comments, automated reviews, commit messages, and issue/PR titles and bodies in English. The project does not plan Korean-language support or localized documentation.
+- Keep conversation language independent: respond to the user in their preferred language without applying it to repository content.
+
 ## Package identities
 
 - Preserve `nestjs-azure-storage-blob` and `nestjs-drizzle-pg`, including their existing folder names.
