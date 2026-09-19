@@ -18,12 +18,12 @@ Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
 
 ```ts
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Injectable, Module } from "@nestjs/common";
-import { S3Module, InjectS3Client } from "@nestjs-kit/s3";
+import { Inject, Injectable, Module } from "@nestjs/common";
+import { S3Module, MODULE_CLIENT_TOKEN } from "@nestjs-kit/s3";
 
 @Injectable()
 export class FilesService {
-  constructor(@InjectS3Client() private readonly client: S3Client) {}
+  constructor(@Inject(MODULE_CLIENT_TOKEN) private readonly client: S3Client) {}
 
   download(bucket: string, key: string) {
     return this.client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -104,15 +104,15 @@ This example uses `@nestjs/config` to load separate credentials for two S3-compa
 
 ```ts
 import { S3Client } from "@aws-sdk/client-s3";
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import { InjectS3Client, S3Module } from "@nestjs-kit/s3";
+import { getClientToken, S3Module } from "@nestjs-kit/s3";
 
 @Injectable()
 export class StorageService {
   constructor(
-    @InjectS3Client("primary") readonly primary: S3Client,
-    @InjectS3Client("backup") readonly backup: S3Client,
+    @Inject(getClientToken("primary")) readonly primary: S3Client,
+    @Inject(getClientToken("backup")) readonly backup: S3Client,
   ) {}
 }
 
@@ -164,6 +164,6 @@ export class StorageModule {}
 
 The same `{ alias: "primary" }` second argument works with `register(options)` and with `useFactory`, `useClass` or `useExisting` async configuration. Keep the alias outside the factory result: Nest needs it when building injection tokens. Distinct endpoints must use distinct aliases; registering two unnamed clients does not make them independently selectable.
 
-An unnamed registration remains injectable with `@InjectS3Client()` and can coexist with named clients. The second argument also accepts `{ global: true }`; naming still determines which client is injected. Nest closes each registered client when the application shuts down. This API already supported named connections before the coordinated multi-connection major release.
+An unnamed registration remains injectable with `@Inject(MODULE_CLIENT_TOKEN)` and can coexist with named clients. The second argument also accepts `{ global: true }`; naming still determines which client is injected. Nest closes each registered client when the application shuts down. Nonempty aliases use an underscore suffix, for example `S3_MODULE_CLIENT_TOKEN_primary`; empty aliases keep the default token. Use the exported helpers for named clients and options rather than constructing token strings yourself. `MODULE_OPTIONS_TOKEN` and `getOptionsToken(alias)` expose registration options through the same Nest `Inject` API.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
