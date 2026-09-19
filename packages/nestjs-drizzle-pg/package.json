@@ -1,6 +1,6 @@
 {
   "name": "nestjs-drizzle-pg",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "Drizzle ORM and PostgreSQL integration for NestJS",
   "license": "ISC",
   "author": "thilllon",
