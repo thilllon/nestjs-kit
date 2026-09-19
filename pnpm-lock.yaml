@@ -352,7 +352,7 @@ importers:
         specifier: 10.0.10
         version: 10.0.10
 
-  packages/nestjskit__pubnub:
+  packages/nestjs-pubnub:
     dependencies:
       reflect-metadata:
         specifier: ^0.2.2

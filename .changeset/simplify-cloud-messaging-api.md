@@ -1,6 +1,6 @@
 ---
 "@nestjs-kit/cloudinary": major
-"@nestjs-kit/pubnub": major
+"nestjs-pubnub": major
 "@nestjs-kit/nodemailer": major
 ---
 

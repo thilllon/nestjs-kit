@@ -1,5 +1,5 @@
 {
-  "name": "@nestjs-kit/pubnub",
+  "name": "nestjs-pubnub",
   "version": "3.0.0",
   "description": "PubNub realtime messaging integration for NestJS",
   "license": "ISC",
@@ -36,9 +36,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/thilllon/nestjs-kit.git",
-    "directory": "packages/nestjskit__pubnub"
+    "directory": "packages/nestjs-pubnub"
   },
-  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjskit__pubnub",
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-pubnub",
   "bugs": {
     "url": "https://github.com/thilllon/nestjs-kit/issues"
   },

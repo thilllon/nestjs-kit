@@ -1,7 +1,7 @@
-# @nestjs-kit/pubnub
+# nestjs-pubnub
 
-[![npm version](https://img.shields.io/npm/v/%40nestjs-kit%2Fpubnub)](https://www.npmjs.com/package/@nestjs-kit/pubnub)
-[![npm monthly downloads](https://img.shields.io/npm/dm/%40nestjs-kit%2Fpubnub)](https://www.npmjs.com/package/@nestjs-kit/pubnub)
+[![npm version](https://img.shields.io/npm/v/nestjs-pubnub)](https://www.npmjs.com/package/nestjs-pubnub)
+[![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-pubnub)](https://www.npmjs.com/package/nestjs-pubnub)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
 An injectable PubNub client for NestJS. `PubNubService` extends the SDK client, so publishing and subscription APIs remain available.
@@ -9,7 +9,7 @@ An injectable PubNub client for NestJS. `PubNubService` extends the SDK client, 
 Install it in your NestJS application:
 
 ```sh
-pnpm add @nestjs-kit/pubnub pubnub
+pnpm add nestjs-pubnub pubnub
 ```
 
 Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
@@ -18,7 +18,7 @@ Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
 
 ```ts
 import { Module } from "@nestjs/common";
-import { PubNubModule } from "@nestjs-kit/pubnub";
+import { PubNubModule } from "nestjs-pubnub";
 
 @Module({
   imports: [
@@ -40,7 +40,7 @@ With `@nestjs/config` installed, place this in your module's `imports`:
 
 ```ts
 import { ConfigModule, ConfigService } from "@nestjs/config";
-import { PubNubModule } from "@nestjs-kit/pubnub";
+import { PubNubModule } from "nestjs-pubnub";
 
 PubNubModule.registerAsync({
   imports: [ConfigModule.forRoot()],
@@ -63,7 +63,7 @@ import {
   getPubNubClientToken,
   PubNubModule,
   PubNubService,
-} from "@nestjs-kit/pubnub";
+} from "nestjs-pubnub";
 
 @Injectable()
 class AccountNotifications {
@@ -108,7 +108,7 @@ Register this service in the module that imports `PubNubModule`:
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { PubNubService } from "@nestjs-kit/pubnub";
+import { PubNubService } from "nestjs-pubnub";
 
 @Injectable()
 export class NotificationsService {
