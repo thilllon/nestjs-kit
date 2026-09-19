@@ -239,3 +239,7 @@ Use Drizzle itself for queries, transactions and migrations. This package suppli
 ## Project
 
 [Report an issue](https://github.com/thilllon/nestjs-kit/issues/new/choose) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [License](https://github.com/thilllon/nestjs-kit/blob/main/LICENSE)
+
+## Options token
+
+Use `getDrizzlePgOptionsToken()` when extending a registration with providers that need its options. Generic `MODULE_OPTIONS_TOKEN` is not part of the public API. The helper returns the existing Nest configurable-module token and deliberately accepts no alias: Nest keeps that provider local to each dynamic module registration. It does not export the options provider to importing modules or change registration visibility. Keep additional providers inside the registration that owns those options.

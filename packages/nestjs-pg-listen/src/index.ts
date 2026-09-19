@@ -6,6 +6,7 @@ export { PgListenService } from "./pg-listen.service";
 export {
   type PgListenModuleOptions,
   type PgListenModuleExtras,
+  getPgListenOptionsToken,
   OPTIONS_TYPE,
   ASYNC_OPTIONS_TYPE,
 } from "./pg-listen.module-definition";

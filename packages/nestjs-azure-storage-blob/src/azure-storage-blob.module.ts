@@ -1,3 +1,4 @@
+import { getAzureStorageBlobOptionsToken } from "./azure-storage-blob.constants";
 import { BlobServiceClient } from "@azure/storage-blob";
 import {
   type DynamicModule,
@@ -16,7 +17,6 @@ import { AzureStorageBlobService } from "./azure-storage-blob.service";
 import {
   getAzureStorageBlobServiceToken,
   getStorageBlobClientToken,
-  getStorageBlobOptionsToken,
 } from "./azure-storage-blob.tokens";
 
 @Module({})
@@ -28,7 +28,7 @@ export class AzureStorageBlobModule {
     return this.createModule(
       [
         {
-          provide: getStorageBlobOptionsToken(extras?.alias),
+          provide: getAzureStorageBlobOptionsToken(extras?.alias),
           useValue: options,
         },
       ],
@@ -50,7 +50,7 @@ export class AzureStorageBlobModule {
     optionsProviders: Provider[],
     extras?: ExtraModuleOptions,
   ): DynamicModule {
-    const optionsToken = getStorageBlobOptionsToken(extras?.alias);
+    const optionsToken = getAzureStorageBlobOptionsToken(extras?.alias);
     const clientToken = getStorageBlobClientToken(extras?.alias);
     const serviceToken = getAzureStorageBlobServiceToken(extras?.alias);
     return {
@@ -80,7 +80,7 @@ export class AzureStorageBlobModule {
     options: AsyncModuleOptions,
     extras?: ExtraModuleOptions,
   ): Provider[] {
-    const token = getStorageBlobOptionsToken(extras?.alias);
+    const token = getAzureStorageBlobOptionsToken(extras?.alias);
     if (options.useFactory) {
       return [
         {
