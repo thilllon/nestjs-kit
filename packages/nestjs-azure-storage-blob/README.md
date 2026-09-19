@@ -231,21 +231,37 @@ export class ContainersService {
 
 Register this provider in a module that imports `AzureStorageBlobModule`. You can also obtain the same client through `AzureStorageBlobService.getClient()`.
 
+### Direct blob operations
+
+The forwarding-only `deleteFile()`, `deleteFileIfExists()` and `downloadStream()` helpers have been removed. Obtain a blob client from the injected client or `storage.getClient()`, then call the SDK directly:
+
+```ts
+const blob = storage
+  .getClient()
+  .getContainerClient(container)
+  .getBlockBlobClient(blobName);
+```
+
+| Removed helper                            | SDK replacement                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------- |
+| `deleteFile(container, blobName)`         | `await blob.delete()`                                                 |
+| `deleteFileIfExists(container, blobName)` | `await blob.deleteIfExists()`                                         |
+| `downloadStream(container, blobName)`     | `await blob.download()`; read `readableStreamBody` from its response. |
+
+These are the same SDK operations the removed methods called. Their responses and errors remain the SDK's own, and direct access also lets you supply SDK-specific request options. The adapter retains its SAS, upload-request and collected-list helpers.
+
 ## API reference
 
 All methods below belong to [`AzureStorageBlobService`](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-azure-storage-blob/src/azure-storage-blob.service.ts). Optional arguments are marked with `?`.
 
-| Method                                                                 | Result                                                                           |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `getBlockBlobSasUrl(container, blob, permissions?, options?)`          | Promise of `{ sasUrl, headers }` for one blob. Includes the upload header.       |
-| `getContainerSasUrl(container, permissions?, options?)`                | Promise of `{ sasUrl, headers }` for a container.                                |
-| `getAccountSasUrl(expiresOn?, permissions?, resourceTypes?, options?)` | `{ sasUrl, headers }` for account-level access; synchronous.                     |
-| `getUploadable(container, blob, expiresIn?)`                           | Promise of paired upload and download request details.                           |
-| `listFiles(prefix, container)`                                         | Promise of an array of Azure `BlobItem` objects.                                 |
-| `deleteFile(container, blob)`                                          | Delete a blob; returns the SDK response.                                         |
-| `deleteFileIfExists(container, blob)`                                  | Delete a blob if present; returns the SDK response.                              |
-| `downloadStream(container, blob)`                                      | Promise of the SDK download response, including `readableStreamBody` in Node.js. |
-| `getClient()`                                                          | The configured Azure `BlobServiceClient`.                                        |
+| Method                                                                 | Result                                                                     |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `getBlockBlobSasUrl(container, blob, permissions?, options?)`          | Promise of `{ sasUrl, headers }` for one blob. Includes the upload header. |
+| `getContainerSasUrl(container, permissions?, options?)`                | Promise of `{ sasUrl, headers }` for a container.                          |
+| `getAccountSasUrl(expiresOn?, permissions?, resourceTypes?, options?)` | `{ sasUrl, headers }` for account-level access; synchronous.               |
+| `getUploadable(container, blob, expiresIn?)`                           | Promise of paired upload and download request details.                     |
+| `listFiles(prefix, container)`                                         | Promise of an array of Azure `BlobItem` objects.                           |
+| `getClient()`                                                          | The configured Azure `BlobServiceClient`.                                  |
 
 Blob and container SAS URLs default to a **five-minute expiry** unless you provide `expiresOn` or a stored access policy `identifier`. Blob permissions default to `read` and `create`; container and account permissions default to `read`. Pass explicit permissions for the intended operation.
 

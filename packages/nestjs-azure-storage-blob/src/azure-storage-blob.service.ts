@@ -207,25 +207,4 @@ export class AzureStorageBlobService {
     }
     return paths;
   }
-
-  async deleteFile(container: string, blob: string) {
-    return this.blobServiceClient
-      .getContainerClient(container)
-      .getBlockBlobClient(blob)
-      .delete();
-  }
-
-  async deleteFileIfExists(container: string, blob: string) {
-    return this.blobServiceClient
-      .getContainerClient(container)
-      .getBlockBlobClient(blob)
-      .deleteIfExists();
-  }
-
-  async downloadStream(container: string, blob: string) {
-    return this.blobServiceClient
-      .getContainerClient(container)
-      .getBlockBlobClient(blob)
-      .download();
-  }
 }
