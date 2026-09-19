@@ -22,7 +22,7 @@ import { Inject, Injectable, Module } from "@nestjs/common";
 import { S3Module, MODULE_CLIENT_TOKEN } from "@nestjs-kit/s3";
 
 @Injectable()
-export class FilesService {
+export class FileService {
   constructor(@Inject(MODULE_CLIENT_TOKEN) private readonly client: S3Client) {}
 
   download(bucket: string, key: string) {
@@ -32,10 +32,10 @@ export class FilesService {
 
 @Module({
   imports: [S3Module.register({ region: "ap-northeast-2" })],
-  providers: [FilesService],
-  exports: [FilesService],
+  providers: [FileService],
+  exports: [FileService],
 })
-export class FilesModule {}
+export class FileModule {}
 ```
 
 Options follow `S3ClientConfig`, including credential providers, `endpoint`, and `forcePathStyle`. Omit `credentials` to use the SDK's default provider chain.
