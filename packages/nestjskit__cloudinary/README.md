@@ -57,21 +57,22 @@ CloudinaryModule.registerAsync({
 
 ## Multiple accounts and endpoints
 
-Use a distinct `alias` for each account. `InjectCloudinary(alias)` injects a `CloudinaryService` whose upload, ping and signing operations use that registration's configuration. `alias` and `global` are Nest module settings: declare them beside `useFactory`, not in its returned configuration. The factory returns Cloudinary options and, optionally, the service setting `pingOnInit`. For synchronous registration, include all these settings in the same object.
+Use a distinct `alias` for each account. `@Inject(getCloudinaryToken(alias))` injects a `CloudinaryService` whose upload, ping and signing operations use that registration's configuration. `alias` and `global` are Nest module settings: declare them beside `useFactory`, not in its returned configuration. The factory returns Cloudinary options and, optionally, the service setting `pingOnInit`. For synchronous registration, include all these settings in the same object.
 
 ```ts
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import {
   CloudinaryModule,
   CloudinaryService,
-  InjectCloudinary,
+  getCloudinaryToken,
 } from "@nestjs-kit/cloudinary";
 
 @Injectable()
 class AccountMedia {
   constructor(
-    @InjectCloudinary("primary") readonly primary: CloudinaryService,
-    @InjectCloudinary("regional") readonly regional: CloudinaryService,
+    @Inject(getCloudinaryToken("primary")) readonly primary: CloudinaryService,
+    @Inject(getCloudinaryToken("regional"))
+    readonly regional: CloudinaryService,
   ) {}
 }
 
@@ -109,7 +110,7 @@ Set credentials for both accounts. Use a regional `upload_prefix` only for an ac
 Register this service in the module that imports `CloudinaryModule`:
 
 ```ts
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { CloudinaryService } from "@nestjs-kit/cloudinary";
 
 @Injectable()
@@ -133,7 +134,7 @@ The result contains the upload URL, timestamp, signature, API key, and upload op
 `uploadFile(file, uploadOptions?)` sends `file.buffer` unchanged through the Cloudinary SDK. Pass Cloudinary transformations explicitly in the upload options:
 
 ```ts
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { CloudinaryService, type IFile } from "@nestjs-kit/cloudinary";
 
 @Injectable()
@@ -163,7 +164,11 @@ The Cloudinary Node SDK has one process-wide configuration object and can silent
 
 This is a deliberate compatibility restriction, not a separate SDK instance or automatic cleanup of global state. Even unrelated shared SDK settings are rejected because the SDK may inherit them in current or future operations. Other code in the same process may use the SDK only with explicit call options and an empty shared configuration. If existing application code requires SDK-global configuration, it cannot share this process with these scoped services. The adapter never temporarily changes or resets global settings. Its default API endpoint is explicitly `https://api.cloudinary.com`; signing defaults are explicitly SHA-1 and signature version 2, with per-registration overrides supported.
 
-### Breaking change: shared SDK access removed
+### Major release upgrade
+
+Package-specific injection decorators have been removed. Import `Inject` from `@nestjs/common` and use `@Inject(getCloudinaryToken(alias))` as shown above. Default `CloudinaryService` class injection remains supported.
+
+### Shared SDK access
 
 The `instance` and `cloudinary` accessors have been removed. They exposed the same process-wide SDK object for every account, so they could not represent an independently configured client. Use `uploadFile()`, `ping()` and `createSignedUploadUrl()` on the injected service. For SDK operations outside this facade, import Cloudinary directly in your application and pass the intended account configuration explicitly on every call; do not mutate shared `cloudinary.config()` state to switch accounts. Existing default `CloudinaryService` injection still works.
 

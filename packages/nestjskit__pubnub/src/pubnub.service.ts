@@ -7,6 +7,7 @@ export class PubNubService extends PubNub implements OnModuleDestroy {
   constructor(options: PubnubConfig) {
     super(options);
   }
+
   onModuleDestroy(): void {
     this.destroy();
   }

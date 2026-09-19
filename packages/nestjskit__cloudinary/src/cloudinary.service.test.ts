@@ -1,6 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
-import { InjectCloudinary, getCloudinaryToken } from "./cloudinary.tokens";
+import { getCloudinaryToken } from "./cloudinary.tokens";
 import { Writable } from "node:stream";
 import {
   v2 as cloudinary,
@@ -212,8 +212,9 @@ it.each([false, true])(
     @Injectable()
     class Consumer {
       constructor(
-        @InjectCloudinary("first") readonly first: CloudinaryService,
-        @InjectCloudinary("second") readonly second: CloudinaryService,
+        @Inject(getCloudinaryToken("first")) readonly first: CloudinaryService,
+        @Inject(getCloudinaryToken("second"))
+        readonly second: CloudinaryService,
       ) {}
     }
     const register = (alias: string, async: boolean) => {

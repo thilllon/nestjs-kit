@@ -58,9 +58,9 @@ PubNubModule.registerAsync({
 Give each registration a unique `alias` and inject the matching client. `alias` and `isGlobal` are Nest module settings: place them beside `useFactory` for async registration, not inside its returned PubNub SDK configuration. For synchronous registration, include them alongside the SDK options in the same object.
 
 ```ts
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import {
-  InjectPubNubClient,
+  getPubNubClientToken,
   PubNubModule,
   PubNubService,
 } from "@nestjs-kit/pubnub";
@@ -68,8 +68,9 @@ import {
 @Injectable()
 class AccountNotifications {
   constructor(
-    @InjectPubNubClient("primary") readonly primary: PubNubService,
-    @InjectPubNubClient("secondary") readonly secondary: PubNubService,
+    @Inject(getPubNubClientToken("primary")) readonly primary: PubNubService,
+    @Inject(getPubNubClientToken("secondary"))
+    readonly secondary: PubNubService,
   ) {}
 }
 
@@ -99,14 +100,14 @@ Each registration owns its SDK configuration, client and shutdown hook. SDK opti
 
 ### Major release note
 
-This release establishes explicit named-client injection. Existing single-client `PubNubService` injection continues to work. Applications registering multiple clients should assign distinct aliases and use `InjectPubNubClient(alias)` instead of relying on import order to select a class provider.
+Package-specific injection decorators have been removed; use Nest's `@Inject(getPubNubClientToken(alias))`. Existing single-client `PubNubService` injection continues to work. Applications registering multiple clients should assign distinct aliases and use `@Inject(getPubNubClientToken(alias))` instead of relying on import order to select a class provider.
 
 ## Publish a message
 
 Register this service in the module that imports `PubNubModule`:
 
 ```ts
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { PubNubService } from "@nestjs-kit/pubnub";
 
 @Injectable()

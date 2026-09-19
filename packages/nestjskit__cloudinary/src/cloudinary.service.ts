@@ -23,7 +23,9 @@ export class CloudinaryService {
   constructor(private readonly options: ModuleOptions) {}
 
   async onModuleInit(): Promise<void> {
-    if (this.options.pingOnInit) await this.ping();
+    if (this.options.pingOnInit) {
+      await this.ping();
+    }
   }
 
   async ping() {
@@ -125,14 +127,19 @@ export class CloudinaryService {
       const upload = cloudinary.uploader.upload_stream(
         { ...options, ...sdkOptions },
         (error, result) => {
-          if (error) return reject(error);
-          if (!result)
+          if (error) {
+            return reject(error);
+          }
+          if (!result) {
             return reject(new Error("Cloudinary returned no upload result"));
+          }
           resolve(result);
         },
       );
       pipeline(Readable.from([file.buffer]), upload, (error) => {
-        if (error) reject(error);
+        if (error) {
+          reject(error);
+        }
       });
     });
   }

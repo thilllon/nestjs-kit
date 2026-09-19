@@ -1,7 +1,4 @@
-export {
-  InjectNodemailer,
-  NODEMAILER_TRANSPORTER,
-} from "./nodemailer.decorator";
+export { NODEMAILER_TRANSPORTER } from "./nodemailer.tokens";
 export type { NodemailerModuleOptions } from "./nodemailer.interface";
 export { NodemailerModule } from "./nodemailer.module";
 export {
