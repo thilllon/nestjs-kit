@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { NODEMAILER_TRANSPORTER } from "./nodemailer.decorator";
+import { NODEMAILER_TRANSPORTER } from "./nodemailer.tokens";
 import { ConfigurableModuleClass } from "./nodemailer.module-definition";
 import { NodemailerService } from "./nodemailer.service";
 

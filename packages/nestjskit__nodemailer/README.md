@@ -25,7 +25,7 @@ export class NotificationsService {
   constructor(private readonly mailer: NodemailerService) {}
 
   welcome(to: string) {
-    return this.mailer.sendMail({
+    return this.mailer.transporter.sendMail({
       to,
       subject: "Welcome",
       text: "Your account is ready.",
@@ -56,7 +56,7 @@ export class NotificationsModule {}
 
 Replace the example host and sender with your mail provider's settings and set the credentials in your application environment. On port 587, `secure: false` allows STARTTLS; use `secure: true` for implicit TLS on port 465. See [Nodemailer's SMTP options](https://nodemailer.com/smtp).
 
-`sendMail()` returns the SDK result, including the message ID and envelope. Message fields override `defaults`; transport errors reject the returned promise unchanged. The adapter does not add retries or template rendering.
+`transporter.sendMail()` returns the SDK result, including the message ID and envelope. Message fields override `defaults`; transport errors reject the returned promise unchanged. The adapter does not add retries or template rendering.
 
 ## Asynchronous configuration
 
@@ -82,16 +82,18 @@ NodemailerModule.registerAsync({
 
 `transport` accepts Nodemailer's SMTP configuration, SMTP URL, built-in transport options, or a custom transport plugin. For example, enable pooled SMTP with `{ host, port, secure, auth, pool: true, maxConnections: 5 }`.
 
-Use `@InjectNodemailer()` when you need the raw transporter for plugins, events, or callback APIs:
+Use `@Inject(NODEMAILER_TRANSPORTER)` when you need the raw transporter for plugins, events, or callback APIs:
 
 ```ts
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { Transporter } from "nodemailer";
-import { InjectNodemailer } from "@nestjs-kit/nodemailer";
+import { NODEMAILER_TRANSPORTER } from "@nestjs-kit/nodemailer";
 
 @Injectable()
 export class MailTransportService {
-  constructor(@InjectNodemailer() readonly transporter: Transporter) {}
+  constructor(
+    @Inject(NODEMAILER_TRANSPORTER) readonly transporter: Transporter,
+  ) {}
 }
 ```
 
@@ -99,7 +101,7 @@ Register this provider in the module that imports `NodemailerModule`. `Nodemaile
 
 ## Connection lifecycle
 
-Registration creates the transporter without sending mail or verifying the server connection. Call `await mailer.verify()` explicitly when you want an SMTP connection and authentication check. It resolves to `true` on success, returns `false` for transports that do not implement verification, and propagates errors.
+Registration creates the transporter without sending mail or verifying the server connection. Call `await mailer.transporter.verify()` explicitly when you want an SMTP connection and authentication check. SMTP verification resolves to `true` on success and rejects on failure; transports that do not implement verification return `false` synchronously. Using `await` supports either SDK result.
 
 The module closes its transporter during Nest shutdown, including pooled SMTP connections. Enable signal hooks in your Nest application with `app.enableShutdownHooks()`, or call `app.close()` explicitly. Closing follows [Nodemailer's pool semantics](https://nodemailer.com/smtp/pooled): it is not a promise that all queued messages have been delivered.
 
@@ -114,7 +116,7 @@ NodemailerModule.register({
 });
 
 // After injecting NodemailerService:
-const info = await mailer.sendMail({
+const info = await mailer.transporter.sendMail({
   to: "reader@example.com",
   subject: "Test message",
   text: "Hello",
@@ -124,15 +126,17 @@ const message = JSON.parse(String(info.message));
 
 This package's tests use the real JSON transport for message construction and custom offline transports for error propagation and shutdown behavior.
 
+## Major release upgrade
+
+Use Nest's `@Inject(NODEMAILER_TRANSPORTER)` for direct SDK injection. Calls previously made through the service's forwarding methods now go through `service.transporter.sendMail()` and `service.transporter.verify()`. The service retains ownership of transporter shutdown.
+
 ## API
 
 | API                                       | Purpose                                                |
 | ----------------------------------------- | ------------------------------------------------------ |
 | `NodemailerModule.register(options)`      | Configure the transport and optional message defaults. |
 | `NodemailerModule.registerAsync(options)` | Resolve options through Nest dependency injection.     |
-| `NodemailerService.sendMail(message)`     | Send a message and return the SDK result.              |
-| `NodemailerService.verify()`              | Explicitly check a supported transport's connection.   |
 | `NodemailerService.transporter`           | Access the underlying Nodemailer transporter.          |
-| `@InjectNodemailer()`                     | Inject that transporter directly.                      |
+| `@Inject(NODEMAILER_TRANSPORTER)`         | Inject that transporter directly.                      |
 
 [Message options](https://nodemailer.com/message) · [Transport documentation](https://nodemailer.com/transports) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
