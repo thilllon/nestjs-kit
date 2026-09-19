@@ -33,26 +33,13 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-The six established package identities already exist on npm; skip first-publication commands for them. `@nestjs-kit/nodemailer` is new and awaits its first publication. Its first release version, `1.0.0`, has merged into `main`; npm publication still awaits owner authentication. It is temporarily listed in `.changeset/config.json` under `ignore` so the six established packages can publish independently through OIDC. Native Changesets excludes ignored packages from its publish plan and versioning; this is a temporary bootstrap hold, not a permanent release policy.
+All seven current package identities, including `@nestjs-kit/nodemailer`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
-For a new package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build, inspect the package archive, and publish the intended first version with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings. Then configure trusted publishing for that new package. For Nodemailer, verify its first published version and trusted publisher, then remove its temporary `ignore` entry through a checked PR. [Issue #458](https://github.com/thilllon/nestjs-kit/issues/458) tracks these prerequisites and removal.
+For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
-For the new Nodemailer package only, use its release version checked into `main`:
+For that local first publication only, use `--provenance=false` to override the package's CI-oriented `publishConfig.provenance`; subsequent CI publications retain provenance. Configure its trusted publisher and verify the registry identity before enabling automated publication. Existing packages must continue through the release workflow instead of repeating this bootstrap.
 
-```sh
-mise install
-mise exec -- pnpm install --frozen-lockfile
-mise exec -- pnpm --filter @nestjs-kit/nodemailer build
-mise exec -- pnpm login
-cd packages/nestjskit__nodemailer
-mise exec -- pnpm pack --out /tmp/nestjs-kit-nodemailer.tgz
-tar -tzf /tmp/nestjs-kit-nodemailer.tgz
-mise exec -- pnpm publish --access public --provenance=false
-```
-
-Inspect the archive file list before publishing. The explicit `--provenance=false` overrides the package's CI-oriented `publishConfig.provenance` for this local first publication only; later CI publications retain provenance. Run this bootstrap only for an identity that does not yet exist; existing packages use the release workflow. Use your own npm account with package/scope write access and complete its authentication prompts.
-
-In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After trusted publishers are configured for every non-ignored package, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
+In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After trusted publishers are configured for every package participating in publication, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 
 ## Retries and maintenance
 
