@@ -2,16 +2,18 @@ import {
   BlobServiceClient,
   StorageSharedKeyCredential,
 } from "@azure/storage-blob";
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InjectStorageBlob } from "./azure-storage-blob.decorator";
+import { getStorageBlobClientToken } from "./azure-storage-blob.tokens";
 import { AzureStorageBlobModule } from "./azure-storage-blob.module";
 import { AzureStorageBlobService } from "./azure-storage-blob.service";
 
 @Injectable()
 class Consumer {
-  constructor(@InjectStorageBlob() readonly client: BlobServiceClient) {}
+  constructor(
+    @Inject(getStorageBlobClientToken()) readonly client: BlobServiceClient,
+  ) {}
 }
 @Injectable()
 class Configuration {
@@ -19,7 +21,10 @@ class Configuration {
     return { connection: "offline" };
   }
 }
-@Module({ providers: [Configuration], exports: [Configuration] })
+@Module({
+  providers: [Configuration],
+  exports: [Configuration],
+})
 class ConfigurationModule {}
 afterEach(() => vi.restoreAllMocks());
 describe("Azure module", () => {

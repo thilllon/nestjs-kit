@@ -1,6 +1,7 @@
 import {
   Injectable,
   Logger,
+  type LoggerService,
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from "@nestjs/common";
@@ -12,10 +13,11 @@ export class PgListenService
   implements OnApplicationBootstrap, OnModuleDestroy
 {
   readonly subscriber: Subscriber;
-  private readonly logger = new Logger(PgListenService.name);
+  private readonly logger: LoggerService;
   private closePromise?: Promise<void>;
 
   constructor(private readonly config: PgListenModuleOptions) {
+    this.logger = config.logger ?? new Logger(PgListenService.name);
     this.subscriber = createSubscriber(config.connection, config.options);
     this.subscriber.events.on("error", (error) =>
       this.logger.error(error.message, error.stack),

@@ -1,4 +1,8 @@
-import { ConfigurableModuleBuilder, type DynamicModule } from "@nestjs/common";
+import {
+  ConfigurableModuleBuilder,
+  type LoggerService,
+  type DynamicModule,
+} from "@nestjs/common";
 import type { ClientConfig } from "pg";
 import type { Options } from "pg-listen";
 import { PgListenService } from "./pg-listen.service";
@@ -11,6 +15,8 @@ export interface PgListenModuleOptions {
   connection?: ClientConfig;
   options?: Options;
   channels?: string[];
+  /** Per-registration logger; otherwise Nest global logger configuration applies. */
+  logger?: LoggerService;
 }
 
 export interface PgListenModuleExtras {

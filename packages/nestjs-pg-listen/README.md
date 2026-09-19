@@ -17,15 +17,20 @@ Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
 ## Register and receive notifications
 
 ```ts
-import { Injectable, Module, OnModuleInit } from "@nestjs/common";
-import { InjectPgListen, PgListenModule, Subscriber } from "nestjs-pg-listen";
+import { Inject, Injectable, Module, OnModuleInit } from "@nestjs/common";
+import {
+  getPgListenSubscriberToken,
+  PgListenModule,
+  Subscriber,
+} from "nestjs-pg-listen";
 
 type Events = { orders: { id: string } };
 
 @Injectable()
 export class OrdersListener implements OnModuleInit {
   constructor(
-    @InjectPgListen() private readonly subscriber: Subscriber<Events>,
+    @Inject(getPgListenSubscriberToken())
+    private readonly subscriber: Subscriber<Events>,
   ) {}
 
   onModuleInit() {
@@ -81,10 +86,10 @@ Both registration methods accept `alias` and `isGlobal` at the top level. These 
 Register once per alias to give each database its own subscriber, options, channels and lifecycle. A default connection can coexist with named connections:
 
 ```ts
-import { Injectable, Module, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Module, OnModuleInit } from "@nestjs/common";
 import {
-  InjectPgListen,
-  InjectPgListenService,
+  getPgListenSubscriberToken,
+  getPgListenServiceToken,
   PgListenModule,
   PgListenService,
   Subscriber,
@@ -93,9 +98,10 @@ import {
 @Injectable()
 export class AuditListener implements OnModuleInit {
   constructor(
-    @InjectPgListen() private readonly orders: Subscriber,
-    @InjectPgListen("audit") private readonly audit: Subscriber,
-    @InjectPgListenService("audit")
+    @Inject(getPgListenSubscriberToken()) private readonly orders: Subscriber,
+    @Inject(getPgListenSubscriberToken("audit"))
+    private readonly audit: Subscriber,
+    @Inject(getPgListenServiceToken("audit"))
     private readonly auditService: PgListenService,
   ) {}
 
@@ -129,16 +135,48 @@ export class AuditListener implements OnModuleInit {
 export class NotificationsModule {}
 ```
 
-Set both database URLs for this example. Use unique aliases for additional connections. Omitted, empty (`""`) and `"default"` aliases all identify the default registration. Its existing `@InjectPgListen()`, `PG_LISTEN_SUBSCRIBER` and direct `PgListenService` injection remain supported. Named registrations export only their named subscriber and service tokens.
+Set both database URLs for this example. Use unique aliases for additional connections. Omitted, empty (`""`) and `"default"` aliases all identify the default registration. Its `@Inject(getPgListenSubscriberToken())`, `PG_LISTEN_SUBSCRIBER` and direct `PgListenService` injection remain supported. Named registrations export only their named subscriber and service tokens.
 
 | API                                  | Purpose                                                           |
 | ------------------------------------ | ----------------------------------------------------------------- |
-| `@InjectPgListen(alias?)`            | Inject that registration's raw subscriber.                        |
-| `@InjectPgListenService(alias?)`     | Inject that registration's lifecycle service.                     |
 | `getPgListenSubscriberToken(alias?)` | Resolve the subscriber token for `@Inject()` or module lookups.   |
 | `getPgListenServiceToken(alias?)`    | Resolve the service token; the default returns `PgListenService`. |
 
 Registrations are local to their importing module. Re-export a shared registration module to make it available to consumers elsewhere, or set `isGlobal: true` for application-wide access. Each registration connects, subscribes and closes independently. Applications should let Nest own subscriber shutdown rather than calling the raw subscriber's `close()` themselves.
+
+## Logging
+
+The default `new Logger(PgListenService.name)` follows Nest's application-wide logger: both `app.useLogger(customLogger)` and `Logger.overrideLogger(customLogger)` receive subscriber errors and startup-cleanup errors. No package-specific logger setup is needed when the application already uses a custom Nest logger.
+
+For a different logger per registration, set `logger` to any Nest `LoggerService`. Resolve an application-owned logger through async configuration, for example a logger that forwards records to Kafka:
+
+```ts
+import { Module, type LoggerService } from "@nestjs/common";
+import { PgListenModule } from "nestjs-pg-listen";
+import { ApplicationLoggingModule, KafkaLogger } from "./application-logging";
+
+@Module({
+  imports: [
+    PgListenModule.registerAsync({
+      alias: "audit",
+      imports: [ApplicationLoggingModule],
+      inject: [KafkaLogger],
+      useFactory: (logger: LoggerService) => ({
+        connection: { connectionString: process.env.AUDIT_DATABASE_URL },
+        channels: ["audit_events"],
+        logger,
+      }),
+    }),
+  ],
+})
+export class AuditNotificationsModule {}
+```
+
+`ApplicationLoggingModule` and `KafkaLogger` are application providers, not dependencies of this package. Export the logger from that module and implement Nest's `LoggerService` contract. A registration-local logger takes precedence over the Nest global logger for that subscriber only. Logging does not replace propagation of the original startup error or lifecycle cleanup.
+
+## Injection API changes
+
+Package-specific injection decorators have been removed. Import `Inject` from `@nestjs/common` and pass the public token helpers, as shown above. The default `PG_LISTEN_SUBSCRIBER` token and `PgListenService` class remain available. Named tokens use `PG_LISTEN_SUBSCRIBER_<alias>` and `PG_LISTEN_SERVICE_<alias>`; prefer the helpers over hand-written strings.
 
 ## Errors and shutdown
 

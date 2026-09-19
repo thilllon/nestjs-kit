@@ -147,25 +147,28 @@ Register each account with a unique `alias`, then use that same alias when injec
 
 ```ts
 import { BlobServiceClient } from "@azure/storage-blob";
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import {
   AzureStorageBlobModule,
   AzureStorageBlobService,
-  InjectAzureStorageBlobService,
-  InjectStorageBlob,
+  getAzureStorageBlobServiceToken,
+  getStorageBlobClientToken,
 } from "nestjs-azure-storage-blob";
 
 function connection(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
   return value;
 }
 
 @Injectable()
 export class ArchiveService {
   constructor(
-    @InjectStorageBlob("primary") readonly primary: BlobServiceClient,
-    @InjectAzureStorageBlobService("archive")
+    @Inject(getStorageBlobClientToken("primary"))
+    readonly primary: BlobServiceClient,
+    @Inject(getAzureStorageBlobServiceToken("archive"))
     readonly archive: AzureStorageBlobService,
   ) {}
 
@@ -198,7 +201,7 @@ export class ArchiveService {
 export class ArchiveModule {}
 ```
 
-A named registration exports only its named client, options and service tokens. It does not replace the default `AzureStorageBlobService`. For an unnamed registration, existing class injection and `@InjectStorageBlob()` continue to work; `@InjectAzureStorageBlobService()` also selects the default service.
+A named registration exports only its named client, options and service tokens. It does not replace the default `AzureStorageBlobService`. For an unnamed registration, class injection and `@Inject(getStorageBlobClientToken())` continue to work; `@Inject(getAzureStorageBlobServiceToken())` also selects the default service.
 
 For custom providers and tests, use `getStorageBlobClientToken(alias?)` and `getAzureStorageBlobServiceToken(alias?)` rather than constructing token strings. Each service signs SAS URLs with its own account. `containerName` is metadata returned by `getContainerName()`; operation methods still take an explicit container argument.
 
@@ -210,13 +213,14 @@ Use the underlying `BlobServiceClient` for operations outside the helper API, su
 
 ```ts
 import { BlobServiceClient } from "@azure/storage-blob";
-import { Injectable } from "@nestjs/common";
-import { InjectStorageBlob } from "nestjs-azure-storage-blob";
+import { Inject, Injectable } from "@nestjs/common";
+import { getStorageBlobClientToken } from "nestjs-azure-storage-blob";
 
 @Injectable()
 export class ContainersService {
   constructor(
-    @InjectStorageBlob() private readonly client: BlobServiceClient,
+    @Inject(getStorageBlobClientToken())
+    private readonly client: BlobServiceClient,
   ) {}
 
   create(name: string) {
@@ -227,21 +231,37 @@ export class ContainersService {
 
 Register this provider in a module that imports `AzureStorageBlobModule`. You can also obtain the same client through `AzureStorageBlobService.getClient()`.
 
+### Direct blob operations
+
+The forwarding-only `deleteFile()`, `deleteFileIfExists()` and `downloadStream()` helpers have been removed. Obtain a blob client from the injected client or `storage.getClient()`, then call the SDK directly:
+
+```ts
+const blob = storage
+  .getClient()
+  .getContainerClient(container)
+  .getBlockBlobClient(blobName);
+```
+
+| Removed helper                            | SDK replacement                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------- |
+| `deleteFile(container, blobName)`         | `await blob.delete()`                                                 |
+| `deleteFileIfExists(container, blobName)` | `await blob.deleteIfExists()`                                         |
+| `downloadStream(container, blobName)`     | `await blob.download()`; read `readableStreamBody` from its response. |
+
+These are the same SDK operations the removed methods called. Their responses and errors remain the SDK's own, and direct access also lets you supply SDK-specific request options. The adapter retains its SAS, upload-request and collected-list helpers.
+
 ## API reference
 
 All methods below belong to [`AzureStorageBlobService`](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-azure-storage-blob/src/azure-storage-blob.service.ts). Optional arguments are marked with `?`.
 
-| Method                                                                 | Result                                                                           |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `getBlockBlobSasUrl(container, blob, permissions?, options?)`          | Promise of `{ sasUrl, headers }` for one blob. Includes the upload header.       |
-| `getContainerSasUrl(container, permissions?, options?)`                | Promise of `{ sasUrl, headers }` for a container.                                |
-| `getAccountSasUrl(expiresOn?, permissions?, resourceTypes?, options?)` | `{ sasUrl, headers }` for account-level access; synchronous.                     |
-| `getUploadable(container, blob, expiresIn?)`                           | Promise of paired upload and download request details.                           |
-| `listFiles(prefix, container)`                                         | Promise of an array of Azure `BlobItem` objects.                                 |
-| `deleteFile(container, blob)`                                          | Delete a blob; returns the SDK response.                                         |
-| `deleteFileIfExists(container, blob)`                                  | Delete a blob if present; returns the SDK response.                              |
-| `downloadStream(container, blob)`                                      | Promise of the SDK download response, including `readableStreamBody` in Node.js. |
-| `getClient()`                                                          | The configured Azure `BlobServiceClient`.                                        |
+| Method                                                                 | Result                                                                     |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `getBlockBlobSasUrl(container, blob, permissions?, options?)`          | Promise of `{ sasUrl, headers }` for one blob. Includes the upload header. |
+| `getContainerSasUrl(container, permissions?, options?)`                | Promise of `{ sasUrl, headers }` for a container.                          |
+| `getAccountSasUrl(expiresOn?, permissions?, resourceTypes?, options?)` | `{ sasUrl, headers }` for account-level access; synchronous.               |
+| `getUploadable(container, blob, expiresIn?)`                           | Promise of paired upload and download request details.                     |
+| `listFiles(prefix, container)`                                         | Promise of an array of Azure `BlobItem` objects.                           |
+| `getClient()`                                                          | The configured Azure `BlobServiceClient`.                                  |
 
 Blob and container SAS URLs default to a **five-minute expiry** unless you provide `expiresOn` or a stored access policy `identifier`. Blob permissions default to `read` and `create`; container and account permissions default to `read`. Pass explicit permissions for the intended operation.
 
@@ -250,3 +270,7 @@ For a complete list of types and less common helpers, see the [source](https://g
 ## Project
 
 [Report an issue](https://github.com/thilllon/nestjs-kit/issues/new/choose) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [License](https://github.com/thilllon/nestjs-kit/blob/main/LICENSE)
+
+## Injection API changes
+
+Package-specific injection decorators have been removed. Import `Inject` from `@nestjs/common` and pass `getStorageBlobClientToken(alias)` or `getAzureStorageBlobServiceToken(alias)`. Unnamed and empty aliases preserve the original default tokens and service class. Nonempty aliases now use an underscore suffix (`STORAGE_BLOB_CLIENT_<alias>`, `STORAGE_BLOB_OPTIONS_<alias>`, `STORAGE_BLOB_SERVICE_<alias>`), replacing the previous colon separator. Use the public helpers rather than constructing token strings.

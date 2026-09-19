@@ -1,17 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Client, type Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import { DrizzlePgModule } from "./drizzle-pg.module";
-import { getDrizzlePgToken } from "./drizzle-pg.interface";
 import {
   DrizzlePgService,
-  InjectDrizzlePg,
-  InjectDrizzlePgService,
-  InjectPgConnection,
+  getDrizzlePgToken,
+  getDrizzlePgServiceToken,
+  getPgConnectionToken,
 } from "./index";
 
 const connection = {
@@ -97,12 +96,14 @@ it("isolates named client and default pool queries, raw injection and shutdown",
   @Injectable()
   class Databases {
     constructor(
-      @InjectDrizzlePg() readonly defaultDb: NodePgDatabase,
-      @InjectDrizzlePg("audit") readonly auditDb: NodePgDatabase,
-      @InjectPgConnection() readonly defaultConnection: Pool,
-      @InjectPgConnection("audit") readonly auditConnection: Client,
-      @InjectDrizzlePgService() readonly defaultService: DrizzlePgService,
-      @InjectDrizzlePgService("audit") readonly auditService: DrizzlePgService,
+      @Inject(getDrizzlePgToken()) readonly defaultDb: NodePgDatabase,
+      @Inject(getDrizzlePgToken("audit")) readonly auditDb: NodePgDatabase,
+      @Inject(getPgConnectionToken()) readonly defaultConnection: Pool,
+      @Inject(getPgConnectionToken("audit")) readonly auditConnection: Client,
+      @Inject(getDrizzlePgServiceToken())
+      readonly defaultService: DrizzlePgService,
+      @Inject(getDrizzlePgServiceToken("audit"))
+      readonly auditService: DrizzlePgService,
     ) {}
   }
   const observer = new Client(connection);

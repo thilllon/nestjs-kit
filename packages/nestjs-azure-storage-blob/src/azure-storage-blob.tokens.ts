@@ -5,10 +5,10 @@ import {
 import { AzureStorageBlobService } from "./azure-storage-blob.service";
 
 export const getStorageBlobClientToken = (alias?: string): string =>
-  alias ? `${MODULE_CLIENT_TOKEN}:${alias}` : MODULE_CLIENT_TOKEN;
+  alias ? `${MODULE_CLIENT_TOKEN}_${alias}` : MODULE_CLIENT_TOKEN;
 
 export const getStorageBlobOptionsToken = (alias?: string): string =>
-  alias ? `${MODULE_OPTIONS_TOKEN}:${alias}` : MODULE_OPTIONS_TOKEN;
+  alias ? `${MODULE_OPTIONS_TOKEN}_${alias}` : MODULE_OPTIONS_TOKEN;
 
 export const getAzureStorageBlobServiceToken = (alias?: string) =>
-  alias ? `STORAGE_BLOB_SERVICE:${alias}` : AzureStorageBlobService;
+  alias ? `STORAGE_BLOB_SERVICE_${alias}` : AzureStorageBlobService;

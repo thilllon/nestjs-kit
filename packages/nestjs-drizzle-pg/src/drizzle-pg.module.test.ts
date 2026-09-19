@@ -1,4 +1,4 @@
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import type { Client, Pool } from "pg";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Test } from "@nestjs/testing";
@@ -17,7 +17,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("pg", () => {
   class Connection {
     connect = vi.fn(async () => {
-      if (mocks.connectError) throw mocks.connectError;
+      if (mocks.connectError) {
+        throw mocks.connectError;
+      }
     });
     end = vi.fn(async () => undefined);
     query = vi.fn(async () => ({ rowCount: 1 }));
@@ -36,13 +38,8 @@ vi.mock("drizzle-orm/node-postgres", () => ({
 import { DrizzlePgModule } from "./drizzle-pg.module";
 import { DrizzlePgService } from "./drizzle-pg.service";
 import {
-  getDrizzlePgServiceToken,
   getDrizzlePgToken,
-} from "./drizzle-pg.interface";
-import {
-  InjectDrizzlePg,
-  InjectDrizzlePgService,
-  InjectPgConnection,
+  getDrizzlePgServiceToken,
   getPgConnectionToken,
 } from "./index";
 beforeEach(() => {
@@ -83,8 +80,9 @@ describe("Drizzle module", () => {
       ],
     }).compile();
     expect(mocks.connections).toHaveLength(2);
-    for (const connection of mocks.connections)
+    for (const connection of mocks.connections) {
       expect(connection.connect).not.toHaveBeenCalled();
+    }
     expect(module.get(getDrizzlePgToken())).not.toBe(
       module.get(getDrizzlePgToken("analytics")),
     );
@@ -95,8 +93,9 @@ describe("Drizzle module", () => {
         .ping(),
     ).toBe(true);
     await module.close();
-    for (const connection of mocks.connections)
+    for (const connection of mocks.connections) {
       expect(connection.end).toHaveBeenCalledOnce();
+    }
   });
   it.each([false, true])(
     "injects independent databases, raw connections and services (async=%s)",
@@ -111,15 +110,18 @@ describe("Drizzle module", () => {
       @Injectable()
       class Consumer {
         constructor(
-          @InjectDrizzlePg() readonly defaultDb: NodePgDatabase,
-          @InjectDrizzlePg("") readonly emptyAliasDb: NodePgDatabase,
-          @InjectDrizzlePg("default")
+          @Inject(getDrizzlePgToken()) readonly defaultDb: NodePgDatabase,
+          @Inject(getDrizzlePgToken("")) readonly emptyAliasDb: NodePgDatabase,
+          @Inject(getDrizzlePgToken("default"))
           readonly explicitDefaultDb: NodePgDatabase,
-          @InjectDrizzlePg("analytics") readonly analyticsDb: NodePgDatabase,
-          @InjectPgConnection() readonly defaultConnection: Pool,
-          @InjectPgConnection("analytics") readonly analyticsConnection: Client,
-          @InjectDrizzlePgService() readonly defaultService: DrizzlePgService,
-          @InjectDrizzlePgService("analytics")
+          @Inject(getDrizzlePgToken("analytics"))
+          readonly analyticsDb: NodePgDatabase,
+          @Inject(getPgConnectionToken()) readonly defaultConnection: Pool,
+          @Inject(getPgConnectionToken("analytics"))
+          readonly analyticsConnection: Client,
+          @Inject(getDrizzlePgServiceToken())
+          readonly defaultService: DrizzlePgService,
+          @Inject(getDrizzlePgServiceToken("analytics"))
           readonly analyticsService: DrizzlePgService,
         ) {}
       }
