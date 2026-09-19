@@ -139,4 +139,8 @@ Use Nest's `@Inject(NODEMAILER_TRANSPORTER)` for direct SDK injection. Calls pre
 | `NodemailerService.transporter`           | Access the underlying Nodemailer transporter.          |
 | `@Inject(NODEMAILER_TRANSPORTER)`         | Inject that transporter directly.                      |
 
+## Module options token
+
+`getNodemailerOptionsToken()` returns the module-local configuration token for custom providers inside a registration. It takes no alias: each registration owns its options provider. The options provider is not exported to parent or importing modules; use this helper only for providers added inside that registration or for registration-local tests. The generated builder token is private and is not exported from the package entry point.
+
 [Message options](https://nodemailer.com/message) · [Transport documentation](https://nodemailer.com/transports) · [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

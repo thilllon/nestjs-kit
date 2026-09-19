@@ -22,7 +22,7 @@ import { Inject, Injectable, Module } from "@nestjs/common";
 import { S3Module, MODULE_CLIENT_TOKEN } from "@nestjs-kit/s3";
 
 @Injectable()
-export class FilesService {
+export class FileService {
   constructor(@Inject(MODULE_CLIENT_TOKEN) private readonly client: S3Client) {}
 
   download(bucket: string, key: string) {
@@ -32,10 +32,10 @@ export class FilesService {
 
 @Module({
   imports: [S3Module.register({ region: "ap-northeast-2" })],
-  providers: [FilesService],
-  exports: [FilesService],
+  providers: [FileService],
+  exports: [FileService],
 })
-export class FilesModule {}
+export class FileModule {}
 ```
 
 Options follow `S3ClientConfig`, including credential providers, `endpoint`, and `forcePathStyle`. Omit `credentials` to use the SDK's default provider chain.
@@ -164,6 +164,6 @@ export class StorageModule {}
 
 The same `{ alias: "primary" }` second argument works with `register(options)` and with `useFactory`, `useClass` or `useExisting` async configuration. Keep the alias outside the factory result: Nest needs it when building injection tokens. Distinct endpoints must use distinct aliases; registering two unnamed clients does not make them independently selectable.
 
-An unnamed registration remains injectable with `@Inject(MODULE_CLIENT_TOKEN)` and can coexist with named clients. The second argument also accepts `{ global: true }`; naming still determines which client is injected. Nest closes each registered client when the application shuts down. Nonempty aliases use an underscore suffix, for example `S3_MODULE_CLIENT_TOKEN_primary`; empty aliases keep the default token. Use the exported helpers for named clients and options rather than constructing token strings yourself. `MODULE_OPTIONS_TOKEN` and `getOptionsToken(alias)` expose registration options through the same Nest `Inject` API.
+An unnamed registration remains injectable with `@Inject(MODULE_CLIENT_TOKEN)` and can coexist with named clients. The second argument also accepts `{ global: true }`; naming still determines which client is injected. Nest closes each registered client when the application shuts down. Nonempty aliases use an underscore suffix, for example `S3_MODULE_CLIENT_TOKEN_primary`; empty aliases keep the default token. Use the exported helpers for named clients and options rather than constructing token strings yourself. `@Inject(getS3OptionsToken(alias))` injects registration options through the package-specific helper; omit the alias for the default registration.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)

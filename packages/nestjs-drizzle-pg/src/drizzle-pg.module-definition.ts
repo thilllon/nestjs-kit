@@ -11,9 +11,9 @@ import {
   getPgConnectionToken,
 } from "./drizzle-pg.interface";
 
-export const {
+const {
   ConfigurableModuleClass,
-  MODULE_OPTIONS_TOKEN,
+  MODULE_OPTIONS_TOKEN: moduleOptionsToken,
   ASYNC_OPTIONS_TYPE,
   OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<DrizzlePgModuleOptions>()
@@ -30,7 +30,7 @@ export const {
       definition.providers.push(
         {
           provide: connectionToken,
-          inject: [MODULE_OPTIONS_TOKEN],
+          inject: [getDrizzlePgOptionsToken()],
           useFactory: async (options: DrizzlePgModuleOptions) => {
             if (options.pgConfig?.type === "pool") {
               return new Pool(options.pgConfig.config);
@@ -47,7 +47,7 @@ export const {
         },
         {
           provide: drizzleToken,
-          inject: [MODULE_OPTIONS_TOKEN, connectionToken],
+          inject: [getDrizzlePgOptionsToken(), connectionToken],
           useFactory: (
             options: DrizzlePgModuleOptions,
             connection: Pool | Client,
@@ -71,3 +71,9 @@ export const {
     },
   )
   .build();
+
+export { ConfigurableModuleClass, OPTIONS_TYPE, ASYNC_OPTIONS_TYPE };
+
+export function getDrizzlePgOptionsToken(): string | symbol {
+  return moduleOptionsToken;
+}

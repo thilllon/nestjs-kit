@@ -24,9 +24,9 @@ export interface PgListenModuleExtras {
   isGlobal?: boolean;
 }
 
-export const {
+const {
   ConfigurableModuleClass,
-  MODULE_OPTIONS_TOKEN,
+  MODULE_OPTIONS_TOKEN: moduleOptionsToken,
   OPTIONS_TYPE,
   ASYNC_OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<PgListenModuleOptions>()
@@ -42,7 +42,7 @@ export const {
           ...(definition.providers ?? []),
           {
             provide: serviceToken,
-            inject: [MODULE_OPTIONS_TOKEN],
+            inject: [getPgListenOptionsToken()],
             useFactory: (options: PgListenModuleOptions) =>
               new PgListenService(options),
           },
@@ -57,3 +57,9 @@ export const {
     },
   )
   .build();
+
+export { ConfigurableModuleClass, OPTIONS_TYPE, ASYNC_OPTIONS_TYPE };
+
+export function getPgListenOptionsToken(): string | symbol {
+  return moduleOptionsToken;
+}
