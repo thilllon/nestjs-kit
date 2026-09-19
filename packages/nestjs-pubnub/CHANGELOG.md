@@ -1,4 +1,4 @@
-# @nestjs-kit/pubnub
+# nestjs-pubnub
 
 ## 3.0.0
 

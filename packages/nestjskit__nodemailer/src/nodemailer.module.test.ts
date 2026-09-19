@@ -1,8 +1,8 @@
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import type { Transport, Transporter } from "nodemailer";
 import { describe, expect, it, vi } from "vitest";
-import { InjectNodemailer } from "./nodemailer.decorator";
+import { NODEMAILER_TRANSPORTER } from "./nodemailer.tokens";
 import { NodemailerModule } from "./nodemailer.module";
 import { NodemailerService } from "./nodemailer.service";
 
@@ -12,7 +12,9 @@ describe("Nodemailer integration", () => {
   it("sends through the injected SDK with defaults and per-message overrides", async () => {
     @Injectable()
     class MailConsumer {
-      constructor(@InjectNodemailer() readonly transport: Transporter) {}
+      constructor(
+        @Inject(NODEMAILER_TRANSPORTER) readonly transport: Transporter,
+      ) {}
     }
     const module = await Test.createTestingModule({
       imports: [
@@ -35,7 +37,7 @@ describe("Nodemailer integration", () => {
       expect(sent.messageId).toEqual(expect.any(String));
       const override = await module
         .get(NodemailerService)
-        .sendMail({ ...message, from: "override@example.com" });
+        .transporter.sendMail({ ...message, from: "override@example.com" });
       expect(JSON.parse(String(override.message)).from.address).toBe(
         "override@example.com",
       );
@@ -72,8 +74,8 @@ describe("Nodemailer integration", () => {
     }).compile();
     try {
       const results = await Promise.all([
-        first.get(NodemailerService).sendMail(message),
-        second.get(NodemailerService).sendMail(message),
+        first.get(NodemailerService).transporter.sendMail(message),
+        second.get(NodemailerService).transporter.sendMail(message),
       ]);
       expect(
         results.map(
@@ -105,8 +107,8 @@ describe("Nodemailer integration", () => {
       await module.init();
       expect(verify).not.toHaveBeenCalled();
       const service = module.get(NodemailerService);
-      await expect(service.sendMail(message)).rejects.toBe(failure);
-      await expect(service.verify()).rejects.toBe(failure);
+      await expect(service.transporter.sendMail(message)).rejects.toBe(failure);
+      await expect(service.transporter.verify()).rejects.toBe(failure);
     } finally {
       await module.close();
     }
@@ -126,16 +128,5 @@ describe("Nodemailer integration", () => {
     service.onModuleDestroy();
     service.onModuleDestroy();
     expect(close).toHaveBeenCalledTimes(2);
-  });
-
-  it("reports unsupported verification without opening a connection", async () => {
-    const service = new NodemailerService({
-      transport: { jsonTransport: true },
-    });
-    try {
-      await expect(service.verify()).resolves.toBe(false);
-    } finally {
-      service.onModuleDestroy();
-    }
   });
 });

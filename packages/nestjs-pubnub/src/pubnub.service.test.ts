@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { InjectPubNubClient, getPubNubClientToken } from "./pubnub.tokens";
+import { Inject, Injectable } from "@nestjs/common";
+import { getPubNubClientToken } from "./pubnub.tokens";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { PubNubModule } from "./pubnub.module";
@@ -35,8 +35,8 @@ it.each([false, true])(
     @Injectable()
     class Consumer {
       constructor(
-        @InjectPubNubClient("first") readonly first: PubNubService,
-        @InjectPubNubClient("second") readonly second: PubNubService,
+        @Inject(getPubNubClientToken("first")) readonly first: PubNubService,
+        @Inject(getPubNubClientToken("second")) readonly second: PubNubService,
       ) {}
     }
     const register = (alias: string, async: boolean) => {
