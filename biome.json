@@ -24,7 +24,8 @@
       "preset": "recommended",
       "style": {
         "useImportType": "off",
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "useBlockStatements": "error"
       },
       "suspicious": {
         "noExplicitAny": "off"

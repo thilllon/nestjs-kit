@@ -9,11 +9,11 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 ## Package identities
 
-- Preserve `nestjs-azure-storage-blob` and `nestjs-drizzle-pg`, including their existing folder names.
-- Scoped packages use npm names `@nestjs-kit/<name>` and folders `packages/nestjskit__<name>`.
-- `nestjs-pg-listen` is an explicitly requested unscoped package in `packages/nestjs-pg-listen`.
+- Check npm name availability and ownership before creating a package. Prefer an available unscoped name such as `nestjs-foobar`; if it is already taken, use the owned `@nestjs-kit/foobar` scope as the fallback.
+- Unscoped package folders match their npm names, for example `packages/nestjs-foobar`. Scoped packages use folders such as `packages/nestjskit__foobar` for `@nestjs-kit/foobar`.
+- Preserve existing published names and folder identities unless the maintainer explicitly requests a rename. Apply the naming preference to new packages without silently renaming established packages.
 - Do not publish to the retired `@nestjs-tools/*` scope or delete its npm packages. The owner handles their retirement.
-- Check registry ownership and published versions before changing package identities or release baselines.
+- Check registry ownership and published versions before changing package identities or release baselines. Do not describe a requested rename as published until the registry confirms its first publication.
 
 ## Toolchain and builds
 
@@ -23,6 +23,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
+- Keep source and test files in the default package `tsconfig.json` project so editors apply the shared decorator settings to both. Use the test configuration for no-emit typechecking; production bundling stays limited to the package entry point.
 - Every library must build with tsdown to separate CJS and ESM outputs and matching declarations. Maintain conditional `require` and `import` exports.
 - Define `build` directly in each package's `package.json`; share options through `tsdown.config.mts`, not a build wrapper script.
 - For public API renames, audit exports, services, decorators, injection tokens, source paths and current examples together. Inspect the actual npm archive, including declarations and source maps, for stale names before publication; preserve historical changelogs.
@@ -38,6 +39,8 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Biome must cover every supported file throughout the repository, including root files and examples. Exclude generated/dependency state, not source directories.
 - Use Prettier only for unsupported Markdown/YAML. Keep formatters from rewriting each other's files.
+- Use braces for control-flow bodies, including single-statement branches and loops. Biome enforces `useBlockStatements`.
+- Separate class methods, including constructors, with a blank line. Write nonempty `@Module({ ... })` metadata objects across multiple lines; keep Biome object expansion at its default `auto` behavior.
 - Name all test files `*.test.ts`, with middleware E2E tests named `*.e2e.test.ts`. Use `fixtures` for any necessary fixture directories; remove stale fixture exclusions and unused assets.
 - Write unit tests for meaningful behavior: signing rules, configuration isolation, lifecycle management, error propagation and regressions. Do not add trivial framework/getter tests or tests mirroring the implementation.
 - Where middleware integration needs E2E coverage, provide Docker Compose services with health checks and `docker:up` / `docker:down` scripts. Use isolated local services; always clean up after tests.
@@ -46,7 +49,9 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 ## Multiple client registrations
 
-- Keep named client registrations isolated: credentials, endpoints, service options and lifecycle cleanup must belong to the selected alias. Preserve existing unnamed injection APIs.
+- Keep named client registrations isolated: credentials, endpoints, service options and lifecycle cleanup must belong to the selected alias. Preserve default registration when no alias is supplied.
+- Use NestJS `@Inject()` directly instead of custom injection-decorator wrappers. Named provider tokens use a readable `<BASE_TOKEN>_<alias>` suffix; retain the default token for unnamed registrations.
+- Keep `MODULE_OPTIONS_TOKEN` internal. Public entry points must not expose it, including indirectly through `export *`; expose package-specific helpers such as `getFoobarOptionsToken(alias?)` and prefer those helpers wherever they are available.
 - Declare asynchronous registration aliases in module extras, outside the options factory. Document each adapter's call shape and require distinct aliases for clients injected together.
 - Verify multiple registrations in one real Nest consumer, including default/named coexistence and shutdown. Check CJS and ESM consumers for injection changes; use Compose E2E when database behavior is involved.
 
