@@ -8,8 +8,6 @@
 
 ## Install
 
-This package is being prepared for its first npm release. Once published:
-
 ```sh
 pnpm add @nestjs-kit/nodemailer nodemailer
 ```
