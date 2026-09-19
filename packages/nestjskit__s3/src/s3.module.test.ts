@@ -2,10 +2,10 @@ import { Inject, Injectable, Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { S3Module } from "./s3.module";
-import type { ModuleOptionsFactory } from "./s3.interface";
+import type { ModuleOptions, ModuleOptionsFactory } from "./s3.interface";
 import { S3Service } from "./s3.service";
-import { getClientToken } from "./s3.utils";
-import { MODULE_CLIENT_TOKEN, MODULE_OPTIONS_TOKEN } from "./s3.constants";
+import { getClientToken, getS3OptionsToken } from "./s3.utils";
+import { MODULE_CLIENT_TOKEN } from "./s3.constants";
 
 const options = {
   region: async () => "storage-region-1",
@@ -57,6 +57,9 @@ class NamedClients {
   constructor(
     @Inject(`${MODULE_CLIENT_TOKEN}_primary`) readonly primary: S3Service,
     @Inject(getClientToken("backup")) readonly backup: S3Service,
+    @Inject(getS3OptionsToken("primary"))
+    readonly primaryOptions: ModuleOptions,
+    @Inject(getS3OptionsToken("backup")) readonly backupOptions: ModuleOptions,
   ) {}
 }
 
@@ -90,13 +93,20 @@ describe("S3 module", () => {
         imports: [S3Module.register(options, { alias: "primary" }), backup],
         providers: [NamedClients],
       }).compile();
-      const { primary, backup: secondary } = app.get(NamedClients);
+      const {
+        primary,
+        backup: secondary,
+        primaryOptions,
+        backupOptions: secondaryOptions,
+      } = app.get(NamedClients);
       const primaryDestroy = vi.spyOn(primary, "destroy");
       const secondaryDestroy = vi.spyOn(secondary, "destroy");
       try {
         expect(primary).not.toBe(secondary);
-        expect(app.get(`${MODULE_OPTIONS_TOKEN}_primary`)).toBe(options);
-        expect(app.get(`${MODULE_OPTIONS_TOKEN}_backup`)).toBe(backupOptions);
+        expect(primaryOptions).toBe(options);
+        expect(secondaryOptions).toBe(backupOptions);
+        expect(app.get("S3_MODULE_OPTIONS_TOKEN_primary")).toBe(options);
+        expect(app.get("S3_MODULE_OPTIONS_TOKEN_backup")).toBe(backupOptions);
         expect(await primary.config.endpoint?.()).toMatchObject({
           hostname: "localhost",
           port: 4566,
@@ -131,10 +141,12 @@ describe("S3 module", () => {
           { alias: "backup", global: true },
         ),
       ],
-      providers: [DefaultAndNamedClients],
+      providers: [DefaultAndNamedClients, S3Service],
     }).compile();
     try {
       const { primary, backup } = app.get(DefaultAndNamedClients);
+      expect(app.get(getS3OptionsToken())).toBe(options);
+      expect(await app.get(S3Service).config.region()).toBe("storage-region-1");
       expect(primary).not.toBe(backup);
       expect(await primary.config.endpoint?.()).toMatchObject({
         hostname: "localhost",

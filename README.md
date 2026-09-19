@@ -1,6 +1,8 @@
 # NestJS Kit
 
-Small NestJS modules for storage, media, PostgreSQL, email, and realtime messaging. Register the integration you need, inject it into your service, and keep using the underlying SDK.
+NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
+
+Install only the integrations you need. Packages have their own npm releases and usage guides, with shared tooling and maintenance in this repository.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main&label=CI)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
@@ -17,39 +19,14 @@ Small NestJS modules for storage, media, PostgreSQL, email, and realtime messagi
 | `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle               | [README](packages/nestjs-pg-listen/README.md)          |
 | `@nestjs-kit/nodemailer` [(npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)       | [![Monthly downloads for @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)      | Email delivery through configurable Nodemailer transports                  | [README](packages/nestjskit__nodemailer/README.md)     |
 
-## Quick start
+## Shared approach
 
-In an existing NestJS application:
+- **Nest-native configuration.** Register options directly or resolve them asynchronously through dependency injection. Inject the client or adapter service using Nest's standard APIs.
+- **SDK access.** Use the underlying SDK's operations and types. Adapters add configuration, useful integration helpers, and connection cleanup where needed.
+- **Separate integrations.** Each package is installed, versioned, and published independently. Its README documents supported registration options and lifecycle behavior.
+- **Both module formats.** Every library ships ESM and CommonJS builds with matching TypeScript declarations. Package exports select the correct files for `import` and `require()`.
 
-```sh
-pnpm add @nestjs-kit/s3 @aws-sdk/client-s3
-```
-
-```ts
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Inject, Injectable, Module } from "@nestjs/common";
-import { S3Module, MODULE_CLIENT_TOKEN } from "@nestjs-kit/s3";
-
-@Injectable()
-export class FilesService {
-  constructor(@Inject(MODULE_CLIENT_TOKEN) private readonly s3: S3Client) {}
-
-  download(bucket: string, key: string) {
-    return this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  }
-}
-
-@Module({
-  imports: [S3Module.register({ region: "ap-northeast-2" })],
-  providers: [FilesService],
-  exports: [FilesService],
-})
-export class FilesModule {}
-```
-
-AWS credentials use the SDK's default provider chain. Each package guide includes asynchronous configuration for Nest's dependency injection system.
-
-Every library ships separate ESM and CommonJS builds with matching TypeScript declarations. Use normal `import` syntax in ESM or `require()` in CommonJS; package exports select the matching output automatically.
+Choose an integration above for installation instructions and complete examples.
 
 ## Develop locally
 
