@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-language: ko-KR
+language: en-US
 tone_instructions: Be concise and actionable. Prioritize concrete correctness, security, and compatibility issues; avoid repeating feedback already covered by CI.
 reviews:
   profile: chill
