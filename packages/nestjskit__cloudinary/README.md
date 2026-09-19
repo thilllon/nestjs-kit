@@ -110,7 +110,7 @@ Set credentials for both accounts. Use a regional `upload_prefix` only for an ac
 Register this service in the module that imports `CloudinaryModule`:
 
 ```ts
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { CloudinaryService } from "@nestjs-kit/cloudinary";
 
 @Injectable()
@@ -134,7 +134,7 @@ The result contains the upload URL, timestamp, signature, API key, and upload op
 `uploadFile(file, uploadOptions?)` sends `file.buffer` unchanged through the Cloudinary SDK. Pass Cloudinary transformations explicitly in the upload options:
 
 ```ts
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { CloudinaryService, type IFile } from "@nestjs-kit/cloudinary";
 
 @Injectable()

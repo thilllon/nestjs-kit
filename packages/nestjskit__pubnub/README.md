@@ -107,7 +107,7 @@ Package-specific injection decorators have been removed; use Nest's `@Inject(get
 Register this service in the module that imports `PubNubModule`:
 
 ```ts
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { PubNubService } from "@nestjs-kit/pubnub";
 
 @Injectable()
