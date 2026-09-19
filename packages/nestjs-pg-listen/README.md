@@ -187,3 +187,7 @@ The subscriber closes when the Nest module is destroyed. Enable signal-driven cl
 PostgreSQL notifications are transient, not a durable job queue. Use the upstream SDK's typed `notify()` and notification handlers for payloads; application code remains responsible for validating received data and handling asynchronous listener failures.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [Release setup](https://github.com/thilllon/nestjs-kit/blob/main/docs/releases.md)
+
+## Options token
+
+Use `getPgListenOptionsToken()` when extending a registration with providers that need its options. Generic `MODULE_OPTIONS_TOKEN` is not part of the public API. The helper returns the existing Nest configurable-module token and deliberately accepts no alias: Nest keeps that provider local to each dynamic module registration. It does not export the options provider to importing modules or change registration visibility. Keep additional providers inside the registration that owns those options.
