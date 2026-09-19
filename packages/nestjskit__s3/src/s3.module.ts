@@ -7,7 +7,7 @@ import type {
   ModuleOptions,
   ModuleOptionsFactory,
 } from "./s3.interface";
-import { getClientToken, getOptionsToken } from "./s3.utils";
+import { getClientToken, getS3OptionsToken } from "./s3.utils";
 
 @Module({})
 export class S3Module {
@@ -16,7 +16,7 @@ export class S3Module {
     extras?: ExtraModuleOptions,
   ): DynamicModule {
     const optionsProvider: Provider = {
-      provide: getOptionsToken(extras?.alias),
+      provide: getS3OptionsToken(extras?.alias),
       useValue: options,
     };
 
@@ -40,7 +40,7 @@ export class S3Module {
     const clientProvider: Provider = {
       provide: getClientToken(extras?.alias),
       useFactory: (options: ModuleOptions) => this.createClient(options),
-      inject: [getOptionsToken(extras?.alias)],
+      inject: [getS3OptionsToken(extras?.alias)],
     };
     const asyncProviders = this.createAsyncProviders(options, extras);
 
@@ -79,7 +79,7 @@ export class S3Module {
   ): Provider {
     if (options.useClass || options.useExisting) {
       return {
-        provide: getOptionsToken(extras?.alias),
+        provide: getS3OptionsToken(extras?.alias),
         async useFactory(
           optionsFactory: ModuleOptionsFactory,
         ): Promise<ModuleOptions> {
@@ -93,7 +93,7 @@ export class S3Module {
 
     if (options.useFactory) {
       return {
-        provide: getOptionsToken(extras?.alias),
+        provide: getS3OptionsToken(extras?.alias),
         useFactory: options.useFactory,
         inject: options.inject,
       };
