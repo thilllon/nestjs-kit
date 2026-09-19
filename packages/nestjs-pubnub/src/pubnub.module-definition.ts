@@ -5,7 +5,7 @@ import { getPubNubClientToken } from "./pubnub.tokens";
 
 export type PubNubModuleOptions = ConstructorParameters<typeof PubNub>[0];
 
-export const {
+const {
   ConfigurableModuleClass,
   MODULE_OPTIONS_TOKEN,
   OPTIONS_TYPE,
@@ -22,7 +22,7 @@ export const {
           ...(definition.providers ?? []),
           {
             provide: token,
-            inject: [MODULE_OPTIONS_TOKEN],
+            inject: [getPubNubOptionsToken()],
             useFactory: (options: PubNubModuleOptions) =>
               new PubNubService(options),
           },
@@ -32,3 +32,9 @@ export const {
     },
   )
   .build();
+
+export { ConfigurableModuleClass, OPTIONS_TYPE, ASYNC_OPTIONS_TYPE };
+
+export function getPubNubOptionsToken(): string | symbol {
+  return MODULE_OPTIONS_TOKEN;
+}
