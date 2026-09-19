@@ -29,12 +29,12 @@ pnpm add @nestjs-kit/s3 @aws-sdk/client-s3
 
 ```ts
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Injectable, Module } from "@nestjs/common";
-import { S3Module, InjectS3Client } from "@nestjs-kit/s3";
+import { Inject, Injectable, Module } from "@nestjs/common";
+import { S3Module, MODULE_CLIENT_TOKEN } from "@nestjs-kit/s3";
 
 @Injectable()
 export class FilesService {
-  constructor(@InjectS3Client() private readonly s3: S3Client) {}
+  constructor(@Inject(MODULE_CLIENT_TOKEN) private readonly s3: S3Client) {}
 
   download(bucket: string, key: string) {
     return this.s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));

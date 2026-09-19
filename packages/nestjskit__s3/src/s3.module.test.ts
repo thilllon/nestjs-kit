@@ -1,11 +1,11 @@
-import { Injectable, Module } from "@nestjs/common";
+import { Inject, Injectable, Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { S3Module } from "./s3.module";
 import type { ModuleOptionsFactory } from "./s3.interface";
 import { S3Service } from "./s3.service";
 import { getClientToken } from "./s3.utils";
-import { InjectS3Client } from "./s3.decorator";
+import { MODULE_CLIENT_TOKEN, MODULE_OPTIONS_TOKEN } from "./s3.constants";
 
 const options = {
   region: async () => "storage-region-1",
@@ -23,7 +23,10 @@ class Config implements ModuleOptionsFactory {
     return options;
   }
 }
-@Module({ providers: [Config], exports: [Config] })
+@Module({
+  providers: [Config],
+  exports: [Config],
+})
 class ConfigurationModule {}
 
 const backupOptions = {
@@ -43,22 +46,25 @@ class BackupConfig implements ModuleOptionsFactory {
   }
 }
 
-@Module({ providers: [BackupConfig], exports: [BackupConfig] })
+@Module({
+  providers: [BackupConfig],
+  exports: [BackupConfig],
+})
 class BackupConfigurationModule {}
 
 @Injectable()
 class NamedClients {
   constructor(
-    @InjectS3Client("primary") readonly primary: S3Service,
-    @InjectS3Client("backup") readonly backup: S3Service,
+    @Inject(`${MODULE_CLIENT_TOKEN}_primary`) readonly primary: S3Service,
+    @Inject(getClientToken("backup")) readonly backup: S3Service,
   ) {}
 }
 
 @Injectable()
 class DefaultAndNamedClients {
   constructor(
-    @InjectS3Client() readonly primary: S3Service,
-    @InjectS3Client("backup") readonly backup: S3Service,
+    @Inject(MODULE_CLIENT_TOKEN) readonly primary: S3Service,
+    @Inject(getClientToken("backup")) readonly backup: S3Service,
   ) {}
 }
 
@@ -89,6 +95,8 @@ describe("S3 module", () => {
       const secondaryDestroy = vi.spyOn(secondary, "destroy");
       try {
         expect(primary).not.toBe(secondary);
+        expect(app.get(`${MODULE_OPTIONS_TOKEN}_primary`)).toBe(options);
+        expect(app.get(`${MODULE_OPTIONS_TOKEN}_backup`)).toBe(backupOptions);
         expect(await primary.config.endpoint?.()).toMatchObject({
           hostname: "localhost",
           port: 4566,
