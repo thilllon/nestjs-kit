@@ -3,7 +3,7 @@ import type { ModuleOptions } from "./cloudinary.interface";
 import { CloudinaryService } from "./cloudinary.service";
 import { getCloudinaryToken } from "./cloudinary.tokens";
 
-export const {
+const {
   ConfigurableModuleClass,
   MODULE_OPTIONS_TOKEN,
   OPTIONS_TYPE,
@@ -20,7 +20,7 @@ export const {
           ...(definition.providers ?? []),
           {
             provide: token,
-            inject: [MODULE_OPTIONS_TOKEN],
+            inject: [getCloudinaryOptionsToken()],
             useFactory: (options: ModuleOptions) =>
               new CloudinaryService(options),
           },
@@ -30,3 +30,9 @@ export const {
     },
   )
   .build();
+
+export { ConfigurableModuleClass, OPTIONS_TYPE, ASYNC_OPTIONS_TYPE };
+
+export function getCloudinaryOptionsToken(): string | symbol {
+  return MODULE_OPTIONS_TOKEN;
+}

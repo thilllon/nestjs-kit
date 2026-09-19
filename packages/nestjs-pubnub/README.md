@@ -122,4 +122,8 @@ export class NotificationsService {
 
 The module closes its SDK client on destruction. Call `app.enableShutdownHooks()` during Nest bootstrap if shutdown signals should trigger that lifecycle hook.
 
+## Module options token
+
+`getPubNubOptionsToken()` returns the module-local configuration token for custom providers inside a registration. It takes no alias: each registration owns its options provider. The options provider is not exported to parent or importing modules; use this helper only for providers added inside that registration or for registration-local tests. The generated builder token is private and is not exported from the package entry point.
+
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md)
