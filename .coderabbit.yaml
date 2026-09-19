@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ko-KR
+tone_instructions: Be concise and actionable. Prioritize concrete correctness, security, and compatibility issues; avoid repeating feedback already covered by CI.
+reviews:
+  profile: chill
+  high_level_summary_in_walkthrough: true
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+    # The default branch (main) is reviewed without adding other targets.
+    base_branches: []
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - AGENTS.md
