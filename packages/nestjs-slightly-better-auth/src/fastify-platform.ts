@@ -353,9 +353,8 @@ export class FastifyPlatform implements HttpPlatform {
           reply: FastifyReplyLike,
         ) => {
           const cancellation = abortOnDisconnect(request.raw, reply.raw);
-          let response: Response;
           try {
-            response = await binding.handle({
+            const response = await binding.handle({
               method: request.method,
               url: `${request.protocol}://${request.host}${request.originalUrl}`,
               headers: toWebHeaders(request.raw.headers),
@@ -364,6 +363,14 @@ export class FastifyPlatform implements HttpPlatform {
               platformRequest: request,
               signal: cancellation.signal,
             });
+            if (cancellation.signal.aborted) {
+              return undefined;
+            }
+            return await sendWebResponse(
+              reply,
+              response,
+              request.method.toUpperCase() === "HEAD",
+            );
           } catch (error) {
             if (cancellation.signal.aborted) {
               return undefined;
@@ -372,14 +379,6 @@ export class FastifyPlatform implements HttpPlatform {
           } finally {
             cancellation.dispose();
           }
-          if (cancellation.signal.aborted) {
-            return undefined;
-          }
-          return sendWebResponse(
-            reply,
-            response,
-            request.method.toUpperCase() === "HEAD",
-          );
         };
         const methods = [...scope.supportedMethods];
         scope.route({

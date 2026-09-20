@@ -400,7 +400,7 @@ describe("FastifyPlatform", () => {
     }
   });
 
-  it("keeps healthy request signals live and aborts only after a synchronized client disconnect", async () => {
+  it("keeps healthy signals live and aborts request handling or response streaming after client disconnect", async () => {
     let healthySignal: AbortSignal | undefined;
     let disconnectReady!: () => void;
     const ready = new Promise<void>((resolve) => {
@@ -414,6 +414,21 @@ describe("FastifyPlatform", () => {
         resolve();
       };
     });
+    let streamSignal: AbortSignal | undefined;
+    let streamAbortObserved = false;
+    let observeStreamAbort!: () => void;
+    const streamAborted = new Promise<void>((resolve) => {
+      observeStreamAbort = () => {
+        streamAbortObserved = true;
+        resolve();
+      };
+    });
+    let delayedSourceContinued = false;
+    let delayedSourceCancelled = false;
+    let settleDelayedSource!: () => void;
+    const delayedSourceSettled = new Promise<void>((resolve) => {
+      settleDelayedSource = resolve;
+    });
     const fixture = await startHttpFixture({
       auth: createTestAuth(),
       adapter: new FastifyAdapter(),
@@ -422,8 +437,9 @@ describe("FastifyPlatform", () => {
       moduleOptions: {
         http: {
           around: [
-            ({ request }) => {
-              if (new URL(request.url).pathname.endsWith("/healthy")) {
+            async ({ request }) => {
+              const path = new URL(request.url).pathname;
+              if (path.endsWith("/healthy")) {
                 healthySignal = request.signal;
                 const before = request.signal.aborted;
                 return new Promise<Response>((resolve) => {
@@ -436,6 +452,40 @@ describe("FastifyPlatform", () => {
                     );
                   }, 30);
                 });
+              }
+              if (path.endsWith("/stream-disconnect")) {
+                streamSignal = request.signal;
+                return new Response(
+                  new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      controller.enqueue(Buffer.from("first"));
+                      const timer = setTimeout(() => {
+                        delayedSourceContinued = true;
+                        try {
+                          controller.enqueue(Buffer.from("second"));
+                          controller.close();
+                        } catch {
+                          // The transport may already have cancelled its reader.
+                        }
+                        settleDelayedSource();
+                      }, 150);
+                      const onAbort = () => {
+                        clearTimeout(timer);
+                        delayedSourceCancelled = true;
+                        observeStreamAbort();
+                        settleDelayedSource();
+                      };
+                      if (request.signal.aborted) {
+                        onAbort();
+                      } else {
+                        request.signal.addEventListener("abort", onAbort, {
+                          once: true,
+                        });
+                      }
+                    },
+                  }),
+                  { headers: { "content-type": "application/octet-stream" } },
+                );
               }
               return new Promise<Response>((resolve) => {
                 const onAbort = () => {
@@ -465,6 +515,35 @@ describe("FastifyPlatform", () => {
       expect(healthy.status).toBe(200);
       expect(await healthy.json()).toEqual({ before: false, after: false });
       expect(healthySignal?.aborted).toBe(false);
+
+      const firstOutputChunk = new Promise<Buffer>((resolve, reject) => {
+        const outputRequest = nodeRequest(
+          `${fixture.url}/api/auth/stream-disconnect`,
+          (response) => {
+            response.once("data", (chunk: Buffer) => {
+              resolve(Buffer.from(chunk));
+              response.destroy();
+            });
+            response.once("error", () => undefined);
+          },
+        );
+        outputRequest.once("error", reject);
+        outputRequest.end();
+      });
+      await expect(firstOutputChunk).resolves.toEqual(Buffer.from("first"));
+      await expect(
+        Promise.race([
+          streamAborted.then(() => true),
+          new Promise<false>((resolve) =>
+            setTimeout(() => resolve(false), 1_000),
+          ),
+        ]),
+      ).resolves.toBe(true);
+      await delayedSourceSettled;
+      expect(streamAbortObserved).toBe(true);
+      expect(streamSignal?.aborted).toBe(true);
+      expect(delayedSourceCancelled).toBe(true);
+      expect(delayedSourceContinued).toBe(false);
 
       let clientRequest!: ReturnType<typeof nodeRequest>;
       const clientFinished = new Promise<void>((resolve, reject) => {

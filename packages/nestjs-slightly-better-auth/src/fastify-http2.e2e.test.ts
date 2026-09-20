@@ -67,7 +67,7 @@ class Http2RecordingFilter implements ExceptionFilter {
 }
 
 describe("FastifyPlatform HTTP/2", () => {
-  it("drops pseudo-headers, uses authority, preserves bytes and cookies, suppresses HEAD bodies, and delegates errors", async () => {
+  it("preserves HTTP/2 request, response, error, and streamed-disconnect behavior", async () => {
     const filter = new Http2RecordingFilter();
     let healthySignal: AbortSignal | undefined;
     let disconnectReady!: () => void;
@@ -81,6 +81,21 @@ describe("FastifyPlatform HTTP/2", () => {
         disconnectObserved = true;
         resolve();
       };
+    });
+    let streamSignal: AbortSignal | undefined;
+    let streamAbortObserved = false;
+    let observeStreamAbort!: () => void;
+    const streamAborted = new Promise<void>((resolve) => {
+      observeStreamAbort = () => {
+        streamAbortObserved = true;
+        resolve();
+      };
+    });
+    let delayedSourceContinued = false;
+    let delayedSourceCancelled = false;
+    let settleDelayedSource!: () => void;
+    const delayedSourceSettled = new Promise<void>((resolve) => {
+      settleDelayedSource = resolve;
     });
     const fixture = await startHttpFixture({
       auth: createTestAuth({ baseURL: undefined }),
@@ -142,6 +157,41 @@ describe("FastifyPlatform HTTP/2", () => {
                     }
                     disconnectReady();
                   });
+                case "stream-disconnect":
+                  streamSignal = request.signal;
+                  return new Response(
+                    new ReadableStream<Uint8Array>({
+                      start(controller) {
+                        controller.enqueue(Buffer.from("first"));
+                        const timer = setTimeout(() => {
+                          delayedSourceContinued = true;
+                          try {
+                            controller.enqueue(Buffer.from("second"));
+                            controller.close();
+                          } catch {
+                            // The transport may already have cancelled its reader.
+                          }
+                          settleDelayedSource();
+                        }, 150);
+                        const onAbort = () => {
+                          clearTimeout(timer);
+                          delayedSourceCancelled = true;
+                          observeStreamAbort();
+                          settleDelayedSource();
+                        };
+                        if (request.signal.aborted) {
+                          onAbort();
+                        } else {
+                          request.signal.addEventListener("abort", onAbort, {
+                            once: true,
+                          });
+                        }
+                      },
+                    }),
+                    {
+                      headers: { "content-type": "application/octet-stream" },
+                    },
+                  );
                 case "error":
                   throw new Error("http2 around failed");
                 default:
@@ -236,6 +286,36 @@ describe("FastifyPlatform HTTP/2", () => {
         after: false,
       });
       expect(healthySignal?.aborted).toBe(false);
+
+      const streamSession = connect(fixture.url);
+      streamSession.on("error", () => undefined);
+      const outputStream = streamSession.request({
+        ":method": "GET",
+        ":path": "/api/auth/stream-disconnect",
+        "x-probe": "stream-disconnect",
+      });
+      outputStream.on("error", () => undefined);
+      const firstOutputChunk = new Promise<Buffer>((resolve) => {
+        outputStream.once("data", (chunk: Buffer) => {
+          resolve(Buffer.from(chunk));
+          streamSession.destroy();
+        });
+      });
+      outputStream.end();
+      await expect(firstOutputChunk).resolves.toEqual(Buffer.from("first"));
+      await expect(
+        Promise.race([
+          streamAborted.then(() => true),
+          new Promise<false>((resolve) =>
+            setTimeout(() => resolve(false), 1_000),
+          ),
+        ]),
+      ).resolves.toBe(true);
+      await delayedSourceSettled;
+      expect(streamAbortObserved).toBe(true);
+      expect(streamSignal?.aborted).toBe(true);
+      expect(delayedSourceCancelled).toBe(true);
+      expect(delayedSourceContinued).toBe(false);
 
       const disconnectSession = connect(fixture.url);
       disconnectSession.on("error", () => undefined);
