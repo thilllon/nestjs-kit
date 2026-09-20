@@ -400,6 +400,34 @@ describe("FastifyPlatform", () => {
     }
   });
 
+  it("keeps native Fastify wildcard controller parsing outside the auth mount", async () => {
+    @Controller("outside")
+    class WildcardController {
+      @Post("*")
+      owned(@Body() body: unknown) {
+        return { body };
+      }
+    }
+    const fixture = await startHttpFixture({
+      auth: createTestAuth(),
+      adapter: new FastifyAdapter(),
+      platform: fastifyPlatform(),
+      controllers: [WildcardController],
+      moduleOptions: { defaultAccess: "public" },
+    });
+    try {
+      const response = await fetch(`${fixture.url}/outside/example`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"value":42}',
+      });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ body: { value: 42 } });
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("keeps healthy signals live and aborts request handling or response streaming after client disconnect", async () => {
     let healthySignal: AbortSignal | undefined;
     let disconnectReady!: () => void;

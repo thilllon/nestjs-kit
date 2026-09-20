@@ -4,7 +4,9 @@ import type {
   ServerResponse,
 } from "node:http";
 import type { AbstractHttpAdapter } from "@nestjs/core";
+import { parse, pathToRegexp } from "path-to-regexp";
 import type {
+  ApplicationRouteDescriptor,
   AuthRouteBinding,
   ExpressPlatformOptions,
   HttpPlatform,
@@ -12,6 +14,7 @@ import type {
   PlatformPrepareContext,
   ProxyTrust,
 } from "./auth-contracts.js";
+import { BetterAuthConfigurationError } from "./auth-errors.js";
 import {
   appendSetCookie,
   bindAsyncContext,
@@ -43,10 +46,73 @@ type ExpressApplication = {
     handler: (req: ExpressRequest, res: ExpressResponse, next: Next) => void,
   ): unknown;
   get(setting: string): unknown;
+  readonly router?: unknown;
+};
+type ExpressRouterOptions = {
+  readonly caseSensitive: boolean;
+  readonly strict: boolean;
+};
+type ApplicationRouteMatcher = {
+  readonly method: string;
+  readonly regexp: RegExp;
 };
 
 function application(adapter: AbstractHttpAdapter): ExpressApplication {
   return adapter.getInstance() as ExpressApplication;
+}
+
+function routerOptions(
+  app: ExpressApplication | undefined,
+): ExpressRouterOptions {
+  const router = app?.router;
+  if (
+    (typeof router !== "object" && typeof router !== "function") ||
+    router === null
+  ) {
+    throw new BetterAuthConfigurationError(
+      "UNSUPPORTED_EXPRESS_ROUTER",
+      "The Express application does not expose its initialized router.",
+      "Use Express 5.2.x with @nestjs/platform-express 12.x, or move controller routes outside the auth mount.",
+    );
+  }
+  const options = router as Partial<ExpressRouterOptions>;
+  if (
+    typeof options.caseSensitive !== "boolean" ||
+    typeof options.strict !== "boolean"
+  ) {
+    throw new BetterAuthConfigurationError(
+      "UNSUPPORTED_EXPRESS_ROUTER",
+      "The initialized Express router does not expose compatible routing options.",
+      "Use Express 5.2.x with @nestjs/platform-express 12.x, or move controller routes outside the auth mount.",
+    );
+  }
+  return { caseSensitive: options.caseSensitive, strict: options.strict };
+}
+
+function routeMayOverlapMount(path: string, basePath: string): boolean {
+  const tokens = parse(path).tokens;
+  let literalPrefix = "";
+  let dynamic = false;
+  for (const token of tokens) {
+    if (token.type !== "text") {
+      dynamic = true;
+      break;
+    }
+    literalPrefix += token.value;
+  }
+  const route = literalPrefix.toLowerCase();
+  const base = basePath.toLowerCase().replace(/\/+$/, "") || "/";
+  if (base === "/") {
+    return route.startsWith("/");
+  }
+  if (!dynamic) {
+    const exact = route.replace(/\/+$/, "") || "/";
+    return exact === base || exact.startsWith(`${base}/`);
+  }
+  if (base.startsWith(route)) {
+    return true;
+  }
+  return route === base || route.startsWith(`${base}/`);
 }
 
 function rawTarget(req: ExpressRequest): string {
@@ -142,6 +208,8 @@ function abortOnDisconnect(
 export class ExpressPlatform implements HttpPlatform {
   readonly id = "express";
   #warnedConsumedBody = false;
+  #applicationRoutes: readonly ApplicationRouteMatcher[] = [];
+  #application: ExpressApplication | undefined;
 
   constructor(private readonly options: ExpressPlatformOptions = {}) {}
 
@@ -179,11 +247,14 @@ export class ExpressPlatform implements HttpPlatform {
   }
 
   prepare(ctx: PlatformPrepareContext): void {
-    application(ctx.adapter).use((req, _res, next) => {
+    const app = application(ctx.adapter);
+    this.#application = app;
+    app.use((req, _res, next) => {
       const binding = ctx.route(rawPath(req));
       const method = (req.method ?? "GET").toUpperCase();
       if (
         !binding ||
+        this.isApplicationRoute(method, rawPath(req)) ||
         method === "GET" ||
         method === "HEAD" ||
         method === "OPTIONS" ||
@@ -225,6 +296,48 @@ export class ExpressPlatform implements HttpPlatform {
     });
   }
 
+  applicationRoutes(
+    routes: readonly ApplicationRouteDescriptor[],
+    bindings: readonly AuthRouteBinding[],
+  ): void {
+    const bodyRoutes = routes.flatMap((route) => {
+      if (["GET", "HEAD", "OPTIONS"].includes(route.method)) {
+        return [];
+      }
+      const paths = route.paths.filter((path) =>
+        bindings.some((binding) =>
+          routeMayOverlapMount(path, binding.basePath),
+        ),
+      );
+      return paths.length ? [{ ...route, paths }] : [];
+    });
+    const conditional = bodyRoutes.find((route) => route.conditions.length > 0);
+    if (conditional) {
+      throw new BetterAuthConfigurationError(
+        "CONDITIONAL_ROUTE_SHADOW",
+        `${conditional.source} at '${conditional.paths.join(", ")}' uses ${conditional.conditions.join(" and ")} routing under an auth mount.`,
+        "Move the controller route outside the auth mount or make its host and version routing unconditional.",
+      );
+    }
+    if (bodyRoutes.length === 0) {
+      this.#applicationRoutes = [];
+      return;
+    }
+    const { caseSensitive, strict } = routerOptions(this.#application);
+    this.#applicationRoutes = Object.freeze(
+      bodyRoutes.flatMap((route) =>
+        route.paths.map((path) => ({
+          method: route.method,
+          regexp: pathToRegexp(path, {
+            end: true,
+            sensitive: caseSensitive,
+            trailing: !strict,
+          }).regexp,
+        })),
+      ),
+    );
+  }
+
   mount(ctx: PlatformMountContext): void {
     application(ctx.adapter).use((req, res, next) => {
       if (!ctx.binding.matches(rawPath(req))) {
@@ -253,6 +366,14 @@ export class ExpressPlatform implements HttpPlatform {
       return this.options.clientIp(req);
     }
     return req.ip ?? null;
+  }
+
+  private isApplicationRoute(method: string, pathname: string): boolean {
+    return this.#applicationRoutes.some(
+      (route) =>
+        (route.method === "ALL" || route.method === method) &&
+        route.regexp.test(pathname),
+    );
   }
 
   private async dispatch(

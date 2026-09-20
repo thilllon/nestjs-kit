@@ -16,6 +16,7 @@ export type {
   ErrorMappingOptions,
 } from "./auth-errors.js";
 export type {
+  ApplicationRouteDescriptor,
   AdvisedHandler,
   AuthContextView,
   AuthHandle,

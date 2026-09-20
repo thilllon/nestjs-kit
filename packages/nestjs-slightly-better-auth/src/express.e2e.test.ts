@@ -12,11 +12,15 @@ import {
   Module,
   Post,
   Req,
+  RequestMethod,
   VersioningType,
 } from "@nestjs/common";
 import { ExpressAdapter } from "@nestjs/platform-express";
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import type { AbstractHttpAdapter } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { APIError } from "better-auth/api";
+import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CurrentPrincipal,
@@ -25,6 +29,7 @@ import {
   Public,
   RequireAuth,
 } from "./auth-decorators.js";
+import type { AuthRouteBinding } from "./auth-contracts.js";
 import type { AuthPrincipal } from "./auth-types.js";
 import {
   BetterAuthConfigurationError,
@@ -478,6 +483,35 @@ describe("ExpressPlatform", () => {
     });
   });
 
+  it("rejects an unknown initialized Express router shape", () => {
+    const platform = expressPlatform();
+    const app = {
+      get: () => undefined,
+      router: {},
+      use: () => undefined,
+    };
+    platform.prepare({
+      adapter: {
+        getInstance: () => app,
+      } as unknown as AbstractHttpAdapter,
+      logger: new Logger("test"),
+      route: () => undefined,
+    });
+    expect(() =>
+      platform.applicationRoutes(
+        [
+          {
+            method: "POST",
+            paths: Object.freeze(["/api/auth/owned"]),
+            conditions: Object.freeze([]),
+            source: "OwnerController.owned",
+          },
+        ],
+        [{ basePath: "/api/auth" } as AuthRouteBinding],
+      ),
+    ).toThrow(expect.objectContaining({ code: "UNSUPPORTED_EXPRESS_ROUTER" }));
+  });
+
   it("returns the canonical invalid URL response for an invalid trusted protocol", async () => {
     const adapter = new ExpressAdapter();
     const fixture = await startHttpFixture({
@@ -533,7 +567,7 @@ describe("ExpressPlatform", () => {
       adapter,
       platform: expressPlatform(),
       controllers: [],
-      moduleOptions: { http: { around: [byteEcho()] } },
+      moduleOptions: { http: { around: [byteEcho()], bodyLimit: 8 } },
     });
     try {
       for (const body of ['{  "a": 1 }', '{ "b" : 2 }']) {
@@ -543,7 +577,20 @@ describe("ExpressPlatform", () => {
           body,
         });
         expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          bytes: [...Buffer.from(JSON.stringify(JSON.parse(body)))],
+        });
       }
+      const overLimit = await fetch(`${fixture.url}/api/auth/consumed`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"long":"12345"}',
+      });
+      expect(overLimit.status).toBe(413);
+      expect(await overLimit.json()).toEqual({
+        code: "PAYLOAD_TOO_LARGE",
+        message: "Request body exceeds the configured limit",
+      });
       expect(
         warnings.mock.calls.filter(([message]) =>
           String(message).includes("W_BODY_ALREADY_CONSUMED"),
@@ -594,13 +641,131 @@ describe("ExpressPlatform", () => {
       owned() {
         return { source: "controller" };
       }
+
+      @Public()
+      @Post("owned")
+      ownedPost(
+        @Body() body: unknown,
+        @Req() req: IncomingMessage & { rawBody?: Buffer },
+      ) {
+        return {
+          body,
+          raw: req.rawBody?.toString("utf8"),
+          source: "controller",
+        };
+      }
+
+      @Public()
+      @Post("teams/:teamId")
+      ownedDynamic(
+        @Body() body: unknown,
+        @Req() req: IncomingMessage & { rawBody?: Buffer },
+      ) {
+        return { body, raw: req.rawBody?.toString("utf8") };
+      }
+    }
+    @Controller("api/au:tail")
+    class PartialSegmentOwnerController {
+      @Public()
+      @Post("partial")
+      owned(
+        @Body() body: unknown,
+        @Req() req: IncomingMessage & { rawBody?: Buffer },
+      ) {
+        return { body, raw: req.rawBody?.toString("utf8") };
+      }
+    }
+    let dispatched = 0;
+    const module = await Test.createTestingModule({
+      imports: [
+        BetterAuthModule.forRoot({
+          auth: createTestAuth(),
+          platforms: [expressPlatform()],
+          http: {
+            around: [
+              async () => {
+                dispatched += 1;
+                return Response.json({ source: "auth" });
+              },
+            ],
+          },
+        }),
+      ],
+      controllers: [OwnerController, PartialSegmentOwnerController],
+    }).compile();
+    const app = module.createNestApplication<NestExpressApplication>(
+      new ExpressAdapter(),
+      { rawBody: true },
+    );
+    app.useBodyParser("json", {
+      reviver: (key, value: unknown) =>
+        key === "value" && typeof value === "number" ? value + 1 : value,
+    });
+    app.setGlobalPrefix("v1", {
+      exclude: [
+        { path: "api/auth/owned", method: RequestMethod.GET },
+        { path: "api/auth/owned", method: RequestMethod.POST },
+        { path: "api/auth/teams/:teamId", method: RequestMethod.POST },
+        { path: "api/au:tail/partial", method: RequestMethod.POST },
+      ],
+    });
+    try {
+      await app.init();
+      await app.listen(0, "127.0.0.1");
+      const url = await app.getUrl();
+      const response = await fetch(`${url}/api/auth/owned`);
+      expect(await response.json()).toEqual({ source: "controller" });
+      const raw = '{  "value" : 42 }';
+      const post = await fetch(`${url}/api/auth/owned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: raw,
+      });
+      expect(await post.json()).toEqual({
+        body: { value: 43 },
+        raw,
+        source: "controller",
+      });
+      const dynamic = await fetch(`${url}/api/auth/teams/example`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: raw,
+      });
+      expect(await dynamic.json()).toEqual({
+        body: { value: 43 },
+        raw,
+      });
+      const partial = await fetch(`${url}/api/auth/partial`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: raw,
+      });
+      expect(await partial.json()).toEqual({
+        body: { value: 43 },
+        raw,
+      });
+      expect(dispatched).toBe(0);
+    } finally {
+      await app.close();
+      await module.close();
+    }
+  });
+
+  it("preserves URI-versioned controller bodies under the matching auth mount", async () => {
+    @Controller({ path: "api/auth", version: "1" })
+    class VersionedOwnerController {
+      @Public()
+      @Post("owned")
+      owned(@Body() body: unknown) {
+        return { body, source: "controller" };
+      }
     }
     let dispatched = 0;
     const fixture = await startHttpFixture({
-      auth: createTestAuth(),
+      auth: createTestAuth({ baseURL: "http://localhost:3000/v1/api/auth" }),
       adapter: new ExpressAdapter(),
       platform: expressPlatform(),
-      controllers: [OwnerController],
+      controllers: [VersionedOwnerController],
       moduleOptions: {
         http: {
           around: [
@@ -611,13 +776,243 @@ describe("ExpressPlatform", () => {
           ],
         },
       },
+      configure: (app) => {
+        app.enableVersioning({ type: VersioningType.URI });
+      },
     });
     try {
-      const response = await fetch(`${fixture.url}/api/auth/owned`);
-      expect(await response.json()).toEqual({ source: "controller" });
+      const controller = await fetch(`${fixture.url}/v1/api/auth/owned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"versioned":true}',
+      });
+      expect(await controller.json()).toEqual({
+        body: { versioned: true },
+        source: "controller",
+      });
       expect(dispatched).toBe(0);
+
+      const auth = await fetch(`${fixture.url}/v1/api/auth/unowned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{  "exact" : true }',
+      });
+      expect(await auth.json()).toEqual({ source: "auth" });
+      expect(dispatched).toBe(1);
     } finally {
       await fixture.close();
+    }
+  });
+
+  it("rejects host-conditional controller overlap before match or fallback can lose bytes", async () => {
+    @Controller({ path: "api/au:tail", host: "admin.example" })
+    class HostOwnerController {
+      @Public()
+      @Post("owned")
+      owned(@Body() body: unknown) {
+        return body;
+      }
+    }
+    await expect(
+      startHttpFixture({
+        auth: createTestAuth(),
+        adapter: new ExpressAdapter(),
+        platform: expressPlatform(),
+        controllers: [HostOwnerController],
+      }),
+    ).rejects.toThrow("CONDITIONAL_ROUTE_SHADOW");
+  });
+
+  it("rejects header-version controller overlap before a version mismatch can lose bytes", async () => {
+    @Controller({ path: "api/auth", version: "1" })
+    class HeaderVersionOwnerController {
+      @Public()
+      @Post("owned")
+      owned(@Body() body: unknown) {
+        return body;
+      }
+    }
+    await expect(
+      startHttpFixture({
+        auth: createTestAuth(),
+        adapter: new ExpressAdapter(),
+        platform: expressPlatform(),
+        controllers: [HeaderVersionOwnerController],
+        configure: (app) => {
+          app.enableVersioning({
+            type: VersioningType.HEADER,
+            header: "x-api-version",
+          });
+        },
+      }),
+    ).rejects.toThrow("CONDITIONAL_ROUTE_SHADOW");
+  });
+
+  it("allows unrelated conditional routes and bodyless conditional precedence", async () => {
+    @Controller({ path: "outside", host: "admin.example" })
+    class ConditionalOutsideController {
+      @Public()
+      @Post("owned")
+      owned(@Body() body: unknown) {
+        return body;
+      }
+    }
+    @Controller({ path: "api/au\\:tail", host: "admin.example" })
+    class EscapedLiteralConditionalController {
+      @Public()
+      @Post("owned")
+      owned(@Body() body: unknown) {
+        return body;
+      }
+    }
+    @Controller({ path: "api/auth", host: "admin.example" })
+    class ConditionalReadController {
+      @Public()
+      @Get("owned-read")
+      owned() {
+        return { source: "controller" };
+      }
+    }
+    const echo = byteEcho();
+    const fixture = await startHttpFixture({
+      auth: createTestAuth(),
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [
+        ConditionalOutsideController,
+        EscapedLiteralConditionalController,
+        ConditionalReadController,
+      ],
+      moduleOptions: {
+        http: {
+          around: [
+            (call) =>
+              call.request.method === "GET"
+                ? Promise.resolve(Response.json({ source: "auth" }))
+                : echo(call),
+          ],
+        },
+      },
+    });
+    try {
+      const response = await fetch(`${fixture.url}/api/auth/unowned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{  "exact" : true }',
+      });
+      expect(await response.json()).toMatchObject({
+        bytes: [...Buffer.from('{  "exact" : true }')],
+      });
+      const matched = await sendNodeRequest(
+        `${fixture.url}/api/auth/owned-read`,
+        { headers: { host: "admin.example" } },
+      );
+      expect(JSON.parse(matched.body.toString())).toEqual({
+        source: "controller",
+      });
+      const mismatched = await sendNodeRequest(
+        `${fixture.url}/api/auth/owned-read`,
+        { headers: { host: "user.example" } },
+      );
+      expect(JSON.parse(mismatched.body.toString())).toEqual({
+        source: "auth",
+      });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("matches controller ownership with Express case, trailing-slash, and ALL semantics", async () => {
+    @Controller("api/auth")
+    class AllOwnerController {
+      @Public()
+      @All("Owned")
+      owned(@Body() body: unknown) {
+        return { body, source: "controller" };
+      }
+    }
+    const loose = await startHttpFixture({
+      auth: createTestAuth(),
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [AllOwnerController],
+      moduleOptions: { http: { around: [byteEcho()] } },
+    });
+    try {
+      const response = await fetch(`${loose.url}/api/auth/owned/`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"native":true}',
+      });
+      expect(await response.json()).toEqual({
+        body: { native: true },
+        source: "controller",
+      });
+    } finally {
+      await loose.close();
+    }
+
+    const strictApplication = express();
+    strictApplication.set("case sensitive routing", true);
+    strictApplication.set("strict routing", true);
+    const strictAdapter = new ExpressAdapter(strictApplication);
+    const strict = await startHttpFixture({
+      auth: createTestAuth(),
+      adapter: strictAdapter,
+      platform: expressPlatform(),
+      controllers: [AllOwnerController],
+      moduleOptions: { http: { around: [byteEcho()] } },
+      configure: () => {
+        strictAdapter.set("case sensitive routing", false);
+        strictAdapter.set("strict routing", false);
+      },
+    });
+    try {
+      const exact = await fetch(`${strict.url}/api/auth/Owned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"native":true}',
+      });
+      expect(await exact.json()).toEqual({
+        body: { native: true },
+        source: "controller",
+      });
+      const fallback = await fetch(`${strict.url}/api/auth/owned/`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{  "exact" : true }',
+      });
+      expect(await fallback.json()).toMatchObject({
+        bytes: [...Buffer.from('{  "exact" : true }')],
+      });
+    } finally {
+      await strict.close();
+    }
+
+    const looseAdapter = new ExpressAdapter();
+    const lateStrict = await startHttpFixture({
+      auth: createTestAuth(),
+      adapter: looseAdapter,
+      platform: expressPlatform(),
+      controllers: [AllOwnerController],
+      moduleOptions: { http: { around: [byteEcho()] } },
+      configure: () => {
+        looseAdapter.set("case sensitive routing", true);
+        looseAdapter.set("strict routing", true);
+      },
+    });
+    try {
+      const nativeLoose = await fetch(`${lateStrict.url}/api/auth/owned/`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"native":true}',
+      });
+      expect(await nativeLoose.json()).toEqual({
+        body: { native: true },
+        source: "controller",
+      });
+    } finally {
+      await lateStrict.close();
     }
   });
 
