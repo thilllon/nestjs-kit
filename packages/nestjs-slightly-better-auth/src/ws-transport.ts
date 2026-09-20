@@ -5,6 +5,7 @@ import { BetterAuthConfigurationError } from "./auth-errors.js";
 import { toWebHeaders, upgradeRequestUrl } from "./platform.js";
 import {
   isSocketIo,
+  mappedCredentialHeaders,
   principalTtl,
   quotaAdvice,
   transportDefinition,
@@ -102,9 +103,11 @@ export function wsTransport(
         principalTtlMs: ttl,
         headers: () => {
           const headers = new Headers(upgrade().headers);
-          new Headers(options.credentials?.(client)).forEach((value, name) => {
-            headers.set(name, value);
-          });
+          mappedCredentialHeaders(options.credentials?.(client)).forEach(
+            (value, name) => {
+              headers.set(name, value);
+            },
+          );
           return headers;
         },
         get clientIp() {

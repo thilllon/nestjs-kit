@@ -15,6 +15,7 @@ import {
   type TransportValidationContext,
 } from "./auth-contracts.js";
 import {
+  AuthFailures,
   BetterAuthConfigurationError,
   type AuthFailure,
 } from "./auth-errors.js";
@@ -38,6 +39,49 @@ export interface SocketIoClientLike {
     readonly url?: string;
     readonly secure?: boolean;
   };
+}
+/** Convert only mapped headers here: native Headers errors can quote the credential. */
+export function mappedCredentialHeaders(
+  input: HeadersInit | undefined,
+): Headers {
+  const headers = new Headers();
+  if (input === undefined) {
+    return headers;
+  }
+  const malformed = () =>
+    AuthFailures.rejected({ status: 401, reason: "MALFORMED_CREDENTIALS" });
+  if (input === null || typeof input !== "object") {
+    throw malformed();
+  }
+  // Read caller-provided getters/iterators outside the conversion catch so their
+  // programming errors remain errors, as do errors thrown by the mapper itself.
+  const iterable = (input as { [Symbol.iterator]?: unknown })[Symbol.iterator];
+  if (iterable !== undefined && typeof iterable !== "function") {
+    throw malformed();
+  }
+  const entries: Iterable<unknown> =
+    typeof iterable === "function"
+      ? (input as Iterable<unknown>)
+      : Object.entries(input);
+  for (const entry of entries) {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      throw malformed();
+    }
+    const [name, value] = entry;
+    if (
+      typeof name !== "string" ||
+      typeof value !== "string" ||
+      /[\r\n\0]/.test(value)
+    ) {
+      throw malformed();
+    }
+    try {
+      headers.append(name, value);
+    } catch {
+      throw malformed();
+    }
+  }
+  return headers;
 }
 export function isSocketIo(client: unknown): client is SocketIoClientLike {
   return typeof client === "object" && client !== null && "handshake" in client;
@@ -161,13 +205,22 @@ export function socketIoTransport(
         principalTtlMs: ttl,
         headers: () => {
           const headers = original();
-          const mapped = options.credentials
-            ? options.credentials(client)
-            : !headers.has("authorization") &&
-                typeof client.handshake.auth?.token === "string"
-              ? { authorization: `Bearer ${client.handshake.auth.token}` }
-              : undefined;
-          new Headers(mapped).forEach((value, name) => {
+          let mapped: HeadersInit | undefined;
+          if (options.credentials) {
+            mapped = options.credentials(client);
+          } else if (!headers.has("authorization")) {
+            const token = client.handshake.auth?.token;
+            if (token !== undefined) {
+              if (typeof token !== "string") {
+                throw AuthFailures.rejected({
+                  status: 401,
+                  reason: "MALFORMED_CREDENTIALS",
+                });
+              }
+              mapped = { authorization: `Bearer ${token}` };
+            }
+          }
+          mappedCredentialHeaders(mapped).forEach((value, name) => {
             headers.set(name, value);
           });
           return headers;

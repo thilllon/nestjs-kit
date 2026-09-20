@@ -3,6 +3,7 @@ import { ExecutionContextHost } from "@nestjs/core/helpers/execution-context-hos
 import type { PrincipalResolver, PrincipalResult } from "./auth-contracts.js";
 import {
   AuthFailures,
+  isAuthFailure,
   BetterAuthConfigurationError,
   type AuthFailure,
 } from "./auth-errors.js";
@@ -55,20 +56,27 @@ export class WsConnectionAuth {
         .filter((source) => source.acceptance === "default")
         .flatMap((source) => [...source.kinds]),
     );
-    return this.resolver.resolve(call, {
-      auth: entry.handle,
-      accepts,
-      sourceSet: JSON.stringify(
-        entry.sources.flatMap((source, index) =>
-          source.kinds.some((kind) => accepts.has(kind)) ? [index] : [],
+    try {
+      return await this.resolver.resolve(call, {
+        auth: entry.handle,
+        accepts,
+        sourceSet: JSON.stringify(
+          entry.sources.flatMap((source, index) =>
+            source.kinds.some((kind) => accepts.has(kind)) ? [index] : [],
+          ),
         ),
-      ),
-      freshness:
-        entry.options.session !== false &&
-        entry.options.session?.freshness === "authoritative"
-          ? "authoritative"
-          : "default",
-    });
+        freshness:
+          entry.options.session !== false &&
+          entry.options.session?.freshness === "authoritative"
+            ? "authoritative"
+            : "default",
+      });
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        return { outcome: "rejected", failure: error };
+      }
+      throw error;
+    }
   }
 
   socketIoMiddleware(

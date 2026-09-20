@@ -1,5 +1,12 @@
 import "reflect-metadata";
-import { Catch, Inject, UseFilters, type ArgumentsHost } from "@nestjs/common";
+import { inspect } from "node:util";
+import {
+  Catch,
+  Inject,
+  Logger,
+  UseFilters,
+  type ArgumentsHost,
+} from "@nestjs/common";
 import { WsAdapter } from "@nestjs/platform-ws";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import {
@@ -15,8 +22,13 @@ import {
 } from "better-auth/api";
 import { bearer } from "better-auth/plugins";
 import { WebSocket } from "ws";
-import { expect, it } from "vitest";
-import { Public, RequireAuth, UseBetterAuth } from "./auth-decorators.js";
+import { expect, it, vi } from "vitest";
+import {
+  OptionalAuth,
+  Public,
+  RequireAuth,
+  UseBetterAuth,
+} from "./auth-decorators.js";
 import { CurrentSession } from "./session-principal.js";
 import { getBetterAuthServiceToken } from "./auth-tokens.js";
 import type { BetterAuthService } from "./auth-service.js";
@@ -504,6 +516,172 @@ it.each([false, true])(
     } finally {
       client?.terminate();
       await f.close();
+    }
+  },
+);
+it.each([false, true])(
+  "safely denies malformed raw-ws mapped credentials (connect=%s)",
+  async (authenticateConnection) => {
+    const secret = "RAW_WS_MALFORMED_SECRET";
+    const malformed = `${secret}\r\nInjected: value`;
+    let reads = 0;
+    let effects = 0;
+    let connectionResult: unknown;
+    const logs = vi
+      .spyOn(Logger.prototype, "error")
+      .mockImplementation(() => undefined);
+    @WebSocketGateway()
+    @UseBetterAuth()
+    class Gateway {
+      constructor(
+        @Inject(WS_CONNECTION_AUTH)
+        private readonly connection: WsConnectionAuth,
+      ) {}
+
+      async handleConnection(client: WebSocket) {
+        if (!authenticateConnection) {
+          return;
+        }
+        try {
+          const result = await this.connection.authenticate(client);
+          connectionResult = result;
+          client.close(
+            result.outcome === "rejected"
+              ? wsCloseCodeFor(result.failure)
+              : 4501,
+          );
+        } catch (error) {
+          connectionResult = error;
+          client.close(4500);
+        }
+      }
+
+      @Public()
+      @SubscribeMessage("ticker")
+      ticker() {
+        return { event: "ticker", data: true };
+      }
+
+      @RequireAuth()
+      @SubscribeMessage("identity")
+      identity() {
+        effects++;
+        return { event: "identity", data: true };
+      }
+
+      @OptionalAuth()
+      @SubscribeMessage("optional")
+      optional() {
+        effects++;
+        return { event: "optional", data: true };
+      }
+    }
+    const auth = createTestAuth({
+      plugins: [bearer()],
+      hooks: {
+        before: createAuthMiddleware(async (ctx) => {
+          if (ctx.path === "/get-session") {
+            reads++;
+          }
+        }),
+      },
+    });
+    const f = await startHttpFixture({
+      auth,
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [],
+      providers: [Gateway],
+      transports: [
+        wsTransport({
+          credentials: (client) => ({
+            cookie: new URL(
+              client[UPGRADE_REQUEST]!.url!,
+              "http://localhost",
+            ).searchParams.get("credential")!,
+          }),
+        }),
+      ],
+      configure: (app) => {
+        app.useWebSocketAdapter(new (withUpgradeRequest(WsAdapter))(app));
+      },
+    });
+    let client: WebSocket | undefined;
+    try {
+      const response = await auth.api.signUpEmail({
+        body: {
+          name: "Malformed",
+          email: "malformed@example.com",
+          password: "password1234",
+        },
+        asResponse: true,
+      });
+      const cookie = response.headers
+        .getSetCookie()
+        .map((line) => line.split(";")[0])
+        .join("; ");
+      const { token } = await response.json();
+      const options = {
+        headers: {
+          cookie,
+          authorization: `Bearer ${token}`,
+          origin: "http://localhost:3000",
+        },
+      };
+      const url = `${f.url.replace("http", "ws")}/?credential=${encodeURIComponent(malformed)}`;
+      if (authenticateConnection) {
+        client = new WebSocket(url, options);
+        const socket = client;
+        const code = await new Promise<number>((resolve, reject) => {
+          const cleanup = () => {
+            clearTimeout(timer);
+            socket.off("close", closed);
+            socket.off("error", failed);
+          };
+          const closed = (code: number) => {
+            cleanup();
+            resolve(code);
+          };
+          const failed = (error: Error) => {
+            cleanup();
+            reject(error);
+          };
+          const timer = setTimeout(
+            () => failed(new Error("WebSocket close timeout")),
+            2000,
+          );
+          socket.once("close", closed);
+          socket.once("error", failed);
+        });
+        expect(inspect(connectionResult, { depth: 10 })).not.toContain(secret);
+        expect(connectionResult).toMatchObject({
+          outcome: "rejected",
+          failure: { status: 401, reason: "MALFORMED_CREDENTIALS" },
+        });
+        expect(code).toBe(4401);
+      } else {
+        client = await connect(url, options.headers);
+        expect(await sendMessage(client, "ticker", {})).toEqual({
+          event: "ticker",
+          data: true,
+        });
+        for (const event of ["identity", "optional"]) {
+          const result = await sendMessage(client, event, {});
+          expect(inspect(logs.mock.calls, { depth: 10 })).not.toContain(secret);
+          expect(inspect(result, { depth: 10 })).not.toContain(secret);
+          expect(result).toMatchObject({
+            event: "exception",
+            data: { statusCode: 401, reason: "MALFORMED_CREDENTIALS" },
+          });
+        }
+      }
+      expect(reads).toBe(0);
+      expect(effects).toBe(0);
+      expect(logs).not.toHaveBeenCalled();
+    } finally {
+      client?.terminate();
+      await f.close();
+      logs.mockRestore();
     }
   },
 );

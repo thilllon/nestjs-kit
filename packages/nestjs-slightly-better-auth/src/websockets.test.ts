@@ -190,3 +190,115 @@ describe.each([
     }
   });
 });
+describe.each(["socket.io", "ws"] as const)(
+  "malformed mapped credentials (%s)",
+  (kind) => {
+    const secret = "MAPPED_CREDENTIAL_SECRET";
+    function call(credentials: () => HeadersInit | undefined) {
+      const client = {
+        handshake: {
+          headers: {
+            host: "localhost:3000",
+            cookie: "valid=credential",
+            authorization: "Bearer valid-fallback",
+          },
+        },
+      };
+      const raw = {};
+      recordUpgradeRequest(raw, {
+        headers: client.handshake.headers,
+        url: "/",
+      });
+      return unit(
+        kind === "socket.io"
+          ? socketIoTransport({ credentials })
+          : wsTransport({ credentials }),
+      ).describe(context(kind === "socket.io" ? client : raw), { http: null });
+    }
+    it.each([
+      { authorization: `${secret}\rsecond` },
+      { authorization: `${secret}\nsecond` },
+      { authorization: `${secret}\0second` },
+      { authorization: `${secret}\r\n` },
+      { authorization: `${secret}\u0100` },
+      { [`${secret} invalid`]: "token" },
+      { authorization: 42 },
+      { authorization: null },
+      { authorization: undefined },
+      { authorization: [secret] },
+      { authorization: { toString: () => secret } },
+      [["authorization", secret, "extra"]],
+      [["authorization"]],
+      null,
+      secret,
+    ])(
+      "rejects invalid HeaderInit without retaining raw cause or allowing fallback (%#)",
+      (mapped) => {
+        let failure: unknown;
+        try {
+          call(() => mapped as HeadersInit).headers();
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toMatchObject({
+          status: 401,
+          reason: "MALFORMED_CREDENTIALS",
+        });
+        expect(failure).not.toHaveProperty("cause");
+        expect(failure).not.toHaveProperty("stack");
+        expect(JSON.stringify(failure)).not.toContain(secret);
+      },
+    );
+    it("preserves arbitrary mapper and mapped-getter programming errors", () => {
+      const error = new TypeError("mapper programming error");
+      expect(() =>
+        call(() => {
+          throw error;
+        }).headers(),
+      ).toThrow(error);
+      expect(() =>
+        call(() => ({
+          get authorization(): string {
+            throw error;
+          },
+        })).headers(),
+      ).toThrow(error);
+    });
+    it("retains valid HeadersInit forms and keeps the browser leg untouched", () => {
+      for (const mapped of [
+        new Headers({ authorization: "Bearer mapped" }),
+        [["authorization", "Bearer mapped"]],
+        { authorization: "Bearer mapped" },
+      ]) {
+        const transportCall = call(() => mapped as HeadersInit);
+        expect(transportCall.headers().get("authorization")).toBe(
+          "Bearer mapped",
+        );
+        expect(transportCall.browser?.headers().get("authorization")).toBe(
+          "Bearer valid-fallback",
+        );
+      }
+    });
+  },
+);
+it.each([null, 42, {}, [], true])(
+  "rejects a supplied non-string default Socket.IO token without falling back to cookies (%#)",
+  (token) => {
+    const transport = unit(socketIoTransport());
+    expect(() =>
+      transport
+        .describe(
+          context({
+            handshake: {
+              headers: { cookie: "valid=credential", host: "localhost" },
+              auth: { token },
+            },
+          }),
+          { http: null },
+        )
+        .headers(),
+    ).toThrow(
+      expect.objectContaining({ status: 401, reason: "MALFORMED_CREDENTIALS" }),
+    );
+  },
+);

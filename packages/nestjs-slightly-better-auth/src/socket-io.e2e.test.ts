@@ -1,5 +1,6 @@
 import "reflect-metadata";
-import { Inject, UseGuards } from "@nestjs/common";
+import { inspect } from "node:util";
+import { Inject, Logger, UseGuards } from "@nestjs/common";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import { IoAdapter } from "@nestjs/platform-socket.io";
 import {
@@ -14,9 +15,10 @@ import { nestjs } from "./plugin.js";
 import { admin, bearer, organization } from "better-auth/plugins";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   OptionalAuth,
+  Public,
   RequireAuth,
   UseAuthInstance,
   UseBetterAuth,
@@ -125,6 +127,7 @@ async function fixture(
   };
   let fail: "rejected" | "outage" | undefined;
   let reads = 0;
+  let effects = 0;
   let originCalls = 0;
   const auth = betterAuth({
     secret: crypto.randomUUID() + crypto.randomUUID(),
@@ -183,9 +186,16 @@ async function fixture(
       }
     }
 
+    @Public()
+    @SubscribeMessage("ticker")
+    ticker() {
+      return { public: true };
+    }
+
     @RequireAuth()
     @SubscribeMessage("identity")
     identity(@CurrentSession() session: { user: { email: string } }) {
+      effects++;
       return { email: session.user.email };
     }
 
@@ -213,6 +223,7 @@ async function fixture(
     @OptionalAuth()
     @SubscribeMessage("optional")
     optional(@CurrentSession() session: { user: { email: string } } | null) {
+      effects++;
       return { email: session?.user.email ?? null };
     }
 
@@ -294,6 +305,7 @@ async function fixture(
       fail = value;
     },
     reads: () => reads,
+    effects: () => effects,
     origins: () => originCalls,
   };
 }
@@ -698,6 +710,76 @@ it.each([false, true])(
     } finally {
       client?.close();
       await f.close();
+    }
+  },
+);
+it.each([
+  ["default", undefined],
+  ["custom", undefined],
+  ["default", false],
+  ["custom", false],
+  ["default", true],
+  ["custom", true],
+] as const)(
+  "safely denies malformed Socket.IO credentials (%s mapping, required=%s)",
+  async (mapping, required) => {
+    const secret = "SOCKET_IO_MALFORMED_SECRET";
+    const malformed = `${secret}\r\nInjected: value`;
+    const logs = vi
+      .spyOn(Logger.prototype, "error")
+      .mockImplementation(() => undefined);
+    const f = await fixture({
+      required,
+      credentials:
+        mapping === "custom" ? () => ({ cookie: malformed }) : undefined,
+    });
+    let client: Socket | undefined;
+    try {
+      const login = await f.login();
+      const reads = f.reads();
+      const headers = {
+        cookie: login.cookie,
+        origin: "http://localhost:3000",
+        ...(mapping === "custom"
+          ? { authorization: `Bearer ${login.token}` }
+          : {}),
+      };
+      if (required === undefined) {
+        client = await connect(f.url, { headers, token: malformed });
+        expect(await message(client, "ticker")).toEqual({ public: true });
+        for (const event of ["identity", "optional"]) {
+          const response = await message(client, event);
+          expect(inspect(logs.mock.calls, { depth: 10 })).not.toContain(secret);
+          expect(inspect(response, { depth: 10 })).not.toContain(secret);
+          expect(response).toMatchObject({
+            statusCode: 401,
+            reason: "MALFORMED_CREDENTIALS",
+          });
+        }
+      } else {
+        const failure = await connect(f.url, {
+          headers,
+          token: malformed,
+        }).then(
+          (connected) => {
+            client = connected;
+            return null;
+          },
+          (error: unknown) => error,
+        );
+        expect(inspect(logs.mock.calls, { depth: 10 })).not.toContain(secret);
+        expect(inspect(failure, { depth: 10 })).not.toContain(secret);
+        expect(failure).toMatchObject({
+          data: { statusCode: 401, reason: "MALFORMED_CREDENTIALS" },
+        });
+      }
+      expect(f.reads()).toBe(reads);
+      expect(f.effects()).toBe(0);
+      expect(logs).not.toHaveBeenCalled();
+    } finally {
+      client?.close();
+      await f.close();
+      logs.mockRestore();
     }
   },
 );
