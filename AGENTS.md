@@ -45,6 +45,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Write unit tests for meaningful behavior: signing rules, configuration isolation, lifecycle management, error propagation and regressions. Do not add trivial framework/getter tests or tests mirroring the implementation.
 - Where middleware integration needs E2E coverage, provide Docker Compose services with health checks and `docker:up` / `docker:down` scripts. Use isolated local services; always clean up after tests.
 - Default unit tests must not require cloud credentials or network services. PostgreSQL E2E runs separately with `pnpm test:e2e`.
+- Run artifact consumer checks separately with `pnpm test:packaging` after building. Keep packaging tests out of the default unit test run so a clean checkout works without `dist`.
 - Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
 ## Multiple client registrations
@@ -73,6 +74,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Honor explicit maintainer-requested coordinated releases through a changeset; Changesets combines all pending requests into one bump per package.
 - Only changed packages are versioned/published. Do not introduce a competing semantic-release publisher or release unchanged packages for documentation-only edits.
 - All seven established integrations participate in native Changesets versioning and publication. Keep established packages out of `ignore`; verify any future package's first publication and trusted publisher before enabling its automated publication. Do not introduce a custom publication wrapper.
+- `nestjs-slightly-better-auth` is an additional private design workspace, not a released integration. Keep it private until its implementation and first intended release are ready; follow its package instructions and preserve its MIT licenses and historical design material.
 - Prepare and publish only the workflow event commit (`github.sha`). Never publish in the run that merges a version PR: when the publication gate is enabled, dispatch a fresh Release run after the protected merge. Verify its event SHA, preparation base and checkout agree, so signed provenance describes the actual artifact source.
 - npm publishing uses trusted-publisher OIDC and provenance. Leave `NPM_PUBLISH_ENABLED` disabled until the owner completes npm setup; new packages need an owner-authenticated first publication before trust can be configured.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.

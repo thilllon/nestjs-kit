@@ -51,6 +51,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm test:packaging
       - name: Start PostgreSQL for integration tests
         run: pnpm docker:up
       - name: Test against real PostgreSQL

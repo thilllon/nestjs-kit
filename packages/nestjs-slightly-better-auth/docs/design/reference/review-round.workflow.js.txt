@@ -1,0 +1,305 @@
+export const meta = {
+  name: 'nsba-design-round',
+  description: 'One design review round (args: {round, from, to}): 3 adversarial reviewers, then (if rejected) revise, audit the revision, and close the gaps',
+  phases: [
+    { title: 'Critique', detail: '3 independent adversarial reviewers (better-auth, NestJS/SOLID, security/SRE) judge the current version and the previous round\'s fixes' },
+    { title: 'Revise', detail: 'lead architect writes design v3 and appends round 2 to the ledger' },
+    { title: 'Audit', detail: 'ledger auditor + cross-reference auditor check v3' },
+    { title: 'Fix', detail: 'lead architect closes every audited gap' },
+  ],
+}
+
+const SP = '/private/tmp/claude-502/-Users-thilllon-git-nestjs-slightly-better-auth/3e03069d-123b-4b6f-9541-3a6ca41ae377/scratchpad'
+const REF = `${SP}/ref`
+const BA = `${SP}/better-auth`
+const CUR = '/Users/thilllon/git/nestjs-slightly-better-auth'
+const D = `${CUR}/docs/design`
+const ROUND = args.round
+const FROM = args.from
+const TO = args.to
+const PRIOR_ROUNDS = Array.from({ length: ROUND - 1 }, (_, i) => i + 1)
+// The highest §17 question number the user has answered (all as recommended), if any.
+const DECIDED_THROUGH = args.decidedThrough
+// Revision-only switches, so a resumed run keeps its cached reviews: questions the user
+// answered while the round was running, and a revision interrupted after saving part of v<to>.
+const USER_ANSWERED_THROUGH = args.userAnsweredThrough
+const CONTINUE_PARTIAL = args.continuePartial === true
+
+const CONTEXT = `PROJECT
+We are DESIGNING (not implementing) \`nestjs-slightly-better-auth\`: a from-scratch NestJS integration for better-auth. We learned from @thallesp/nestjs-better-auth v2.8.0, but this is a clean break.
+
+HARD REQUIREMENTS (from the user, non-negotiable)
+R1 Honor better-auth's own philosophy and integration model (framework-agnostic Web handler, plugin-first extension, inference-driven types, secure by default). Do not reimplement what better-auth already does.
+R2 HTTP platforms are pluggable through an adapter contract. Express and Fastify ship first-class; any other server / middleware stack can be attached by a third party without editing our code.
+R3 Ships dual CJS + ESM.
+R4 SOLID, especially Open-Closed: new HTTP platforms, transports, principal sources, authorization policies and hooks are added by extension, never by editing core. Core must not switch/if on platform names, transport names or policy kinds.
+R5 Toolchain: pnpm, tsdown (0.23.x), vitest, biome.
+
+USER DECISIONS (already made; do not reopen)
+D1 Peer ranges: @nestjs/* ^11 || ^12; Node engines >=22.12; dual CJS+ESM (the CJS build relies on require(esm) because better-auth and Nest 12 are ESM-only).
+D2 v1 ships built-in support for: HTTP on Express and Fastify; GraphQL via Apollo AND Mercurius; WebSocket gateways (socket.io and ws); Microservices/RPC. Each must still be an extension unit, not core code.
+D3 Clean break from @thallesp's API: choose the best names/semantics; include a migration guide section.
+D4 better-auth peer range: >=1.7.0 <2.
+
+STRONG DEFAULTS FROM RESEARCH (deviate only with explicit, evidence-backed justification written into the doc)
+S1 Never mutate auth.options after betterAuth(); bridge Nest-side hooks through a better-auth plugin, preserving hook return-value semantics.
+S2 On cookie-capable transports, server-side getSession uses returnHeaders:true and forwards ONLY set-cookie; on transports that cannot write cookies, refresh is deliberately suppressed.
+S3 The auth mount path comes from better-auth itself, all HTTP methods, outside Nest's global prefix unless deliberately designed otherwise.
+S4 Auth routes receive the untouched request body stream; app routes keep Nest-native parsing incl. rawBody; a body size limit is enforced on auth routes.
+S5 Copy-safe identities (Symbol.for / namespaced tokens and metadata keys), explicit @Inject, an explicit dual-package-hazard strategy.
+S6 Detect better-auth errors with isAPIError, never instanceof. Infrastructure failures surface as 5xx, never as 401/403.
+S7 Resolve the principal lazily, at most once per request.
+
+${DECIDED_THROUGH
+  ? `DECIDED PRODUCT QUESTIONS (the user answered; do not reopen)
+§17 Q13 to Q${DECIDED_THROUGH} are decided as the recommended option written in §17. Treat them like D1-D4. Raise a finding about one only when the decided answer causes a concrete defect (a failure scenario with evidence); then the fix must keep the decision, or be deferred to the user as a new question.
+
+OPEN PRODUCT QUESTIONS (pending with the user)
+§17 questions numbered after Q${DECIDED_THROUGH} are awaiting the user's answer. The design implements the recommended default for each. Judge the design AS WRITTEN with those defaults. Do not re-raise a question itself as a finding.`
+  : `OPEN PRODUCT QUESTIONS (pending with the user)
+The §17 questions from Q13 on are awaiting the user's answer. The design currently implements the lead's recommended default for each. Judge the design AS WRITTEN with those defaults. Do not re-raise a question itself as a finding; raise a finding only when a default causes a concrete defect (a failure scenario with evidence).`}
+
+RESOURCES
+- Design workspace: ${D}
+  - ${D}/design-v${FROM}.md: the design under review. Earlier versions design-v1.md .. design-v${FROM - 1}.md were rejected (read-only).
+  - ${D}/ledger.md: every earlier finding with its action and a note on the fix and the ADR that records it, round by round.
+  - ${D}/reviews/round-<n>-{BA,NEST,SEC}.md: the findings of rounds ${PRIOR_ROUNDS.join(', ')} in full.
+  - ${D}/research/_digest.md and nine full research reports next to it.
+  - ${D}/tools/splice.mjs and ${D}/tools/sync-parts.mjs (\`node sync-parts.mjs <doc> <partsDir> [--check]\`).
+- better-auth 1.7.4 source (read-only): ${BA}. @thallesp/nestjs-better-auth v2.8.0 source (read-only): ${REF}.
+- Experiments and downloads: ONLY in your own directory ${SP}/tmp-r${ROUND}-<your-label>/. Older text mentions tmp-* experiment directories that no longer exist; treat their results as recorded findings and re-run an experiment before relying on it for a NEW conclusion. Install what you need there (for example @nestjs/* 11.1.17 and 12.0.1, fastify, express, mercurius, @apollo/server, socket.io, ws, better-auth 1.7.4 and 1.7.0).
+
+BOUNDARIES
+- Write documents only inside ${D}, and only where your role says. Never run a git command that changes state (no add, commit, push, checkout, stash, reset); the main session commits. Ignore changes elsewhere in ${CUR}.
+- CHECKPOINTING: earlier runs died mid-task and lost unsaved work. Save to disk after every subsection you finish.`
+
+const DECISION_ITEM = {
+  type: 'object',
+  properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' } }, recommendation: { type: 'string' } },
+  required: ['question', 'options', 'recommendation'],
+}
+
+const REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['approve', 'reject'] },
+    summary: { type: 'string' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          severity: { type: 'string', enum: ['blocker', 'major', 'minor'] },
+          section: { type: 'string' },
+          title: { type: 'string' },
+          failureScenario: { type: 'string' },
+          evidence: { type: 'string' },
+          suggestedFix: { type: 'string' },
+        },
+        required: ['id', 'severity', 'section', 'title', 'failureScenario', 'evidence', 'suggestedFix'],
+      },
+    },
+    priorFindingsStatus: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string', enum: ['resolved', 'unresolved', 'rebuttal-accepted', 'rebuttal-rejected'] },
+          note: { type: 'string' },
+        },
+        required: ['id', 'status', 'note'],
+      },
+    },
+    userDecisions: { type: 'array', items: DECISION_ITEM },
+  },
+  required: ['verdict', 'summary', 'findings', 'priorFindingsStatus', 'userDecisions'],
+}
+
+const REVISE_SCHEMA = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    changeSummary: { type: 'string' },
+    responses: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: { type: 'string' }, action: { type: 'string', enum: ['accepted', 'rebutted', 'deferred-to-user'] }, note: { type: 'string' } },
+        required: ['id', 'action', 'note'],
+      },
+    },
+    userDecisions: { type: 'array', items: DECISION_ITEM },
+  },
+  required: ['path', 'changeSummary', 'responses', 'userDecisions'],
+}
+
+const AUDIT_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    checked: { type: 'number' },
+    gaps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string', enum: ['missing', 'partially-applied', 'contradicted', 'dangling-reference', 'placeholder', 'inconsistency'] },
+          where: { type: 'string' },
+          problem: { type: 'string' },
+          requiredChange: { type: 'string' },
+        },
+        required: ['id', 'status', 'where', 'problem', 'requiredChange'],
+      },
+    },
+  },
+  required: ['summary', 'checked', 'gaps'],
+}
+
+const FIX_SCHEMA = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    changeSummary: { type: 'string' },
+    responses: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: { type: 'string' }, action: { type: 'string', enum: ['fixed', 'not-a-gap'] }, note: { type: 'string' } },
+        required: ['id', 'action', 'note'],
+      },
+    },
+  },
+  required: ['path', 'changeSummary', 'responses'],
+}
+
+const REVIEWERS = [
+  { key: 'BA', name: 'better-auth core maintainer', lens: "Fidelity to better-auth's philosophy and exact runtime semantics. Check every claim the design makes about better-auth (handler pipeline, basePath/baseURL, body reading, origin/CSRF, rate limit and IP, getSession Set-Cookie paths, cookie cache, hooks and plugin contract incl. ordering and return values, databaseHooks, APIError, $context, $Infer, customSession, admin/organization/api-key/jwt/bearer/oauth-provider plugins) against the 1.7.x source, at BOTH the 1.7.0 floor and 1.7.4. Hunt for reimplementation of better-auth behavior, misuse of its extension points, broken plugin compatibility, type-inference loss, and anything likely to break across 1.7 -> 1.x minor upgrades." },
+  { key: 'NEST', name: 'NestJS core maintainer and SOLID/OCP auditor', lens: 'NestJS correctness on BOTH Nest 11 and 12 (module lifecycle timing, NestFactory vs @nestjs/testing, DI tokens and scopes, guards/Reflector/decorators, ExecutionContext per transport, Apollo vs Mercurius, socket.io vs ws, microservices incl. hybrid apps, exception filters per transport) and packaging (dual CJS/ESM hazard, decorator metadata under tsdown, subpath exports, optional peers). Audit SOLID rigorously: any place core must be edited to add a platform/transport/policy/principal source (OCP), fat interfaces (ISP), adapters that need special cases to substitute (LSP), core depending on concretions (DIP), units with more than one reason to change (SRP). The design has grown with every round; check whether the mechanisms added in response to earlier findings (principal kinds and acceptance, per-invocation memo, origin check, coverage rule, stamps and carriers, boot advice, authoritative reads) kept core small and the contracts coherent, and say so when a mechanism should be removed rather than patched. Also testability for consumers.' },
+  { key: 'SEC', name: 'security engineer and production SRE', lens: 'Security: CSRF/origin checks (including the ways a request can be exempted from them), CORS, body-parsing bypasses and size limits, raw-body integrity, trust of forwarded headers and rate-limit bucket collapse, cookie forwarding and refresh drift, session fixation, information leakage in errors/logs/serialized sessions, stale authorization via cookie cache, api-key quota, privilege escalation via principal kinds and delegation, WS/RPC credential carriage. Operations: behavior when the DB or secondary storage is down, startup validation, diagnostics for misconfiguration, per-request cost, memory growth, graceful shutdown, test isolation, upgrade and migration safety.' },
+]
+
+const reviewPrompt = (rv) => `${CONTEXT}
+
+ROLE
+You are an ADVERSARIAL reviewer: ${rv.name}. Critique round ${ROUND}, reviewing design v${FROM} at ${D}/design-v${FROM}.md. Your job is to find the reasons this design will fail. Assume it is wrong until you have checked. You are one of three independent reviewers with different lenses; stay in your lens, but report anything severe you notice outside it.
+
+YOUR LENS
+${rv.lens}
+
+PROCESS
+1. Read the design doc fully (in chunks). Read the research digest; open full research reports and source whenever you need to verify a claim. If a finding depends on runtime behavior not already verified, run a minimal experiment in ${SP}/tmp-r${ROUND}-review-${rv.key}/.
+2. Read ${D}/ledger.md and your earlier reviews ${PRIOR_ROUNDS.map((n) => `${D}/reviews/round-${n}-${rv.key}.md`).join(', ')}. For EVERY finding from round ${ROUND - 1} with id prefix ${rv.key}-r${ROUND - 1}-, and every earlier ${rv.key}- finding a previous round marked unresolved, set its status: resolved / unresolved / rebuttal-accepted / rebuttal-rejected ("unresolved" means the fix does not stop the original failure scenario). Also report, as a new finding, any earlier fix of yours that the latest revision broke again. Check that the fixes did not introduce new problems, contradictions or needless complexity.
+3. Report NEW findings. Each MUST have a concrete failure scenario (specific inputs/state -> specific wrong outcome), evidence (source file:line, research report section, or experiment output) and a concrete suggested fix. No vague or stylistic nits, no padding; zero findings is a valid outcome. Do not re-report an earlier finding as new unless its fix is unresolved; then mark it unresolved in priorFindingsStatus AND add a new finding with the stronger evidence.
+   Severity: blocker = violates a hard requirement or user decision, is a security hole, or rests on a wrong assumption that invalidates a component; major = significant correctness, extensibility (SOLID/OCP), DX or operability problem that needs a design change; minor = local improvement.
+   Finding ids: ${rv.key}-r${ROUND}-NN.
+4. Save your full findings as you go to ${D}/reviews/round-${ROUND}-${rv.key}.md (summary, prior-finding statuses, findings with scenario/evidence/fix, proposed user decisions). This is the only file you may write in ${D}.
+5. userDecisions: only genuine product trade-offs where both options are defensible, with your recommendation. Not for questions already in §17.
+6. verdict: 'approve' ONLY if no blocker or major findings remain from your lens (including unresolved prior ones); otherwise 'reject'.`
+
+phase('Critique')
+const reviews = (await parallel(REVIEWERS.map((rv) => () =>
+  agent(reviewPrompt(rv), { label: `review:r${ROUND}:${rv.key}`, phase: 'Critique', schema: REVIEW_SCHEMA })
+    .then((r) => (r ? { reviewer: rv.key, ...r } : null))
+))).filter(Boolean)
+
+const counts = reviews.map((r) => {
+  const c = { blocker: 0, major: 0, minor: 0 }
+  r.findings.forEach((f) => { c[f.severity]++ })
+  const unresolved = r.priorFindingsStatus.filter((p) => p.status === 'unresolved' || p.status === 'rebuttal-rejected').length
+  return `${r.reviewer}:${r.verdict}(B${c.blocker}/M${c.major}/m${c.minor}, prior unresolved ${unresolved})`
+})
+log(`Round ${ROUND} on v${FROM}: ${counts.join('  ')}`)
+if (reviews.length < REVIEWERS.length) {
+  return { interrupted: `only ${reviews.length}/${REVIEWERS.length} reviewers returned; resume with resumeFromRunId`, counts, reviews }
+}
+
+const blocking = reviews.flatMap((r) => r.findings.filter((f) => f.severity !== 'minor'))
+const allApprove = reviews.every((r) => r.verdict === 'approve') && blocking.length === 0
+if (allApprove) {
+  log(`Converged: all three reviewers approve v${FROM}`)
+  return { converged: true, counts, reviews }
+}
+
+phase('Revise')
+const rev = await agent(`${CONTEXT}
+
+ROLE
+You are the lead architect. Critique round ${ROUND} of design v${FROM} produced the review results below. Produce design v${TO}.
+
+REVIEW RESULTS (JSON; the reviewers' full write-ups are in ${D}/reviews/round-${ROUND}-{BA,NEST,SEC}.md)
+${JSON.stringify(reviews, null, 1)}
+
+${USER_ANSWERED_THROUGH
+  ? `USER ANSWER (received during this round)
+The user answered every open §17 question from Q13 to Q${USER_ANSWERED_THROUGH}: all are decided as the recommended option. In §17 of design v${TO}, mark each of them decided (keep its options and recommendation, and state "Decided by the owner on 2026-09-17: the recommended option"), separate them from the questions that are still open, update any text that calls them open or pending (header, §0, §1, README.md in ${D}), and record this in the v${TO} changelog. Questions this round adds stay open.
+
+`
+  : ''}RULES
+- ${CONTINUE_PARTIAL
+  ? `AN EARLIER RUN OF THIS REVISION WAS INTERRUPTED after saving part of its work. ${D}/design-v${TO}.md already exists (its header and some sections are revised) and ${D}/v${TO}-parts/ may be partly created; ${D}/ledger.md has no round ${ROUND} section yet. Do NOT copy design-v${FROM}.md over it. First diff design-v${TO}.md against design-v${FROM}.md to see which findings are already applied, check that work, then finish the rest in place, saving after every change.`
+  : `FIRST, before anything else: copy design-v${FROM}.md to ${D}/design-v${TO}.md and work in place on the copy, saving after every change.`} For whole-section rewrites, write part files under ${D}/v${TO}-parts/ and splice them with tools/splice.mjs; before you finish, run tools/sync-parts.mjs so ${D}/v${TO}-parts/ reproduces design-v${TO}.md (create the directory by syncing from the v2 parts layout if you did not use parts).
+- Address EVERY new finding (blocker, major and minor): ACCEPT (change the design), REBUT (only with concrete evidence such as source file:line, a research citation or experiment output; reviewers judge rebuttals next round), or DEFER-TO-USER (only for genuine product trade-offs; add it to §17 with options and a recommendation).
+- Every prior finding a reviewer marked unresolved or rebuttal-rejected must be addressed the same way.
+- Prefer simplifying over adding mechanism when a finding shows a mechanism is fragile; v2 is already large. Removing a feature is acceptable if the requirements and user decisions still hold, and it must be recorded in an ADR.
+- Verify disputed facts against source before deciding; run a minimal experiment in ${SP}/tmp-r${ROUND}-revise/ if needed.
+- Update the header, §1 traceability, §16 (ADRs: revised ones get a "Revised in v${TO}" line with finding ids; new ones cite the findings that forced them), §17 and a §18 changelog entry for v${TO}. Keep every section consistent; re-read the whole document once at the end and reconcile referenced ids against defined ids with a script.
+- Append "Round ${ROUND} → design v${TO}" to ${D}/ledger.md: for each new finding id, its severity, reviewer, one-line title, your action and a one-line note ending with the ADR; then a table of the reviewers' prior-finding statuses.
+- Do not silently drop requirements, user decisions or previously accepted fixes.
+Return the structured summary (path = design-v${TO}.md).`,
+  { label: `revise:v${TO}`, phase: 'Revise', schema: REVISE_SCHEMA })
+if (!rev) return { interrupted: `revision to v${TO} failed; design-v${TO}.md keeps what it saved. Resume with resumeFromRunId`, counts, reviews }
+const acts = { accepted: 0, rebutted: 0, 'deferred-to-user': 0 }
+rev.responses.forEach((x) => { acts[x.action] = (acts[x.action] || 0) + 1 })
+log(`v${TO} written: accepted ${acts.accepted}, rebutted ${acts.rebutted}, deferred ${acts['deferred-to-user']}`)
+
+phase('Audit')
+const audits = (await parallel([
+  () => agent(`${CONTEXT}
+
+ROLE
+You are a ledger auditor. You check whether the fixes accepted in round ${ROUND} really landed in ${D}/design-v${TO}.md. You are NOT a design reviewer: do not raise new design criticism. Report only gaps between what was promised and what the document now says.
+
+SCOPE
+Every round-${ROUND} finding (ids *-r${ROUND}-NN) in ${D}/ledger.md with action accepted, plus every prior finding the reviewers marked unresolved or rebuttal-rejected. Findings in full: ${D}/reviews/round-${ROUND}-{BA,NEST,SEC}.md.
+
+PROCESS
+For EVERY finding in scope: read it and its ledger note; find where design-v${TO}.md implements the fix and read the surrounding section; decide whether the text as written stops the reviewer's exact failure scenario and whether every element the note names is present; search the rest of the document for statements that still describe the OLD behavior (code sketches, tables, ADRs, test cases). For rebutted findings, check only that the rebuttal is recorded with its evidence. Report a gap only when you can point at the place. checked = number of findings audited.`,
+    { label: `audit:r${ROUND}-ledger`, phase: 'Audit', schema: AUDIT_SCHEMA }).then((r) => (r ? { auditor: 'LEDGER', ...r } : null)),
+  () => agent(`${CONTEXT}
+
+ROLE
+You are the cross-reference and consistency auditor for ${D}/design-v${TO}.md. You do not judge the design; you find mechanical and editorial defects.
+
+PROCESS
+1. With a script (run it from ${SP}/tmp-r${ROUND}-audit-XREF/), extract every identifier the document REFERENCES and every identifier it DEFINES: section numbers, ADR-nn, boot checks Bnn, invariants, RKnn, Qnn, LEAD-V/LEAD-EXP ids, error codes and warning codes, conformance and test case ids, exported symbol names in §2 versus names used later. Report undefined references, duplicate definitions and accidental gaps in numbered series.
+2. Find placeholders (TODO, TBD, "see above" with no target) and leftover "Design v${FROM}" wording where v${TO} is meant.
+3. Find contradictions between sections: the same option, default, decorator, token, boot check or error mapping described two ways (§2 API listing, §4 contracts, §5 options, §7-9 behavior, §13 error table, §14 cases, §15 migration, §16 ADRs, §17 questions).
+4. Check that every §17 question has options and a recommendation, every ADR changed in v${TO} cites finding ids, the v${TO} changelog entry exists, and \`node tools/sync-parts.mjs design-v${TO}.md v${TO}-parts --check\` reports 0 differences.
+Report each defect as a gap with id XREF-NN. checked = number of distinct identifiers reconciled.`,
+    { label: `audit:r${ROUND}-xref`, phase: 'Audit', schema: AUDIT_SCHEMA }).then((r) => (r ? { auditor: 'XREF', ...r } : null)),
+])).filter(Boolean)
+if (audits.length < 2) log(`Only ${audits.length}/2 auditors returned; the missing scope is NOT audited`)
+const gaps = audits.flatMap((a) => a.gaps.map((g) => ({ auditor: a.auditor, ...g })))
+log(`Audit: ${audits.map((a) => `${a.auditor}:${a.gaps.length} gaps/${a.checked} checked`).join('  ')}`)
+if (!gaps.length) return { converged: false, counts, reviews, revision: rev, audits, gaps: [], fix: null }
+
+phase('Fix')
+const fix = await agent(`${CONTEXT}
+
+ROLE
+You are the lead architect. You wrote design v${TO}; two auditors compared it with the round-${ROUND} ledger and checked its cross-references. Close every gap below in ${D}/design-v${TO}.md.
+
+GAPS (JSON)
+${JSON.stringify(gaps, null, 1)}
+
+RULES
+- Handle EVERY gap: fix it, or answer not-a-gap with the exact location that already covers it.
+- Verify before you change, then make the smallest edit that closes the gap everywhere the old statement appears.
+- Afterwards re-run the reference check and \`node tools/sync-parts.mjs design-v${TO}.md v${TO}-parts\` (then with --check). Keep ledger notes truthful. Save after every gap.
+Return the structured summary (path = design-v${TO}.md).`,
+  { label: `fix:v${TO}-gaps`, phase: 'Fix', schema: FIX_SCHEMA })
+
+return { converged: false, counts, reviews, revision: rev, audits: audits.map((a) => ({ auditor: a.auditor, summary: a.summary, checked: a.checked, gaps: a.gaps.length })), gaps, fix }

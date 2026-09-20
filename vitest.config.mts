@@ -13,7 +13,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["packages/*/src/**/*.test.ts"],
-    exclude: ["**/*.e2e.test.ts"],
+    exclude: ["**/*.e2e.test.ts", "**/packaging.test.ts"],
     clearMocks: true,
     restoreMocks: true,
   },

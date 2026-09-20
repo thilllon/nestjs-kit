@@ -24,11 +24,14 @@ pnpm format:check
 pnpm typecheck
 pnpm build
 pnpm test
+pnpm test:packaging
 ```
 
 Run `pnpm format` to apply formatting. Biome covers all supported files throughout the repository, including root configuration and examples. Markdown and YAML use Prettier because [Biome does not yet support those languages](https://biomejs.dev/internals/language-support/). Generated files and dependencies follow `.gitignore`; source directories are not excluded. Prettier, commitlint, and Vitest use typed `.mts` configuration files.
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
+
+Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the authentication scaffold's ESM and CJS artifacts. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
 
 For real PostgreSQL integration tests, install Docker with Compose and run:
 
@@ -61,11 +64,14 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
+- `packages/nestjs-slightly-better-auth`: private authentication design workspace, research and historical adapter reference; not a working authentication library yet.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
 
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
+
+The authentication workspace additionally puts `module-sync` first in its exports. Supported Node consumers then share one ESM identity for both `import` and `require()`, while the real CJS branch remains available when synchronous ESM loading is disabled. Keep its legacy code outside the active source graph and package archive; historical tests are reference material, not executed coverage.
 
 Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root tooling uses `tsconfig.tools.json` for its different source layout.

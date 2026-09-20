@@ -21,6 +21,8 @@ Install only the integrations you need. Packages have their own npm releases and
 
 ## Shared approach
 
+An authentication integration is also being designed in [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md). Its research, design reviews and reference source live in this monorepo; the workspace is private and does not provide an authentication API yet.
+
 - **Nest-native configuration.** Register options directly or resolve them asynchronously through dependency injection. Inject the client or adapter service using Nest's standard APIs.
 - **SDK access.** Use the underlying SDK's operations and types. Adapters add configuration, useful integration helpers, and connection cleanup where needed.
 - **Separate integrations.** Each package is installed, versioned, and published independently. Its README documents supported registration options and lifecycle behavior.
@@ -46,4 +48,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for checks, commit conventions, and pull
 
 ## License
 
-[ISC](LICENSE).
+The repository and established integrations use [ISC](LICENSE). The `nestjs-slightly-better-auth` workspace uses [MIT](packages/nestjs-slightly-better-auth/LICENSE), and its archived upstream source retains its [original MIT notice](packages/nestjs-slightly-better-auth/legacy/LICENSE). Consult each package's license when using its files.
