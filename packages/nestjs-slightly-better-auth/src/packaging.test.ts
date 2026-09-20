@@ -46,6 +46,8 @@ async function compileConsumer(extension: "cts" | "mts"): Promise<void> {
       `import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
 import { BetterAuthModule, type BetterAuthService } from "nestjs-slightly-better-auth";
+import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import { fastifyPlatform } from "nestjs-slightly-better-auth/fastify";
 import type {
   AuthOf,
   AuthPrincipalBase,
@@ -100,6 +102,8 @@ type CustomSessionUserId = Assert<Equal<AuthSession<"admin">["principal"]["uid"]
 type AugmentedPrincipal = Assert<Equal<PrincipalOfKind<"api-key">, ApiKeyPrincipal>>;
 
 BetterAuthModule.forRoot({ auth: primary, http: { mount: false } });
+BetterAuthModule.forRoot({ auth: primary, platforms: [expressPlatform({ clientIp: request => request.ip ?? null })] });
+BetterAuthModule.forRoot({ auth: primary, platforms: [fastifyPlatform({ clientIp: request => request.raw.socket.remoteAddress ?? null })] });
 BetterAuthModule.forRoot({ name: "admin", auth: admin, session: { userId: value => value.principal.uid } });
 BetterAuthModule.forRootAsync({ name: "worker", useFactory: async () => ({ auth: primary }) });
 
@@ -158,6 +162,72 @@ void invalidKind;
 }
 
 describe("built authentication package", () => {
+  it.each([
+    { format: "esm", platform: "express" },
+    { format: "cjs", platform: "express" },
+    { format: "esm", platform: "fastify" },
+    { format: "cjs", platform: "fastify" },
+  ] as const)(
+    "initializes $platform through its actual $format artifact",
+    ({ format, platform }) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const platform = await load("./dist/${platform}.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { ${platform === "express" ? "ExpressAdapter" : "FastifyAdapter"}: Adapter } = await import("@nestjs/platform-${platform}");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs, NESTJS_PLUGIN_ID } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({
+           baseURL: "http://localhost:3000",
+           secret: crypto.randomUUID().repeat(2),
+           database: memoryAdapter({}),
+           logger: { disabled: true },
+           plugins: [nestjs()],
+         });
+         const moduleRef = await Test.createTestingModule({
+           imports: [kit.BetterAuthModule.forRoot({
+             auth,
+             platforms: [platform.${platform}Platform()],
+             logSummary: false,
+           })],
+         }).compile();
+         const adapter = new Adapter();
+         const app = moduleRef.createNestApplication(adapter, { logger: false });
+         const observed = {};
+         try {
+           await app.init();
+           ${platform === "fastify" ? "await adapter.getInstance().ready();" : ""}
+           observed.exports = Object.keys(platform).sort();
+           observed.adapter = app.getHttpAdapter().getType();
+           observed.originalInstance = app.get(kit.BetterAuthService).instance === auth;
+           observed.bound = (await auth.$context).getPlugin(NESTJS_PLUGIN_ID)[Symbol.for("nestjs-slightly-better-auth:bridge")].state === "bound";
+         } finally {
+           await app.close();
+         }
+         observed.closed = (await auth.$context).getPlugin(NESTJS_PLUGIN_ID)[Symbol.for("nestjs-slightly-better-auth:bridge")].state === "closed";
+         console.log(JSON.stringify(observed));`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        exports: [
+          platform === "express" ? "ExpressPlatform" : "FastifyPlatform",
+          `${platform}Platform`,
+        ],
+        adapter: platform,
+        originalInstance: true,
+        bound: true,
+        closed: true,
+      });
+    },
+  );
+
   it("shares one module identity between canonical Node import and require", () => {
     const result = node(
       `import { createRequire } from "node:module";

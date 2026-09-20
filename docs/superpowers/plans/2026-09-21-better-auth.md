@@ -442,7 +442,10 @@ it("rejects an oversized auth body with the host CORS header", async () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "https://app.example",
     );
-    expect(await response.json()).toEqual({ code: "PAYLOAD_TOO_LARGE" });
+    expect(await response.json()).toEqual({
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds the configured limit",
+    });
   } finally {
     await fixture.close();
   }
@@ -460,6 +463,8 @@ it("rejects an oversized auth body with the host CORS header", async () => {
 **Files:** Create `packages/nestjs-slightly-better-auth/src/fastify.ts`, `fastify-platform.ts`, `fastify.e2e.test.ts`, `fastify-http2.e2e.test.ts`.
 
 **Interfaces:** Consumes the platform/exchange contracts from Tasks 3/4a; implement independently of Express once those ports are frozen. Produces `fastifyPlatform`, `FastifyPlatform`, structural options, mandatory live request accessor, reply lookup, `http2: true`, and `prepareAtInit: true` from v7 §§2.2.11 and 6.4.2.
+
+**Verified platform limitation:** Fastify 5.12.4 does not expose `trustProxy` in its public `initialConfig`; the [Fastify server reference](https://fastify.dev/docs/latest/Reference/Server/#initialconfig) confirms the exposed fields. The frozen design's proposed read cannot determine that setting. Omit the optional `proxyTrust()` capability, so the existing boot summary reports `unknown` and setting-dependent diagnostics remain unavailable. Continue using native request IP resolution. Do not guess `none`, inspect private symbols, or add a second trust configuration that could disagree with the actual server.
 
 - [ ] Add this real Fastify regression to `fastify.e2e.test.ts`; import `FastifyAdapter`, `fastifyPlatform`, and the Task 4a test fixtures:
 
@@ -487,14 +492,17 @@ it("returns bounded-body failures through the host CORS layer", async () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "https://app.example",
     );
-    expect(await response.json()).toEqual({ code: "PAYLOAD_TOO_LARGE" });
+    expect(await response.json()).toEqual({
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds the configured limit",
+    });
   } finally {
     await fixture.close();
   }
 });
 ```
 
-Add another test where an `http.around` callback throws and an actual Nest global filter installed after app initialization records that error.
+Add another test where an `http.around` callback throws and an actual Nest global filter configured before `app.init()` records that error. The auth child mounts during `onModuleInit`, before Nest installs the root error handler later in the same initialization; resolve that handler at request time. Calling Nest `useGlobalFilters()` after completed initialization is not retroactive and is not a supported filter-registration contract here.
 
 - [ ] Run `mise exec -- pnpm exec vitest run --config vitest.e2e.config.mts packages/nestjs-slightly-better-auth/src/fastify.e2e.test.ts`; confirm failures. Implement root `onRequest` reply recording and an auth-only child plugin with buffer parser, unchanged application parsers, canonical limit error, and child error handler delegating to the current root error handler at request time.
 - [ ] Apply exact response merge logic through Fastify reply; do not bypass CORS by writing raw response headers prematurely. Implement request identity/liveness, raw request key, cookie sink and `responseFor` for Apollo on Fastify.

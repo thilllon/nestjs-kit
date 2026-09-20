@@ -4,7 +4,12 @@ import { sharedBuildOptions } from "../../tsdown.config.mts";
 export default defineConfig([
   {
     ...sharedBuildOptions,
-    entry: { index: "src/index.ts", platform: "src/platform.ts" },
+    entry: {
+      index: "src/index.ts",
+      platform: "src/platform.ts",
+      express: "src/express.ts",
+      fastify: "src/fastify.ts",
+    },
   },
   {
     ...sharedBuildOptions,

@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
 
-> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and platform helpers are implemented. Concrete platforms, optional transports and built-in authorization units are still in progress. The npm badges will become available after the first real release.
+> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and Express/Fastify platforms are implemented. Optional transports and built-in authorization units are still in progress. The npm badges will become available after the first real release.
 
 ## Implementation status
 
@@ -14,7 +14,11 @@ The library separates a Better Auth construction plugin, a NestJS integration ke
 
 The root entry provides synchronous and asynchronous module registration, default and named instances, service readers, guards, scoped execution and compositional authorization. Tests exercise actual Nest dependency injection and Better Auth sessions, including isolation between instances, caller-origin enforcement and application shutdown. Built ESM and CommonJS consumers verify the same registration and type contracts.
 
-Express, Fastify, GraphQL, WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. Those integrations will use optional entry points so applications can install the transports they use. Kernel tests do not establish that these concrete integrations are ready.
+The `./express` and `./fastify` entries connect native Nest applications to Better Auth. Their end-to-end tests cover raw bodies, size limits, cookies, CORS, request cancellation, exception filters and real authentication. Fastify also supports HTTP/2. The platform entries have no runtime imports of Express or Fastify; install the Nest platform adapter used by your application.
+
+Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
+
+GraphQL, WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP platform tests do not establish that those integrations are ready.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 

@@ -3,6 +3,7 @@ import type { AbstractHttpAdapter } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
+import { getAuthTables } from "better-auth/db";
 import type {
   BetterAuthRuntimeOptions,
   ExtensionRef,
@@ -15,20 +16,27 @@ import { nestjs } from "./plugin.js";
 export function createTestAuth(
   options: BetterAuthOptions = {},
 ): ReturnType<typeof betterAuth> {
-  return betterAuth<BetterAuthOptions>({
+  const resolvedOptions = {
     secret: globalThis.crypto.randomUUID() + globalThis.crypto.randomUUID(),
     baseURL: "http://localhost:3000",
     emailAndPassword: { enabled: true },
     logger: { disabled: true },
     ...options,
-    database: memoryAdapter({
-      user: [],
-      session: [],
-      account: [],
-      verification: [],
-    }),
     advanced: { ...options.advanced, disableOriginCheck: false },
     plugins: [...(options.plugins ?? []), nestjs()],
+  } satisfies BetterAuthOptions;
+  return betterAuth<BetterAuthOptions>({
+    ...resolvedOptions,
+    database:
+      options.database ??
+      memoryAdapter(
+        Object.fromEntries(
+          Object.values(getAuthTables(resolvedOptions)).map((table) => [
+            table.modelName,
+            [],
+          ]),
+        ),
+      ),
   });
 }
 export interface HttpFixture {
