@@ -10,7 +10,7 @@ import {
 } from "@nestjs/microservices";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthTransport } from "./auth-contracts.js";
-import { AuthFailures } from "./auth-errors.js";
+import { AuthFailures, isAuthFailure } from "./auth-errors.js";
 import {
   defaultCarriers,
   grpcCarrier,
@@ -29,6 +29,77 @@ function context(data: unknown, carrier: unknown) {
 }
 
 describe("RPC carriers", () => {
+  it.each([
+    "secret\r\ninjected",
+    "\nsecret",
+    "secret\0suffix",
+    "secret\u0100",
+    Buffer.from("secret\n"),
+    ["valid", "secret\r"],
+    [Buffer.from("secret\n")],
+    [],
+    null,
+    {},
+    42,
+  ])(
+    "rejects malformed credential values without retaining conversion errors (%#)",
+    (cookie) => {
+      const selected = payloadCarrier();
+      let failure: unknown;
+      try {
+        selected.headers(
+          context({ auth: { cookie, authorization: "Bearer valid" } }, {}),
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(isAuthFailure(failure)).toBe(true);
+      expect(failure).toMatchObject({
+        status: 401,
+        reason: "MALFORMED_CREDENTIALS",
+      });
+      expect(JSON.stringify(failure)).not.toContain("secret");
+      expect(failure).not.toHaveProperty("cause");
+      expect(failure).not.toHaveProperty("stack");
+    },
+  );
+
+  it("sanitizes invalid allowlisted names and raw custom HeadersInit conversion failures", () => {
+    const carrier = kafkaCarrier({ headers: ["invalid\nname"] });
+    const ctx = context(
+      {},
+      { getMessage: () => ({ headers: { "invalid\nname": "secret" } }) },
+    );
+    let failure: unknown;
+    try {
+      carrier.headers(ctx);
+    } catch (error) {
+      failure = error;
+    }
+    expect(isAuthFailure(failure)).toBe(true);
+    expect(JSON.stringify(failure)).not.toContain("secret");
+    const fallback = vi.fn(() => ({ cookie: "valid" }));
+    const transport = rpcTransport({
+      carriers: [
+        {
+          id: "raw",
+          matches: () => true,
+          headers: () => [["cookie", "secret\ninvalid"]],
+        },
+        { id: "fallback", matches: () => true, headers: fallback },
+      ],
+    }) as AuthTransport;
+    failure = undefined;
+    try {
+      transport.describe(ctx, { http: null }).headers();
+    } catch (error) {
+      failure = error;
+    }
+    expect(isAuthFailure(failure)).toBe(true);
+    expect(JSON.stringify(failure)).not.toContain("secret");
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
   it("extracts only normalized allowed credential fields across native context shapes", () => {
     const values = {
       Authorization: "Bearer token",

@@ -1,5 +1,12 @@
 import type { AddressInfo, Server } from "node:net";
-import { Controller, Module, UseGuards, UseInterceptors } from "@nestjs/common";
+import { inspect } from "node:util";
+import {
+  Controller,
+  Logger,
+  Module,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import {
   ClientProxyFactory,
@@ -11,8 +18,8 @@ import { Test } from "@nestjs/testing";
 import { createAuthMiddleware } from "better-auth/api";
 import { bearer } from "better-auth/plugins";
 import { firstValueFrom, timeout } from "rxjs";
-import { describe, expect, it } from "vitest";
-import { Public, RequireAuth } from "./auth-decorators.js";
+import { describe, expect, it, vi } from "vitest";
+import { OptionalAuth, Public, RequireAuth } from "./auth-decorators.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
@@ -36,6 +43,91 @@ class TcpController {
 }
 
 describe("RPC TCP", () => {
+  it("rejects malformed credentials without logging secrets, SDK I/O, or fallback", async () => {
+    let reads = 0;
+    let handled = 0;
+    const auth = createTestAuth({
+      plugins: [bearer()],
+      hooks: {
+        before: createAuthMiddleware(async (context) => {
+          if (context.path === "/get-session") {
+            reads++;
+          }
+        }),
+      },
+    });
+    @Controller()
+    class MalformedController {
+      @MessagePattern("required")
+      required() {
+        handled++;
+        return "unexpected";
+      }
+
+      @OptionalAuth()
+      @MessagePattern("optional")
+      optional() {
+        handled++;
+        return "unexpected";
+      }
+    }
+    @Module({
+      imports: [
+        BetterAuthModule.forRoot({ auth, transports: [rpcTransport()] }),
+      ],
+      controllers: [MalformedController],
+    })
+    class Fixture {}
+    const app = await NestFactory.createMicroservice(Fixture, {
+      transport: Transport.TCP,
+      options: { host: "127.0.0.1", port: 0 },
+      logger: false,
+      abortOnError: false,
+    });
+    let client: ReturnType<typeof ClientProxyFactory.create> | undefined;
+    const logged = vi.spyOn(Logger.prototype, "error");
+    try {
+      await app.listen();
+      const identity = await createTestIdentity(auth);
+      const port = (app.unwrap<Server>().address() as AddressInfo).port;
+      client = ClientProxyFactory.create({
+        transport: Transport.TCP,
+        options: { host: "127.0.0.1", port },
+      });
+      for (const pattern of ["required", "optional"]) {
+        const result = await firstValueFrom(
+          client
+            .send(pattern, {
+              auth: {
+                cookie: `${identity.cookie}\r\nprivate-rpc-credential`,
+                authorization: `Bearer ${identity.token}`,
+              },
+            })
+            .pipe(timeout(4000)),
+        ).then(
+          (value: unknown) => ({ unexpectedSuccess: value }),
+          (error: unknown) => error,
+        );
+        const diagnostics = inspect(logged.mock.calls, { depth: null });
+        expect(diagnostics).not.toContain("private-rpc-credential");
+        expect(diagnostics).not.toContain(identity.cookie);
+        expect(diagnostics).not.toContain(identity.token);
+        expect(result).toMatchObject({
+          statusCode: 401,
+          code: "UNAUTHENTICATED",
+          reason: "MALFORMED_CREDENTIALS",
+        });
+      }
+      expect(reads).toBe(0);
+      expect(handled).toBe(0);
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+      client?.close();
+      await app.close();
+    }
+  });
+
   it.each([
     "listen",
     "init-listen",

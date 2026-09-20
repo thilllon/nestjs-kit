@@ -10,6 +10,7 @@ import type {
 } from "./auth-contracts.js";
 import {
   BetterAuthConfigurationError,
+  AuthFailures,
   type AuthFailure,
 } from "./auth-errors.js";
 import {
@@ -46,7 +47,19 @@ export function rpcTransport(
         invocation: key,
         cookies: null,
         clientIp: null,
-        headers: () => new Headers(select(context)?.headers(context)),
+        headers() {
+          const input = select(context)?.headers(context);
+          try {
+            return new Headers(input);
+          } catch {
+            // Custom carriers may return a raw HeadersInit. Conversion errors
+            // include its values, so discard the original error and its cause.
+            throw AuthFailures.rejected({
+              status: 401,
+              reason: "MALFORMED_CREDENTIALS",
+            });
+          }
+        },
         param(name) {
           const data = context.switchToRpc().getData<unknown>();
           return data !== null &&

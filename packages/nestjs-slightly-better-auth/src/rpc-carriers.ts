@@ -1,6 +1,6 @@
 import type { ExecutionContext } from "@nestjs/common";
 import * as microservices from "@nestjs/microservices";
-import type { AuthFailure } from "./auth-errors.js";
+import { AuthFailures, type AuthFailure } from "./auth-errors.js";
 
 export interface RpcCredentialCarrier {
   readonly id: string;
@@ -51,6 +51,12 @@ function extract(input: unknown, allow: readonly string[]): Headers {
     }
     const value = source[name];
     const values = Array.isArray(value) ? value : [value];
+    if (values.length === 0) {
+      throw AuthFailures.rejected({
+        status: 401,
+        reason: "MALFORMED_CREDENTIALS",
+      });
+    }
     for (const item of values) {
       const text =
         typeof item === "string"
@@ -58,8 +64,21 @@ function extract(input: unknown, allow: readonly string[]): Headers {
           : Buffer.isBuffer(item)
             ? item.toString("utf8")
             : undefined;
-      if (text !== undefined) {
+      if (text === undefined || /[\r\n\0]/.test(text)) {
+        throw AuthFailures.rejected({
+          status: 401,
+          reason: "MALFORMED_CREDENTIALS",
+        });
+      }
+      try {
         headers.append(normalized, text);
+      } catch {
+        // Web Headers errors can embed credentials in their message. Never retain
+        // that error, and never discard one bad credential to try another one.
+        throw AuthFailures.rejected({
+          status: 401,
+          reason: "MALFORMED_CREDENTIALS",
+        });
       }
     }
   }
