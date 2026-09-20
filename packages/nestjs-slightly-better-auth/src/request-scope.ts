@@ -78,6 +78,10 @@ export class RequestScope {
     return this.#storage.run(state, fn);
   }
 
+  exit<T>(fn: () => T): T {
+    return this.#storage.exit(fn);
+  }
+
   current(): ScopeState | undefined {
     return this.#storage.getStore();
   }

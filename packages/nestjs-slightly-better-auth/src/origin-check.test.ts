@@ -3,7 +3,12 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { createAuthEndpoint, formCsrfMiddleware } from "better-auth/api";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthContextView, BrowserExposure } from "./auth-contracts.js";
-import { getRawCause, isInfrastructureError } from "./auth-errors.js";
+import {
+  BetterAuthConfigurationError,
+  BetterAuthInfrastructureError,
+  getRawCause,
+  isInfrastructureError,
+} from "./auth-errors.js";
 import { OriginCheck, OriginDiagnostics } from "./origin-check.js";
 import { RequestScope } from "./request-scope.js";
 
@@ -411,4 +416,173 @@ it("honors the same disable predicate in direct-call proof and guard checks with
   ).not.toThrow();
   expect(await check.check(leg, "form")).toBeNull();
   expect(leg.headers).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  "propagates lazy header extraction failures with diagnostics=%s",
+  async (enabled) => {
+    const { context } = await fixture();
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const check = new OriginCheck(new RequestScope(), {
+      instance: "default",
+      context,
+      diagnostics: enabled ? new OriginDiagnostics(logger) : undefined,
+    });
+    const failure = BetterAuthConfigurationError.atRequest(
+      "GRAPHQL_CONTEXT_UNRECOGNIZED",
+      "No live request is present in the GraphQL context",
+    );
+    const headers = vi.fn(() => {
+      throw failure;
+    });
+    const leg = { ...browser({}, false), headers };
+    expect(headers).not.toHaveBeenCalled();
+    await expect(check.advisory(leg)).rejects.toBe(failure);
+    expect(headers).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).not.toHaveBeenCalled();
+    expect(() =>
+      check.assertCallerSession(leg, "/sign-out", "default"),
+    ).toThrow();
+    expect(headers).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([false, true])(
+  "does not mistake an extraction infrastructure failure for an origin-calculation failure with diagnostics=%s",
+  async (enabled) => {
+    const { context } = await fixture();
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const check = new OriginCheck(new RequestScope(), {
+      instance: "default",
+      context,
+      diagnostics: enabled ? new OriginDiagnostics(logger) : undefined,
+    });
+    const failure = new BetterAuthInfrastructureError(
+      new Error("request extraction failed"),
+    );
+    const headers = vi.fn(() => {
+      throw failure;
+    });
+    await expect(
+      check.advisory({ ...browser({}, false), headers }),
+    ).rejects.toBe(failure);
+    expect(headers).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  },
+);
+
+it.each([false, true])(
+  "keeps origin outages advisory without re-reading the extracted headers with diagnostics=%s",
+  async (enabled) => {
+    const { context, scope } = await fixture();
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const origins = vi.fn(async () => {
+      throw new Error("trusted-origin storage unavailable");
+    });
+    const init = {
+      instance: "default",
+      context: {
+        ...context,
+        options: { ...context.options, trustedOrigins: origins },
+      },
+      diagnostics: enabled ? new OriginDiagnostics(logger) : undefined,
+    };
+    const check = new OriginCheck(scope, init);
+    const headers = vi
+      .fn()
+      .mockReturnValueOnce(
+        new Headers({
+          cookie: "session=opaque",
+          origin: "https://app.example",
+        }),
+      )
+      .mockImplementation(() => {
+        throw BetterAuthConfigurationError.atRequest(
+          "GRAPHQL_CONTEXT_UNRECOGNIZED",
+          "Request capability cannot be extracted again",
+        );
+      });
+    const leg = { ...browser({}, false), headers };
+    const first = check.advisory(leg);
+    const shared = new OriginCheck(scope, init).advisory(leg);
+    await expect(Promise.all([first, shared])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(headers).toHaveBeenCalledTimes(1);
+    expect(origins).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    expect(() =>
+      check.assertCallerSession(leg, "/sign-out", "default"),
+    ).toThrow();
+  },
+);
+
+it.each([false, true])(
+  "propagates trusted-origin configuration errors with diagnostics=%s",
+  async (enabled) => {
+    const { context } = await fixture();
+    const failure = BetterAuthConfigurationError.atRequest(
+      "INVALID_TRUST_CONFIGURATION",
+      "Origin policy is misconfigured",
+    );
+    const logger = { warn: vi.fn(), debug: vi.fn() };
+    const check = new OriginCheck(new RequestScope(), {
+      instance: "default",
+      context: {
+        ...context,
+        options: {
+          ...context.options,
+          trustedOrigins: () => {
+            throw failure;
+          },
+        },
+      },
+      diagnostics: enabled ? new OriginDiagnostics(logger) : undefined,
+    });
+    const headers = vi.fn(
+      () =>
+        new Headers({
+          cookie: "session=opaque",
+          origin: "https://app.example",
+        }),
+    );
+    await expect(
+      check.advisory({ ...browser({}, false), headers }),
+    ).rejects.toBe(failure);
+    expect(headers).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  },
+);
+
+it("does not reuse an earlier calculation-failure classification when extraction later fails", async () => {
+  const { context } = await fixture();
+  const failure = new BetterAuthInfrastructureError(
+    new Error("shared adapter failure"),
+  );
+  const check = new OriginCheck(new RequestScope(), {
+    instance: "default",
+    context: {
+      ...context,
+      options: {
+        ...context.options,
+        trustedOrigins: () => {
+          throw failure;
+        },
+      },
+    },
+  });
+  const headers = vi
+    .fn()
+    .mockReturnValueOnce(
+      new Headers({ cookie: "session=opaque", origin: "https://app.example" }),
+    )
+    .mockImplementation(() => {
+      throw failure;
+    });
+  const leg = { ...browser({}, false), headers };
+  await expect(check.advisory(leg)).resolves.toBeUndefined();
+  await expect(check.advisory(leg)).rejects.toBe(failure);
+  expect(headers).toHaveBeenCalledTimes(2);
 });

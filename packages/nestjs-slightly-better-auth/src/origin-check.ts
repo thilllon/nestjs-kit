@@ -15,6 +15,9 @@ import { memoKey, RequestScope } from "./request-scope.js";
 import { originChecksDisabled, TrustedOrigins } from "./trusted-origins.js";
 
 const ORIGIN_PROOF = Symbol.for("nestjs-slightly-better-auth:origin-proof");
+const ORIGIN_CALCULATION_FAILURES = Symbol.for(
+  "nestjs-slightly-better-auth:origin-calculation-failures",
+);
 
 function diagnosticOrigin(headers: Headers): string {
   const origin = headers.get("origin");
@@ -123,6 +126,7 @@ export class OriginCheck {
       return existing;
     }
     let headers: Headers | undefined;
+    let calculationFailed = false;
     const promise = Promise.resolve()
       .then(async () => {
         if (
@@ -132,7 +136,9 @@ export class OriginCheck {
           return null;
         }
         headers = browser.headers();
-        const failure = await this.verdict(browser, headers, mode);
+        const failure = await this.verdict(browser, headers, mode, () => {
+          calculationFailed = true;
+        });
         if (failure) {
           this.init.diagnostics?.record(
             this.init.instance,
@@ -158,27 +164,38 @@ export class OriginCheck {
         if (origins.get(key) === promise) {
           origins.delete(key);
         }
-        if (isConfigurationError(error) || isInfrastructureError(error)) {
+        if (isConfigurationError(error)) {
           throw error;
         }
-        throw createInfrastructureError(error, {
-          headers,
-          credentialHeaders: this.init.credentialHeaders,
-          exposeRawCause: this.init.exposeRawCause,
-        });
+        const failure = isInfrastructureError(error)
+          ? error
+          : createInfrastructureError(error, {
+              headers,
+              credentialHeaders: this.init.credentialHeaders,
+              exposeRawCause: this.init.exposeRawCause,
+            });
+        if (calculationFailed && headers) {
+          this.calculationFailures(browser).set(promise, headers);
+        }
+        throw failure;
       });
     origins.set(key, promise);
     return promise;
   }
 
   async advisory(browser: BrowserExposure): Promise<void> {
+    const verdict = this.check(browser, "cookie");
     try {
-      await this.check(browser, "cookie");
-    } catch {
-      // The safe read continues. A direct caller-session call still needs passing evidence.
+      await verdict;
+    } catch (error) {
+      const headers = this.calculationFailures(browser).get(verdict);
+      if (!isInfrastructureError(error) || !headers) {
+        throw error;
+      }
+      // Only failed origin calculations are advisory. Logging reuses the successful extraction.
       this.init.diagnostics?.advisoryFailure(
         this.init.instance,
-        browser.headers(),
+        headers,
         this.init.context.trustedOrigins.length,
       );
     }
@@ -210,10 +227,29 @@ export class OriginCheck {
     );
   }
 
+  private calculationFailures(
+    browser: BrowserExposure,
+  ): WeakMap<Promise<AuthFailure | null>, Headers> {
+    const values = this.scope.stateFor(browser.key).values;
+    const key = this.scope.valueKey(
+      this.init.instance,
+      ORIGIN_CALCULATION_FAILURES,
+    );
+    let failures = values.get(key) as
+      | WeakMap<Promise<AuthFailure | null>, Headers>
+      | undefined;
+    if (!failures) {
+      failures = new WeakMap();
+      values.set(key, failures);
+    }
+    return failures;
+  }
+
   private async verdict(
     browser: BrowserExposure,
     headers: Headers,
     mode: "cookie" | "form",
+    onCalculationFailure: () => void,
   ): Promise<AuthFailure | null> {
     if (!headers.has("cookie")) {
       if (mode === "cookie") {
@@ -250,7 +286,12 @@ export class OriginCheck {
       return AuthFailures.forbidden("MISSING_OR_NULL_ORIGIN");
     }
     const request = new Request(browser.url, { headers });
-    const trustedOrigins = await this.#trusted.list(request);
+    const trustedOrigins = await this.#trusted
+      .list(request)
+      .catch((error: unknown) => {
+        onCalculationFailure();
+        throw error;
+      });
     this.#trustedCounts.set(browser.key, trustedOrigins.length);
     return this.init.context.isTrustedOrigin.call({ trustedOrigins }, value, {
       allowRelativePaths: false,

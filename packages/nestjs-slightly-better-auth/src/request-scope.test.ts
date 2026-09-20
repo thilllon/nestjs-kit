@@ -213,3 +213,49 @@ it("keeps decisions and provided values local to each invocation and instance", 
     scope.stateFor(b).values.get(scope.valueKey("default", key)),
   ).toBeUndefined();
 });
+
+it("runs asynchronous work with no scope and restores the caller while it remains pending", async () => {
+  const scope = new RequestScope();
+  const state = { view };
+  const pending = deferred<void>();
+  await scope.run(state, async () => {
+    const outside = scope.exit(async () => {
+      expect(scope.current()).toBeUndefined();
+      await pending.promise;
+      expect(scope.current()).toBeUndefined();
+      return "outside result";
+    });
+    expect(scope.current()).toBe(state);
+    pending.resolve();
+    expect(await outside).toBe("outside result");
+    expect(scope.current()).toBe(state);
+  });
+  expect(scope.current()).toBeUndefined();
+});
+
+it("restores nested scope and absent-scope contexts when exit callbacks throw", () => {
+  const scope = new RequestScope();
+  const outer = { view };
+  const inner = { view };
+  const failure = new Error("outside work failed");
+  scope.run(outer, () => {
+    expect(() =>
+      scope.exit(() => {
+        expect(scope.current()).toBeUndefined();
+        scope.run(inner, () => {
+          expect(() =>
+            scope.exit(() => {
+              expect(scope.current()).toBeUndefined();
+              throw failure;
+            }),
+          ).toThrow(failure);
+          expect(scope.current()).toBe(inner);
+        });
+        expect(scope.current()).toBeUndefined();
+        throw failure;
+      }),
+    ).toThrow(failure);
+    expect(scope.current()).toBe(outer);
+  });
+  expect(scope.current()).toBeUndefined();
+});
