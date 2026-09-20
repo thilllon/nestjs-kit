@@ -21,7 +21,10 @@ function node(script: string, ...flags: string[]): string {
   }).trim();
 }
 
-async function compileConsumer(extension: "cts" | "mts"): Promise<void> {
+async function compileConsumer(
+  extension: "cts" | "mts",
+  source?: string,
+): Promise<void> {
   const directory = await mkdtemp(
     join(tmpdir(), `nsba-built-consumer-${extension}-`),
   );
@@ -43,7 +46,8 @@ async function compileConsumer(extension: "cts" | "mts"): Promise<void> {
     ]);
     await writeFile(
       join(directory, `consumer.${extension}`),
-      `import { betterAuth } from "better-auth";
+      source ??
+        `import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
 import { BetterAuthModule, type BetterAuthService } from "nestjs-slightly-better-auth";
 import { expressPlatform } from "nestjs-slightly-better-auth/express";
@@ -224,6 +228,113 @@ describe("built authentication package", () => {
         originalInstance: true,
         bound: true,
         closed: true,
+      });
+    },
+  );
+
+  it.each(["mts", "cts"] as const)(
+    "keeps optional principal kinds out of a root-only .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import type { PrincipalKind, PrincipalOfKind } from "nestjs-slightly-better-auth";
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+type RootKinds = Assert<Equal<PrincipalKind, "session">>;
+// @ts-expect-error API-key types require their optional subpath import.
+type UnavailableApiKey = PrincipalOfKind<"api-key">;
+`,
+      );
+    },
+  );
+
+  it.each(["mts", "cts"] as const)(
+    "preserves authorization builders and opt-in principal types for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import type { PrincipalOfKind } from "nestjs-slightly-better-auth";
+import { permission, RequirePermission } from "nestjs-slightly-better-auth/admin";
+import { orgPermission, orgMember, fromParam, ActiveOrganizationId } from "nestjs-slightly-better-auth/organization";
+import { apiKeyPrincipal, apiKeyPermission, type ApiKeyPrincipal } from "nestjs-slightly-better-auth/api-key";
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Assert<T extends true> = T;
+type KeyAugmentation = Assert<Equal<PrincipalOfKind<"api-key">, ApiKeyPrincipal>>;
+declare const principal: PrincipalOfKind<"api-key">;
+const owner: string | null = principal.userId;
+const organization: string | null = principal.organizationId;
+// @ts-expect-error Verified principals never expose the raw credential.
+principal.key;
+// @ts-expect-error Verified permission grants are read-only.
+principal.permissions?.project?.push("write");
+permission({ user: ["ban"] }, { principals: ["session", "api-key"] });
+RequirePermission({ user: ["list"] });
+orgPermission({ member: ["create"] }, { organization: fromParam("organizationId") });
+orgMember();
+ActiveOrganizationId();
+apiKeyPrincipal({ references: key => key.configId === "org" ? "organization" : "user" });
+apiKeyPermission({ project: ["read"] });
+void owner;
+void organization;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "registers authorization units from the actual %s artifacts",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const adminUnit = await load("./dist/admin.${format === "esm" ? "mjs" : "cjs"}");
+         const orgUnit = await load("./dist/organization.${format === "esm" ? "mjs" : "cjs"}");
+         const keyUnit = await load("./dist/api-key.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { admin, organization } = await import("better-auth/plugins");
+         const { apiKey } = await import("@better-auth/api-key");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({
+           baseURL: "http://localhost:3000",
+           secret: crypto.randomUUID().repeat(2),
+           database: memoryAdapter({}),
+           logger: { disabled: true },
+           plugins: [admin(), organization(), apiKey(), nestjs()],
+         });
+         const moduleRef = await Test.createTestingModule({
+           imports: [kit.BetterAuthModule.forRoot({ auth, principals: [keyUnit.apiKeyPrincipal()], http: { mount: false }, logSummary: false })],
+         }).compile();
+         try {
+           await moduleRef.init();
+           console.log(JSON.stringify({
+             originalInstance: moduleRef.get(kit.BetterAuthService).instance === auth,
+             adminPolicy: adminUnit.permission({ user: ["ban"] }).policy === adminUnit.adminPermissionPolicy,
+             orgPolicy: orgUnit.orgPermission({ member: ["create"] }).policy === orgUnit.orgPermissionPolicy,
+             orgMemberPolicy: orgUnit.orgMember().policy === orgUnit.orgMemberPolicy,
+             keyKind: keyUnit.API_KEY_PRINCIPAL_KIND,
+             keySource: keyUnit.apiKeyPrincipal().kinds,
+             keyRequirement: keyUnit.apiKeyPermission({ project: ["read"] }).params,
+           }));
+         } finally {
+           await moduleRef.close();
+         }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstance: true,
+        adminPolicy: true,
+        orgPolicy: true,
+        orgMemberPolicy: true,
+        keyKind: "api-key",
+        keySource: ["api-key"],
+        keyRequirement: { project: ["read"] },
       });
     },
   );

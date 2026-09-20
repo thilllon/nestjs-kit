@@ -2,6 +2,8 @@ import type {
   AuthPrincipalBase,
   DatabaseHookTarget,
 } from "./auth-contracts.js";
+import type { PrincipalKinds } from "./index.js";
+export type { PrincipalKinds } from "./index.js";
 
 /** Structural minimum; accepts any betterAuth() result incl. plugins and customSession (EXP-C2, EXP-A:types/). */
 export interface AuthLike {
@@ -155,9 +157,6 @@ export type WithActiveOrganization<S> = S & {
 };
 
 // Principals (§4.3) [A][B][C]
-export interface PrincipalKinds {
-  session: SessionPrincipal;
-} // augmentable
 export type PrincipalKind = keyof PrincipalKinds & string;
 export type AuthPrincipal = PrincipalKinds[PrincipalKind];
 export type PrincipalOfKind<K extends PrincipalKind> = PrincipalKinds[K];

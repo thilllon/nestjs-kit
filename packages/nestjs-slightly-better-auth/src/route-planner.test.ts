@@ -26,7 +26,7 @@ import { RoutePlanner } from "./route-planner.js";
 import { CurrentSession } from "./session-principal.js";
 import { TransportRegistry } from "./transport-registry.js";
 
-declare module "./auth-types.js" {
+declare module "./index.js" {
   interface PrincipalKinds {
     machine: {
       kind: "machine";
