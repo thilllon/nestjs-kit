@@ -80,6 +80,20 @@
         "default": "./dist/fastify.cjs"
       }
     },
+    "./microservices": {
+      "module-sync": {
+        "types": "./dist/microservices.d.mts",
+        "default": "./dist/microservices.mjs"
+      },
+      "import": {
+        "types": "./dist/microservices.d.mts",
+        "default": "./dist/microservices.mjs"
+      },
+      "require": {
+        "types": "./dist/microservices.d.cts",
+        "default": "./dist/microservices.cjs"
+      }
+    },
     "./admin": {
       "module-sync": {
         "types": "./dist/admin.d.mts",
@@ -157,9 +171,15 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsdown"
   },
+  "peerDependenciesMeta": {
+    "@nestjs/microservices": {
+      "optional": true
+    }
+  },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
+    "@nestjs/microservices": "^12.0.3",
     "better-auth": ">=1.7.5 <2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -170,16 +190,25 @@
   },
   "devDependencies": {
     "@better-auth/api-key": "1.7.5",
+    "@grpc/grpc-js": "1.14.5",
+    "@grpc/proto-loader": "0.8.1",
+    "@nats-io/transport-node": "3.4.0",
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
+    "@nestjs/microservices": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/platform-fastify": "12.0.3",
     "@nestjs/testing": "12.0.3",
     "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
+    "amqp-connection-manager": "5.0.0",
+    "amqplib": "2.0.1",
     "better-auth": "1.7.5",
     "express": "5.2.1",
+    "ioredis": "6.0.0",
+    "kafkajs": "2.2.4",
+    "mqtt": "5.16.0",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"

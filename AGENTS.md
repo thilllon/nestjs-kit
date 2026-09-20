@@ -44,7 +44,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Name all test files `*.test.ts`, with middleware E2E tests named `*.e2e.test.ts`. Use `fixtures` for any necessary fixture directories; remove stale fixture exclusions and unused assets.
 - Write unit tests for meaningful behavior: signing rules, configuration isolation, lifecycle management, error propagation and regressions. Do not add trivial framework/getter tests or tests mirroring the implementation.
 - Where middleware integration needs E2E coverage, provide Docker Compose services with health checks and `docker:up` / `docker:down` scripts. Use isolated local services; always clean up after tests.
-- Default unit tests must not require cloud credentials or network services. PostgreSQL E2E runs separately with `pnpm test:e2e`.
+- Default unit tests must not require cloud credentials or network services. HTTP, database, socket and broker E2E runs separately with `pnpm test:e2e`.
 - Run artifact consumer checks separately with `pnpm test:packaging` after building. Keep packaging tests out of the default unit test run so a clean checkout works without `dist`.
 - Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
