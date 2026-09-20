@@ -38,6 +38,33 @@ describe("infrastructure diagnostics", () => {
     ).not.toContain(cause);
   });
 
+  it("redacts request-owned credentials while retaining only an explicitly opted-in raw cause", () => {
+    const session = randomUUID();
+    const bearer = randomUUID();
+    const apiKey = randomUUID();
+    const headers = new Headers({
+      cookie: `session=${session}`,
+      authorization: `Bearer ${bearer}`,
+      "x-api-key": apiKey,
+    });
+    const cause = new Error(`lookup ${session} ${bearer} ${apiKey}`);
+    for (const exposeRawCause of [false, true]) {
+      const error = createInfrastructureError(cause, {
+        headers,
+        credentialHeaders: ["x-api-key"],
+        exposeRawCause,
+      });
+      expect(error.cause.message).toBe(
+        "lookup [REDACTED] [REDACTED] [REDACTED]",
+      );
+      expect(getRawCause(error)).toBe(exposeRawCause ? cause : undefined);
+      for (const secret of [session, bearer, apiKey]) {
+        expect(inspect(error)).not.toContain(secret);
+        expect(JSON.stringify(error)).not.toContain(secret);
+      }
+    }
+  });
+
   it("keeps raw causes only for explicit local debugging without printing them", () => {
     const secret = randomUUID();
     const cause = new Error(`database ${secret}`);

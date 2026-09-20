@@ -1,0 +1,261 @@
+import type {
+  AuthContextView,
+  BrowserExposure,
+  OriginCheckOptions,
+} from "./auth-contracts.js";
+import {
+  AuthFailures,
+  type AuthFailure,
+  BetterAuthConfigurationError,
+  createInfrastructureError,
+  isConfigurationError,
+  isInfrastructureError,
+} from "./auth-errors.js";
+import { memoKey, RequestScope } from "./request-scope.js";
+import { originChecksDisabled, TrustedOrigins } from "./trusted-origins.js";
+
+const ORIGIN_PROOF = Symbol.for("nestjs-slightly-better-auth:origin-proof");
+
+function diagnosticOrigin(headers: Headers): string {
+  const origin = headers.get("origin");
+  const referer = headers.get("referer");
+  let value = origin || referer || "(missing)";
+  if (!origin && referer) {
+    try {
+      value = new URL(referer).origin;
+    } catch {
+      value = "(invalid referer)";
+    }
+  }
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Remove attacker-controlled log control characters.
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 100);
+}
+
+/** Bounded, per-application diagnostics; the next denial rolls the window without timers. */
+export class OriginDiagnostics {
+  #openedAt: number | undefined;
+  readonly #pairs = new Set<string>();
+  readonly #further = new Map<string, number>();
+  readonly #origins = new Map<string, number>();
+
+  constructor(
+    private readonly logger: {
+      warn(message: string): void;
+      debug(message: string): void;
+    },
+  ) {}
+
+  record(
+    instance: string,
+    failure: AuthFailure,
+    headers: Headers,
+    trustedCount: number,
+  ): void {
+    const now = Date.now();
+    if (this.#openedAt !== undefined && now - this.#openedAt >= 3_600_000) {
+      this.logger.warn(
+        `Origin check window closed: further denials ${JSON.stringify([...this.#further])}; frequent origins ${JSON.stringify([...this.#origins].sort((a, b) => b[1] - a[1]).slice(0, 5))}`,
+      );
+      this.#pairs.clear();
+      this.#further.clear();
+      this.#origins.clear();
+      this.#openedAt = undefined;
+    }
+    this.#openedAt ??= now;
+    const origin = diagnosticOrigin(headers);
+    const reason = failure.reason ?? failure.code;
+    const pair = JSON.stringify([reason, origin]);
+    const message = `Origin check ${instance}: ${reason}, origin ${origin}, trusted origins ${trustedCount}. Add the origin to trustedOrigins or send Origin from non-browser clients.`;
+    if (!this.#pairs.has(pair) && this.#pairs.size < 100) {
+      this.#pairs.add(pair);
+      this.logger.warn(message);
+    } else {
+      this.#further.set(reason, (this.#further.get(reason) ?? 0) + 1);
+    }
+    if (this.#origins.has(origin) || this.#origins.size < 100) {
+      this.#origins.set(origin, (this.#origins.get(origin) ?? 0) + 1);
+    }
+    this.logger.debug(message);
+  }
+
+  advisoryFailure(
+    instance: string,
+    headers: Headers,
+    trustedCount: number,
+  ): void {
+    this.record(
+      instance,
+      AuthFailures.forbidden("ORIGIN_CHECK_UNAVAILABLE"),
+      headers,
+      trustedCount,
+    );
+  }
+}
+
+export interface OriginCheckInit {
+  readonly instance: string;
+  readonly context: AuthContextView;
+  readonly options?: OriginCheckOptions;
+  readonly diagnostics?: OriginDiagnostics;
+  readonly credentialHeaders?: readonly string[];
+  readonly exposeRawCause?: boolean;
+}
+
+export class OriginCheck {
+  readonly #trusted: TrustedOrigins;
+  readonly #trustedCounts = new WeakMap<object, number>();
+
+  constructor(
+    private readonly scope: RequestScope,
+    private readonly init: OriginCheckInit,
+  ) {
+    this.#trusted = new TrustedOrigins(async () => init.context);
+  }
+
+  check(
+    browser: BrowserExposure,
+    mode: "cookie" | "form",
+  ): Promise<AuthFailure | null> {
+    const origins = this.scope.stateFor(browser.key).origins;
+    const key = memoKey(this.init.instance, mode);
+    const existing = origins.get(key);
+    if (existing) {
+      return existing;
+    }
+    let headers: Headers | undefined;
+    const promise = Promise.resolve()
+      .then(async () => {
+        if (
+          this.init.options?.mode === "off" ||
+          originChecksDisabled(this.init.context)
+        ) {
+          return null;
+        }
+        headers = browser.headers();
+        const failure = await this.verdict(browser, headers, mode);
+        if (failure) {
+          this.init.diagnostics?.record(
+            this.init.instance,
+            failure,
+            headers,
+            this.#trustedCounts.get(browser.key) ??
+              this.init.context.trustedOrigins.length,
+          );
+        } else {
+          // Cookie-free cookie mode does not establish evidence about an origin.
+          if (mode === "form" || headers.has("cookie")) {
+            this.scope
+              .stateFor(browser.key)
+              .values.set(
+                this.scope.valueKey(this.init.instance, ORIGIN_PROOF),
+                true,
+              );
+          }
+        }
+        return failure;
+      })
+      .catch((error: unknown) => {
+        if (origins.get(key) === promise) {
+          origins.delete(key);
+        }
+        if (isConfigurationError(error) || isInfrastructureError(error)) {
+          throw error;
+        }
+        throw createInfrastructureError(error, {
+          headers,
+          credentialHeaders: this.init.credentialHeaders,
+          exposeRawCause: this.init.exposeRawCause,
+        });
+      });
+    origins.set(key, promise);
+    return promise;
+  }
+
+  async advisory(browser: BrowserExposure): Promise<void> {
+    try {
+      await this.check(browser, "cookie");
+    } catch {
+      // The safe read continues. A direct caller-session call still needs passing evidence.
+      this.init.diagnostics?.advisoryFailure(
+        this.init.instance,
+        browser.headers(),
+        this.init.context.trustedOrigins.length,
+      );
+    }
+  }
+
+  assertCallerSession(
+    browser: BrowserExposure,
+    path: string,
+    instance: string,
+  ): void {
+    if (
+      instance === this.init.instance &&
+      (this.init.options?.mode === "off" ||
+        originChecksDisabled(this.init.context) ||
+        this.scope
+          .stateFor(browser.key)
+          .values.get(this.scope.valueKey(this.init.instance, ORIGIN_PROOF)) ===
+          true)
+    ) {
+      return;
+    }
+    throw BetterAuthConfigurationError.atRequest(
+      "PUBLIC_HANDLER_USED_CALLER_SESSION",
+      "A direct caller-session call requires a passing origin verdict for this browser leg and instance",
+      {
+        site: path,
+        hint: "Guard the handler and pass its origin check before making this call.",
+      },
+    );
+  }
+
+  private async verdict(
+    browser: BrowserExposure,
+    headers: Headers,
+    mode: "cookie" | "form",
+  ): Promise<AuthFailure | null> {
+    if (!headers.has("cookie")) {
+      if (mode === "cookie") {
+        return null;
+      }
+      const site = headers.get("sec-fetch-site");
+      const navigation = headers.get("sec-fetch-mode");
+      const metadata = [site, navigation, headers.get("sec-fetch-dest")].some(
+        (value) => Boolean(value?.trim()),
+      );
+      if (metadata && site === "cross-site" && navigation === "navigate") {
+        return AuthFailures.forbidden("CROSS_SITE_NAVIGATION_LOGIN_BLOCKED");
+      }
+      if (!metadata && !headers.get("origin") && !headers.get("referer")) {
+        return null;
+      }
+    }
+    const origin = headers.get("origin");
+    const referer = headers.get("referer");
+    const site = headers.get("sec-fetch-site");
+    const value =
+      origin === "null" && site === "same-origin"
+        ? new URL(browser.url).origin
+        : origin || referer;
+    if (!value || value === "null") {
+      if (
+        this.init.options?.missingOrigin === "allow-non-browser" &&
+        !headers.has("origin") &&
+        !headers.has("referer") &&
+        !headers.has("sec-fetch-site")
+      ) {
+        return null;
+      }
+      return AuthFailures.forbidden("MISSING_OR_NULL_ORIGIN");
+    }
+    const request = new Request(browser.url, { headers });
+    const trustedOrigins = await this.#trusted.list(request);
+    this.#trustedCounts.set(browser.key, trustedOrigins.length);
+    return this.init.context.isTrustedOrigin.call({ trustedOrigins }, value, {
+      allowRelativePaths: false,
+    })
+      ? null
+      : AuthFailures.forbidden("INVALID_ORIGIN");
+  }
+}
