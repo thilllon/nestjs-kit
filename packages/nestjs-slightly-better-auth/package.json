@@ -80,6 +80,20 @@
         "default": "./dist/fastify.cjs"
       }
     },
+    "./websockets": {
+      "module-sync": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "import": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "require": {
+        "types": "./dist/websockets.d.cts",
+        "default": "./dist/websockets.cjs"
+      }
+    },
     "./admin": {
       "module-sync": {
         "types": "./dist/admin.d.mts",
@@ -157,9 +171,15 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsdown"
   },
+  "peerDependenciesMeta": {
+    "@nestjs/websockets": {
+      "optional": true
+    }
+  },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
+    "@nestjs/websockets": "^12.0.3",
     "better-auth": ">=1.7.5 <2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -174,14 +194,21 @@
     "@nestjs/core": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/platform-fastify": "12.0.3",
+    "@nestjs/platform-socket.io": "12.0.3",
+    "@nestjs/platform-ws": "12.0.3",
     "@nestjs/testing": "12.0.3",
+    "@nestjs/websockets": "12.0.3",
     "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1",
     "better-auth": "1.7.5",
     "express": "5.2.1",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "socket.io": "4.8.3",
+    "socket.io-client": "4.8.3",
+    "ws": "8.21.3"
   }
 }

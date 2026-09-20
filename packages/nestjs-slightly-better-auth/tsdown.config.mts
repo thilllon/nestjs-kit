@@ -9,6 +9,7 @@ export default defineConfig([
       platform: "src/platform.ts",
       express: "src/express.ts",
       fastify: "src/fastify.ts",
+      websockets: "src/websockets.ts",
       admin: "src/admin.ts",
       organization: "src/organization.ts",
       "api-key": "src/api-key.ts",

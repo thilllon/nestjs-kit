@@ -166,6 +166,70 @@ void invalidKind;
 }
 
 describe("built authentication package", () => {
+  it.each(["mts", "cts"] as const)(
+    "preserves WebSocket adapter and connection-auth types in a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule } from "nestjs-slightly-better-auth";
+import { socketIoTransport, wsTransport, withUpgradeRequest, recordUpgradeRequest, WS_CONNECTION_AUTH, WsConnectionAuth, wsCloseCodeFor } from "nestjs-slightly-better-auth/websockets";
+import type { AuthLike } from "nestjs-slightly-better-auth";
+declare const auth: AuthLike;
+BetterAuthModule.forRoot({ auth, transports: [socketIoTransport({ credentials: client => ({ authorization: String(client.handshake.auth?.token ?? "") }) }), wsTransport()], http: { mount: false } });
+class Adapter {
+  bindClientConnect(_server: unknown, _callback: (...args: any[]) => void): void {}
+  nativeMethod(): string { return "preserved"; }
+}
+const Wrapped = withUpgradeRequest(Adapter);
+const method: string = new Wrapped().nativeMethod();
+recordUpgradeRequest({}, { headers: { cookie: "example" }, url: "/socket" });
+declare const connections: WsConnectionAuth;
+connections.authenticate({}, { instance: "named" });
+connections.socketIoMiddleware({ required: false });
+const token: symbol = WS_CONNECTION_AUTH;
+const code: 4401 | 4403 | 4429 = wsCloseCodeFor({ status: 401, code: "UNAUTHENTICATED", message: "Unauthorized" });
+// @ts-expect-error An unsupported TTL policy is not accepted.
+wsTransport({ principalTtlMs: "forever" });
+void method; void token; void code;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "injects connection authentication from the actual %s WebSocket entry",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const sockets = await load("./dist/websockets.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [kit.BetterAuthModule.forRoot({ auth, transports: [sockets.socketIoTransport(), sockets.wsTransport()], http: { mount: false }, logSummary: false })] }).compile();
+         try {
+           await moduleRef.init();
+           const byToken = moduleRef.get(sockets.WS_CONNECTION_AUTH);
+           console.log(JSON.stringify({ sameProvider: byToken === moduleRef.get(sockets.WsConnectionAuth), authenticate: typeof byToken.authenticate, middleware: typeof byToken.socketIoMiddleware, originalInstance: moduleRef.get(kit.BetterAuthService).instance === auth }));
+         } finally { await moduleRef.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        sameProvider: true,
+        authenticate: "function",
+        middleware: "function",
+        originalInstance: true,
+      });
+    },
+  );
+
   it.each([
     { format: "esm", platform: "express" },
     { format: "cjs", platform: "express" },

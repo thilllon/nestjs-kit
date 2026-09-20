@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
 
-> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and Express/Fastify platforms are implemented. Optional transports and built-in authorization units are still in progress. The npm badges will become available after the first real release.
+> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and Express/Fastify platforms are implemented. Admin, organization, API-key and WebSocket integrations are implemented on the development branch. GraphQL, RPC, conformance and release acceptance remain in progress. The npm badges will become available after the first real release.
 
 ## Implementation status
 
@@ -20,7 +20,13 @@ Express preserves native controller parsing for unconditional routes that overla
 
 Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
 
-GraphQL, WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP platform tests do not establish that those integrations are ready.
+GraphQL and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP platform tests do not establish that those integrations are ready.
+
+The `./websockets` entry supports Socket.IO and raw `ws`, including connection authentication through `WsConnectionAuth` or `@Inject(WS_CONNECTION_AUTH)`. Use `@UseBetterAuth()` on gateways so both the guard and invocation scope run. For raw `ws`, wrap Nest's `WsAdapter` with `withUpgradeRequest(WsAdapter)` to retain the actual upgrade request. Public messages can run without credentials; protected messages fail safely when their request context is missing.
+
+Principal caching defaults to zero. A positive `principalTtlMs` reuses successful authentication on a connection and delays revocation on ordinary handlers; authoritative routes still revalidate. Neither message nor connection authentication refreshes cookies. The browser-origin check uses the original handshake even when credentials are mapped from Socket.IO auth or a custom callback.
+
+Native tests currently verify Nest 12.0.3 with Socket.IO 4.8.3 and ws 8.21.3. That Nest version delivers raw-ws errors as native exception packets. Older Nest versions may require an application exception filter for wire delivery; broader compatibility remains a release gate.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 
