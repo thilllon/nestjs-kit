@@ -6,13 +6,15 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
 
-> **Private implementation in progress.** This workspace is not currently available on npm. Foundation contracts, derived types, injection tokens and safe errors are implemented; authentication modules, policies and transports are still in progress. The npm badges will become available after the first real release.
+> **Private implementation in progress.** This workspace is not currently available on npm. Foundation contracts, injection tokens, safe errors, the construction plugin, request-state primitives and platform helpers are implemented; Nest authentication modules, policies and concrete transports are still in progress. The npm badges will become available after the first real release.
 
-## Planned integration
+## Implementation status
 
-The proposal separates a Better Auth plugin, a NestJS integration kernel and optional transport integrations. It aims to support Express, Fastify, GraphQL, WebSockets and microservices without making every application install every transport.
+The library separates a Better Auth construction plugin, a NestJS integration kernel and optional transports. The `./plugin` entry installs the hook and cookie bridge before Better Auth creates its pipeline. The `./platform` entry provides Node/Web request and response helpers. Neither entry requires Express, Fastify, GraphQL or WebSocket packages.
 
-The reviewed design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These runtime capabilities are not available from the current foundation entry point.
+The kernel and concrete integrations are being implemented to support Express, Fastify, GraphQL, WebSockets and microservices without making every application install every transport.
+
+The reviewed design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These end-to-end capabilities are not yet available from the root entry point.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 

@@ -1,6 +1,10 @@
 import type { ExecutionContext } from "@nestjs/common";
 import { isAPIError } from "better-auth/api";
-import { ErrorRedactor, readErrorProperty } from "./error-redactor.js";
+import {
+  ErrorRedactor,
+  type ErrorRedactorOptions,
+  readErrorProperty,
+} from "./error-redactor.js";
 
 const FAILURE_BRAND = Symbol.for("nestjs-slightly-better-auth:auth-failure");
 const INFRASTRUCTURE_BRAND = Symbol.for(
@@ -257,8 +261,9 @@ export class BetterAuthInfrastructureError extends Error {
 /** Internal factory for an instance's explicit diagnostic opt-in, never global state. */
 export function createInfrastructureError(
   cause: unknown,
-  options?: { secrets?: readonly string[]; exposeRawCause?: boolean },
+  options?: ErrorRedactorOptions & { exposeRawCause?: boolean },
 ): BetterAuthInfrastructureError {
+  // Preserve request-owned redaction inputs without widening the public constructor.
   const error = new BetterAuthInfrastructureError(cause, options);
   if (options?.exposeRawCause === true) {
     Object.defineProperty(error, RAW_CAUSE, {

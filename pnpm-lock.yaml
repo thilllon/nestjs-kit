@@ -331,6 +331,10 @@ importers:
         version: 13.0.1
 
   packages/nestjs-slightly-better-auth:
+    dependencies:
+      defu:
+        specifier: 6.1.7
+        version: 6.1.7
     devDependencies:
       '@nestjs/common':
         specifier: 12.0.3

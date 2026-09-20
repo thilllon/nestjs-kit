@@ -69,9 +69,11 @@ export interface ScopeView {
 }
 export interface CompiledHook {
   /**
-   * A throwing user predicate makes matches() return TRUE, so that run() rethrows it: as APIError 500 from before-hooks
-   * (better-auth logs and converts before-hook matcher throws) and raw from after-hooks (better-auth propagates them),
-   * LEAD-V23. v1 returned false and silently skipped the hook.
+   * Evaluate the user predicate once and let it throw. The dispatcher logs and
+   * converts before-hook matcher failures to APIError 500; after-hook matcher
+   * failures cross the next fixed SDK matcher boundary unchanged, so the SDK
+   * cannot recover them as handler APIErrors. Never swallow a failure as a
+   * non-match or evaluate the predicate again in run().
    */
   matches(ctx: HookEndpointContext, scope: ScopeView | undefined): boolean;
   run(ctx: HookEndpointContext): Promise<unknown>;

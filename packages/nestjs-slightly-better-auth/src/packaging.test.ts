@@ -254,21 +254,68 @@ describe("built authentication package", () => {
   });
 
   it("includes every declared entry point and both declaration formats", () => {
-    const entry = manifest.exports["."];
     const paths = new Set([
       manifest.main,
       manifest.module,
       manifest.types,
-      ...Object.values(entry).flatMap(({ types, default: path }) => [
-        types,
-        path,
-      ]),
-      manifest.exports["./package.json"],
+      ...Object.values(manifest.exports).flatMap((entry) =>
+        typeof entry === "string"
+          ? [entry]
+          : Object.values(entry).flatMap(({ types, default: path }) => [
+              types,
+              path,
+            ]),
+      ),
     ]);
     const missing = [...paths].filter(
       (path) => !existsSync(new URL(`../${path}`, import.meta.url)),
     );
     expect(missing).toEqual([]);
+  });
+
+  it("loads the isolated plugin in both formats without importing the Nest kernel", () => {
+    const result = node(
+      `import { createRequire, registerHooks } from "node:module";
+       import { pathToFileURL } from "node:url";
+       const require = createRequire(import.meta.url);
+       const dist = pathToFileURL(process.cwd() + "/dist/").href;
+       const external = new Set(["better-auth/api", "better-auth/cookies", "defu"]);
+       const seen = new Set();
+       const hooks = registerHooks({
+         resolve(specifier, context, nextResolve) {
+           if (context.parentURL?.startsWith(dist) && !specifier.startsWith(".")) {
+             if (!external.has(specifier)) {
+               throw new Error("Unexpected plugin runtime dependency: " + specifier);
+             }
+             seen.add(specifier);
+           }
+           return nextResolve(specifier, context);
+         },
+       });
+       try {
+         const esm = await import(${JSON.stringify(`${manifest.name}/plugin`)});
+         const canonicalCjs = require(${JSON.stringify(`${manifest.name}/plugin`)});
+         const cjs = require("./dist/plugin.cjs");
+         const bridge = Symbol.for("nestjs-slightly-better-auth:bridge");
+         const plugins = [esm.nestjs(), cjs.nestjs()];
+         console.log(JSON.stringify({
+           same: esm === canonicalCjs,
+           bridges: plugins.map((plugin) => ({ id: plugin.id, protocol: plugin[bridge].protocol })),
+           middlewareLoaded: seen.has("better-auth/api"),
+         }));
+       } finally {
+         hooks.deregister();
+       }`,
+      "--input-type=module",
+    );
+    expect(JSON.parse(result)).toEqual({
+      same: true,
+      bridges: [
+        { id: "nestjs-slightly-better-auth", protocol: 4 },
+        { id: "nestjs-slightly-better-auth", protocol: 4 },
+      ],
+      middlewareLoaded: true,
+    });
   });
 
   it("carries public registry augmentation through both built declaration formats", async () => {
