@@ -38,6 +38,7 @@ yarn-error.log*
 
 # Agent-local state
 .omc/
+.superpowers/
 
 # Generated package archives
 *.tgz
