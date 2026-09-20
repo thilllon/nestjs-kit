@@ -35,6 +35,8 @@ Trusted publishing exchanges the workflow's OIDC identity for publish access; th
 
 All seven current package identities, including `@nestjs-kit/nodemailer`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
+`nestjs-slightly-better-auth` is an additional design-phase workspace with `private: true`, so it does not participate in publication. Its `0.0.1` source version is not evidence of a published package. Do not remove the private flag until a real implementation is ready, its package archive has been reviewed, and the owner completes first publication and trusted-publisher setup for this repository. Importing its old repository's release instructions does not transfer npm trust.
+
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
 For that local first publication only, use `--provenance=false` to override the package's CI-oriented `publishConfig.provenance`; subsequent CI publications retain provenance. Configure its trusted publisher and verify the registry identity before enabling automated publication. Existing packages must continue through the release workflow instead of repeating this bootstrap.

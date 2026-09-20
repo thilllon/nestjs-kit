@@ -1,0 +1,62 @@
+{
+  "name": "nestjs-slightly-better-auth",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A Better Auth integration for NestJS, currently in design",
+  "license": "MIT",
+  "author": "thilllon",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "module-sync": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/nestjs-slightly-better-auth"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-slightly-better-auth",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "nest",
+    "better-auth",
+    "authentication",
+    "typescript"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts"
+  }
+}

@@ -15,6 +15,7 @@
     "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
     "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
     "test": "vitest run",
+    "test:packaging": "vitest run --config vitest.packaging.config.mts",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down --volumes --remove-orphans",
     "test:e2e": "vitest run --config vitest.e2e.config.mts",
@@ -38,6 +39,7 @@
     "rxjs": "7.8.2",
     "tsdown": "0.23.0",
     "turbo": "2.10.13",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
     "unplugin-swc": "1.6.0",
     "vitest": "5.0.1"

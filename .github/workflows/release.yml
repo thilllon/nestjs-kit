@@ -184,6 +184,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm test:packaging
       - name: Configure release tag identity
         run: |
           git config user.name 'github-actions[bot]'
