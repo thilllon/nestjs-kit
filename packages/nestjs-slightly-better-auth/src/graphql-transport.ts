@@ -26,6 +26,7 @@ import type {
 } from "./auth-contracts.js";
 import {
   BetterAuthConfigurationError,
+  AuthFailures,
   isConfigurationError,
 } from "./auth-errors.js";
 import type {
@@ -294,9 +295,20 @@ class GraphqlTransport implements AuthTransport {
       }
       const ambient = details.ambient();
       if (this.options.subscriptionCredentials) {
-        const mapped = new Headers(
-          this.options.subscriptionCredentials(details.connection),
-        );
+        // Keep callback errors outside the conversion boundary: application
+        // programming failures are not malformed credential denials.
+        const input = this.options.subscriptionCredentials(details.connection);
+        let mapped: Headers;
+        try {
+          mapped = new Headers(input);
+        } catch {
+          // Web Headers errors embed rejected values, including server secrets.
+          // Discard the exception entirely; never retain its message or cause.
+          throw AuthFailures.rejected({
+            status: 401,
+            reason: "MALFORMED_CREDENTIALS",
+          });
+        }
         for (const name of ["host", "x-forwarded-host", "x-forwarded-proto"]) {
           const value = ambient.get(name);
           if (!mapped.has(name) && value !== null) {
@@ -312,8 +324,24 @@ class GraphqlTransport implements AuthTransport {
         ).map((name) => name.toLowerCase()),
       );
       for (const [name, value] of Object.entries(details.params ?? {})) {
-        if (allow.has(name.toLowerCase()) && typeof value === "string") {
+        if (!allow.has(name.toLowerCase())) {
+          continue;
+        }
+        if (typeof value !== "string" || /[\r\n\0]/.test(value)) {
+          throw AuthFailures.rejected({
+            status: 401,
+            reason: "MALFORMED_CREDENTIALS",
+          });
+        }
+        try {
           credentials.set(name, value);
+        } catch {
+          // One malformed selected credential rejects the whole extraction,
+          // without falling back to another credential or exposing its value.
+          throw AuthFailures.rejected({
+            status: 401,
+            reason: "MALFORMED_CREDENTIALS",
+          });
         }
       }
       return credentials;

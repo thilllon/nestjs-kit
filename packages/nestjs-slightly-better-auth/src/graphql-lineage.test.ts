@@ -66,7 +66,8 @@ import type {
   HttpRequestAccessor,
   PrincipalReading,
 } from "./auth-contracts.js";
-import { apolloTransport } from "./graphql.js";
+import { apolloTransport, type GraphqlTransportOptions } from "./graphql.js";
+import { isAuthFailure } from "./auth-errors.js";
 import { PrincipalReadings } from "./principal-readings.js";
 import { RequestScope } from "./request-scope.js";
 
@@ -290,5 +291,133 @@ describe("GraphQL socket credential envelopes", () => {
     expect(call.cookies).toBeNull();
     expect(call.key).toBe(carrier);
     expect(call.connection).toBe(request);
+  });
+});
+
+function socketHeaders(
+  options: GraphqlTransportOptions,
+  params: Record<string, unknown> = {},
+) {
+  class Resolver {
+    query() {}
+  }
+  const context = new ExecutionContextHost(
+    [
+      null,
+      {},
+      {
+        req: {
+          connectionParams: params,
+          extra: {
+            request: {
+              headers: {
+                host: "localhost:3000",
+                upgrade: "websocket",
+                cookie: "valid=fallback",
+              },
+              rawHeaders: [
+                "host",
+                "localhost:3000",
+                "upgrade",
+                "websocket",
+                "cookie",
+                "valid=fallback",
+              ],
+              url: "/graphql",
+            },
+          },
+        },
+      },
+      info({}, ["query"]),
+    ],
+    Resolver,
+    Resolver.prototype.query,
+  );
+  context.setType("graphql");
+  return (apolloTransport(options) as AuthTransport).describe(context, {
+    http: null,
+  }).headers;
+}
+
+describe("GraphQL malformed credential conversion", () => {
+  it.each([
+    "secret\r\nInjected: value",
+    "secret\r",
+    "secret\n",
+    "secret\0",
+    "secret\u0100",
+    null,
+    12,
+    {},
+    [],
+    ["secret"],
+  ])(
+    "rejects a selected malformed value without retaining its cause (%j)",
+    (value) => {
+      const headers = socketHeaders({}, { authorization: value });
+      let failure: unknown;
+      try {
+        headers();
+      } catch (error) {
+        failure = error;
+      }
+      expect(isAuthFailure(failure)).toBe(true);
+      expect(failure).toMatchObject({
+        status: 401,
+        code: "UNAUTHENTICATED",
+        reason: "MALFORMED_CREDENTIALS",
+      });
+      expect(failure).not.toHaveProperty("cause");
+      expect(failure).not.toHaveProperty("stack");
+      expect(JSON.stringify(failure)).not.toContain("secret");
+    },
+  );
+  it.each<Record<string, string>>([
+    { authorization: "secret\r\nInjected: value" },
+    { authorization: "secret\u0100" },
+    { "invalid header": "secret" },
+  ])("sanitizes custom HeadersInit conversion (%j)", (input) => {
+    const headers = socketHeaders({ subscriptionCredentials: () => input });
+    let failure: unknown;
+    try {
+      headers();
+    } catch (error) {
+      failure = error;
+    }
+    expect(isAuthFailure(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      status: 401,
+      reason: "MALFORMED_CREDENTIALS",
+    });
+    expect(failure).not.toHaveProperty("cause");
+    expect(failure).not.toHaveProperty("stack");
+    expect(JSON.stringify(failure)).not.toContain("secret");
+  });
+  it("sanitizes invalid selected header names and ignores unselected values", () => {
+    expect(() =>
+      socketHeaders(
+        { connectionParamHeaders: ["invalid header"] },
+        { "invalid header": "secret" },
+      )(),
+    ).toThrow();
+    expect(
+      socketHeaders({}, { unselected: "secret\r\n" })().get("cookie"),
+    ).toBe("valid=fallback");
+  });
+  it.each([
+    new Error("mapper programming error"),
+    new TypeError("mapper programming error"),
+  ])("preserves callback programming errors (%j)", (error) => {
+    const headers = socketHeaders({
+      subscriptionCredentials: () => {
+        throw error;
+      },
+    });
+    expect(headers).toThrow(error);
+    try {
+      headers();
+    } catch (actual) {
+      expect(actual).toBe(error);
+    }
   });
 });

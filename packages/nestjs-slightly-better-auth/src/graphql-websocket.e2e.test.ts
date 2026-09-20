@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import { ApolloDriver } from "@nestjs/apollo";
 import { MercuriusDriver } from "@nestjs/mercurius";
 import {
@@ -11,12 +12,19 @@ import { ExpressAdapter } from "@nestjs/platform-express";
 import { FastifyAdapter } from "@nestjs/platform-fastify";
 import { Test } from "@nestjs/testing";
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { memoryAdapter } from "better-auth/adapters/memory";
+import { bearer } from "better-auth/plugins";
 import { createClient, type Client } from "graphql-ws";
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 import { BetterAuthModule } from "./auth-module.js";
-import { CurrentPrincipal, RequireAuth } from "./auth-decorators.js";
+import {
+  CurrentPrincipal,
+  OptionalAuth,
+  Public,
+  RequireAuth,
+} from "./auth-decorators.js";
 import type { AuthPrincipal } from "./auth-types.js";
 import { expressPlatform } from "./express.js";
 import { fastifyPlatform } from "./fastify.js";
@@ -30,8 +38,24 @@ import { nestjs } from "./plugin.js";
 
 @Resolver()
 class SocketResolver {
+  calls = 0;
+
+  @Query(() => String, { nullable: true })
+  @OptionalAuth()
+  optionalWho(@CurrentPrincipal() principal: AuthPrincipal | null) {
+    this.calls++;
+    return principal?.userId ?? "anonymous";
+  }
+
+  @Query(() => String)
+  @Public()
+  harmless() {
+    return "public";
+  }
+
   @Query(() => String, { nullable: true })
   who(@CurrentPrincipal() principal: AuthPrincipal) {
+    this.calls++;
     return principal.userId;
   }
 
@@ -112,6 +136,7 @@ async function fixture(
     verification: [],
   };
   let reads = 0;
+  let sessionCalls = 0;
   const memory = memoryAdapter(database);
   const auth = betterAuth({
     secret: crypto.randomUUID() + crypto.randomUUID(),
@@ -126,6 +151,13 @@ async function fixture(
     logger: { disabled: true },
     emailAndPassword: { enabled: true },
     session: { updateAge: 1 },
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path === "/get-session") {
+          sessionCalls++;
+        }
+      }),
+    },
     database: (options: Parameters<typeof memory>[0]) => {
       const adapter = memory(options);
       return {
@@ -138,7 +170,7 @@ async function fixture(
         },
       };
     },
-    plugins: [nestjs()],
+    plugins: [bearer(), nestjs()],
   });
   const mercurius = mode.startsWith("mercurius");
   const module = await Test.createTestingModule({
@@ -182,9 +214,18 @@ async function fixture(
     ],
     providers: [SocketResolver],
   }).compile();
+  const errors: unknown[][] = [];
   const app = module.createNestApplication(
     mercurius ? new FastifyAdapter() : new ExpressAdapter(),
-    { logger: false },
+    {
+      logger: {
+        log() {},
+        warn() {},
+        error(...args: unknown[]) {
+          errors.push(args);
+        },
+      },
+    },
   );
   const clients: Client[] = [];
   try {
@@ -208,12 +249,17 @@ async function fixture(
       new Date(String(database.session[0]!.expiresAt)).getTime() - 60_000,
     );
     reads = 0;
+    sessionCalls = 0;
     return {
       userId: signup.response.user.id,
       cookie,
+      bearer: `Bearer ${signup.response.token}`,
+      errors,
+      calls: () => module.get(SocketResolver).calls,
       database,
       oldUpdatedAt,
       reads: () => reads,
+      sessionCalls: () => sessionCalls,
       client(
         headers: Record<string, string>,
         connectionParams: Record<string, unknown> = {},
@@ -248,6 +294,78 @@ describe.each([
   "mercurius",
   "mercurius-native",
 ] as const)("native %s socket operations", (mode) => {
+  describe.each(["default", "override"] as const)(
+    "%s credential conversion",
+    (mapping) => {
+      it.each(["authorization", "cookie"] as const)(
+        "rejects malformed %s without fallback, disclosure or authentication work",
+        async (name) => {
+          const marker = `SYNTHETIC_${mode}_${mapping}_${name}_PRIVATE`;
+          const malformed = `${marker}\r\nInjected: value`;
+          let replacement: Record<string, string> = {};
+          let mappings = 0;
+          const f = await fixture(
+            mode,
+            mapping === "override"
+              ? {
+                  subscriptionCredentials: () => {
+                    mappings++;
+                    return replacement;
+                  },
+                }
+              : {},
+          );
+          try {
+            const fallback: Record<string, string> =
+              name === "authorization"
+                ? { cookie: f.cookie }
+                : { authorization: f.bearer };
+            replacement = { ...fallback, [name]: malformed };
+            const client = f.client(
+              { ...fallback, origin: "http://localhost:3000" },
+              mapping === "default" ? { [name]: malformed } : {},
+            );
+            expect(await execute(client, "{ harmless }")).toEqual({
+              data: { harmless: "public" },
+            });
+            expect(mappings).toBe(0);
+            expect(f.reads()).toBe(0);
+            const result = await execute(
+              client,
+              "{ a: who b: who c: optionalWho d: optionalWho }",
+            );
+            expect(inspect([result, f.errors])).not.toContain(marker);
+            expect(result.errors).toHaveLength(4);
+            for (const error of result.errors ?? []) {
+              expect(error.extensions).toMatchObject({
+                code: "UNAUTHENTICATED",
+                statusCode: 401,
+                reason: "MALFORMED_CREDENTIALS",
+              });
+            }
+            expect(result.data).toEqual({ a: null, b: null, c: null, d: null });
+            expect(f.errors).toEqual([]);
+            expect(f.reads()).toBe(0);
+            expect(f.calls()).toBe(0);
+            expect(f.sessionCalls()).toBe(0);
+            // Prove the alternate credential really authenticates if presented alone.
+            replacement = fallback;
+            expect(
+              await execute(
+                f.client({ ...fallback, origin: "http://localhost:3000" }),
+                "{ who }",
+              ),
+            ).toEqual({ data: { who: f.userId } });
+            expect(f.reads()).toBe(1);
+            expect(f.calls()).toBe(1);
+            expect(f.sessionCalls()).toBe(1);
+          } finally {
+            await f.close();
+          }
+        },
+      );
+    },
+  );
   it("authenticates queries, mutations and subscriptions independently and never refreshes", async () => {
     const f = await fixture(mode);
     try {
