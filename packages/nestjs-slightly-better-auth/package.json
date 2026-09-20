@@ -80,6 +80,20 @@
         "default": "./dist/fastify.cjs"
       }
     },
+    "./graphql": {
+      "module-sync": {
+        "types": "./dist/graphql.d.mts",
+        "default": "./dist/graphql.mjs"
+      },
+      "import": {
+        "types": "./dist/graphql.d.mts",
+        "default": "./dist/graphql.mjs"
+      },
+      "require": {
+        "types": "./dist/graphql.d.cts",
+        "default": "./dist/graphql.cjs"
+      }
+    },
     "./admin": {
       "module-sync": {
         "types": "./dist/admin.d.mts",
@@ -157,10 +171,20 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsdown"
   },
+  "peerDependenciesMeta": {
+    "@nestjs/graphql": {
+      "optional": true
+    },
+    "graphql": {
+      "optional": true
+    }
+  },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
+    "@nestjs/graphql": "^14.0.1",
     "better-auth": ">=1.7.5 <2",
+    "graphql": "^16.14.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
@@ -169,19 +193,33 @@
     "path-to-regexp": "8.4.2"
   },
   "devDependencies": {
+    "@apollo/server": "5.5.1",
+    "@apollo/subgraph": "2.15.1",
+    "@as-integrations/express5": "1.1.2",
+    "@as-integrations/fastify": "3.1.0",
     "@better-auth/api-key": "1.7.5",
+    "@mercuriusjs/federation": "5.1.1",
+    "@nestjs/apollo": "14.0.1",
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
+    "@nestjs/graphql": "14.0.1",
+    "@nestjs/mercurius": "14.0.1",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/platform-fastify": "12.0.3",
     "@nestjs/testing": "12.0.3",
     "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1",
     "better-auth": "1.7.5",
     "express": "5.2.1",
+    "graphql": "16.14.2",
+    "graphql-subscriptions": "3.0.0",
+    "graphql-ws": "6.2.2",
+    "mercurius": "16.10.0",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "ws": "8.21.3"
   }
 }

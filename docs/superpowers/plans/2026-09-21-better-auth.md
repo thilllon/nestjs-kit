@@ -545,6 +545,12 @@ The fixture obtains the registered `AuthHandle` through `getBetterAuthHandleToke
 
 **Interfaces:** Implements `apolloTransport`, `mercuriusTransport`, subscription helper and error classes from v7 §2.2.12. Both implement the §4.2 transport contract, particularly structural description/lazy extraction, claims and lineage. Only this subpath imports `@nestjs/graphql`/`graphql`.
 
+**Verified framework prerequisites:** Nest GraphQL 14.0.1 enables exception filters for field and reference resolvers only when `fieldResolverEnhancers` includes `'filters'`. The frozen design assumed that guards/interceptors also entered Nest's exception pipeline. Require `['guards', 'filters']` for the documented nested-error logging guarantee; add `'interceptors'` for scoped service readers. Test one ERROR for repeated reader failures both with and without interceptors, and separately test that omitting filters still denies every field but produces no Nest ERROR. Emit `W_FIELD_EXCEPTION_FILTERS_DISABLED` with this prerequisite; preserve application-owned exception filters and do not add a second logger. The recorded correction does not change authentication decisions or silently satisfy an unconditional logging assertion.
+
+Nest GraphQL 14.0.1's code-first federation factory also accesses an Apollo subgraph internal module removed in 2.15.1. Track the incompatible upstream pair in [#552](https://github.com/thilllon/nestjs-kit/issues/552); use actual schema-first Apollo/Mercurius federation for this task and ordinary code-first GraphQL separately. Task 12 must verify a supported code-first federation pair or document that limitation before release. Do not patch vendor internals or substitute a mock federation executor.
+
+**Session-read measurement:** The organization permission SDK performs its own session handling. The one-storage-read fixture enables the SDK's signed session cookie cache while the guard performs the authoritative identity read. Count guard resolution and actual storage reads separately; do not imply that arbitrary SDK policy calls never read a session again.
+
 - [ ] Add an actual driver fixture with a root `projects(orgId)` handler protected by `orgPermission(..., { organization: fromParam('orgId') })`, an inheriting reader field, real user/session, and membership only in A. Send this HTTP GraphQL operation through each driver and assert distinct outcomes:
 
 ```ts

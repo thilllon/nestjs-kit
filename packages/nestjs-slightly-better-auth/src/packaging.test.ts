@@ -166,6 +166,73 @@ void invalidKind;
 }
 
 describe("built authentication package", () => {
+  it.each(["mts", "cts"] as const)(
+    "preserves GraphQL transport declarations for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule, AuthFailures, type AuthLike } from "nestjs-slightly-better-auth";
+import { apolloTransport, mercuriusTransport, mercuriusSubscriptionContext, BetterAuthGraphqlDenial, type GraphqlTransportOptions } from "nestjs-slightly-better-auth/graphql";
+declare const auth: AuthLike;
+const options: GraphqlTransportOptions = { connectionParamHeaders: ["authorization"], subscriptionCredentials: () => ({ authorization: "Bearer example" }), subscriptionPrincipalTtlMs: 50, fieldResolverCoverage: "error" };
+BetterAuthModule.forRoot({ auth, transports: [apolloTransport(options)], http: { mount: false } });
+BetterAuthModule.forRoot({ auth, transports: [mercuriusTransport()], http: { mount: false } });
+const context = mercuriusSubscriptionContext();
+context({}, { headers: {} });
+new BetterAuthGraphqlDenial(AuthFailures.unauthenticated());
+// @ts-expect-error Unknown coverage modes cannot silently disable enforcement.
+apolloTransport({ fieldResolverCoverage: "ignore" });
+`,
+      );
+    },
+  );
+
+  it.each([
+    { format: "esm", driver: "apollo", platform: "express" },
+    { format: "cjs", driver: "apollo", platform: "express" },
+    { format: "esm", driver: "mercurius", platform: "fastify" },
+    { format: "cjs", driver: "mercurius", platform: "fastify" },
+  ] as const)(
+    "initializes $driver with its actual $format transport artifact",
+    ({ format, driver, platform }) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const graphql = await load("./dist/graphql.${format === "esm" ? "mjs" : "cjs"}");
+         const platform = await load("./dist/${platform}.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { GraphQLModule } = await import("@nestjs/graphql");
+         const { ${driver === "apollo" ? "ApolloDriver" : "MercuriusDriver"}: Driver } = await import("@nestjs/${driver}");
+         const { ${platform === "express" ? "ExpressAdapter" : "FastifyAdapter"}: Adapter } = await import("@nestjs/platform-${platform}");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [
+           kit.BetterAuthModule.forRoot({ auth, platforms: [platform.${platform}Platform()], transports: [graphql.${driver}Transport()], logSummary: false }),
+           GraphQLModule.forRoot({ driver: Driver, typeDefs: "type Query { ping: String! }", resolvers: { Query: { ping: () => "pong" } } }),
+         ] }).compile();
+         const adapter = new Adapter();
+         const app = moduleRef.createNestApplication(adapter, { logger: false });
+         try {
+           await app.init();
+           ${platform === "fastify" ? "await adapter.getInstance().ready();" : ""}
+           console.log(JSON.stringify({ originalInstance: app.get(kit.BetterAuthService).instance === auth, adapter: app.getHttpAdapter().getType() }));
+         } finally { await app.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstance: true,
+        adapter: platform,
+      });
+    },
+  );
+
   it.each([
     { format: "esm", platform: "express" },
     { format: "cjs", platform: "express" },
