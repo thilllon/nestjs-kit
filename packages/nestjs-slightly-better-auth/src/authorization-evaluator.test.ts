@@ -267,3 +267,121 @@ it("fresh-session policy matches the SDK boundary, disabled check and unsupporte
     vi.useRealTimers();
   }
 });
+
+it.each([
+  {
+    name: "anyOf stops on its first allow",
+    tree: "any-allow",
+    calls: ["allow"],
+    decision: { effect: "allow" },
+  },
+  {
+    name: "anyOf keeps the first denial reason but gives 401 precedence",
+    tree: "any-deny",
+    calls: ["deny403", "deny401"],
+    decision: {
+      effect: "deny",
+      status: 401,
+      reason: "FIRST_DENIAL",
+      message: "deny403 or deny401",
+    },
+  },
+  {
+    name: "allOf stops on its first denial",
+    tree: "all-deny",
+    calls: ["deny403"],
+    decision: { effect: "deny", status: 403, reason: "FIRST_DENIAL" },
+  },
+  {
+    name: "nested alternatives preserve sequential short circuits",
+    tree: "nested",
+    calls: ["deny403", "allow"],
+    decision: { effect: "allow" },
+  },
+  {
+    name: "allOf evaluates all children until every child allows",
+    tree: "all-allow",
+    calls: ["allow", "secondAllow"],
+    decision: { effect: "allow" },
+  },
+])("$name", async ({ tree, calls, decision }) => {
+  const { anyOf, allOf, requirement } = await import("./auth-decorators.js");
+  const observed: string[] = [];
+  const leaf = (
+    id: string,
+    answer: import("./auth-contracts.js").AuthorizationDecision,
+  ) =>
+    requirement(
+      {
+        id,
+        evaluate() {
+          observed.push(id);
+          return answer;
+        },
+      },
+      {},
+      { label: id },
+    );
+  const allow = leaf("allow", { effect: "allow" }),
+    secondAllow = leaf("secondAllow", { effect: "allow" });
+  const deny403 = leaf("deny403", {
+      effect: "deny",
+      status: 403,
+      reason: "FIRST_DENIAL",
+    }),
+    deny401 = leaf("deny401", {
+      effect: "deny",
+      status: 401,
+      reason: "SECOND_DENIAL",
+    });
+  const unused = requirement(
+    {
+      id: "unused",
+      evaluate() {
+        throw new Error("short-circuited policy ran");
+      },
+    },
+    {},
+  );
+  const expressions: Record<
+    string,
+    import("./auth-contracts.js").RequirementExpr
+  > = {
+    "any-allow": anyOf(allow, unused),
+    "any-deny": anyOf(deny403, deny401),
+    "all-deny": allOf(deny403, unused),
+    nested: anyOf(allOf(deny403, unused), allOf(allow)),
+    "all-allow": allOf(allow, secondAllow),
+  };
+  const f = fixture({
+    id: "unused-fixture",
+    evaluate: () => ({ effect: "allow" }),
+  });
+  Object.assign(f.plan, { requirements: [expressions[tree]] });
+  await expect(f.run()).resolves.toMatchObject(decision);
+  expect(observed).toEqual(calls);
+});
+
+it("keeps policy symbol identity within the request across separate invocation decisions", async () => {
+  const a = Symbol("same"),
+    b = Symbol("same"),
+    registered = Symbol.for("nestjs-slightly-better-auth:test-policy-memo");
+  const io = vi.fn(async () => true);
+  const f = fixture({
+    id: "symbols",
+    async evaluate(_params, context) {
+      await Promise.all([
+        context.memo(a, io),
+        context.memo(a, io),
+        context.memo(b, io),
+        context.memo(registered, io),
+      ]);
+      return { effect: "allow" };
+    },
+  });
+  await f.run();
+  await f.run({ ...f.call, invocation: {} });
+  expect(io).toHaveBeenCalledTimes(3);
+  await f.run({ ...f.call, key: {}, invocation: {} });
+  expect(io).toHaveBeenCalledTimes(6);
+});

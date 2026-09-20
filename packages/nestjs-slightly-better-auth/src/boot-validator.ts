@@ -34,6 +34,7 @@ import {
   AUTH_ENHANCER,
   AUTH_INSTANCE_METADATA,
   FORWARD_COOKIES_METADATA,
+  FRESHNESS_METADATA,
   INSTANCE_REGISTRY,
   INVOCATION_PARAMS_METADATA,
   MOUNT_COORDINATOR,
@@ -42,11 +43,13 @@ import {
   REQUIREMENTS_METADATA,
   ROUTE_PLANNER,
   SKIP_ORIGIN_CHECK_METADATA,
+  SKIP_DEFAULT_REQUIREMENTS_METADATA,
   TRANSPORT_REGISTRY,
   USE_BETTER_AUTH_METADATA,
 } from "./auth-tokens.js";
 import {
   configurationIssue,
+  isSingletonDependencyTree,
   type InstanceEntry,
   type InstanceRegistry,
 } from "./instance-registry.js";
@@ -193,7 +196,7 @@ export class BootValidator {
         (key?.startsWith("nestjs-slightly-better-auth:ext:") ||
           refs.has(wrapper.token) ||
           refs.has(wrapper.metatype as Type)) &&
-        (!wrapper.isDependencyTreeStatic() || wrapper.isTransient)
+        !isSingletonDependencyTree(wrapper)
       ) {
         issues.push(
           new BetterAuthConfigurationError(
@@ -314,6 +317,7 @@ export class BootValidator {
       PRINCIPAL_PARAMS_METADATA,
       INVOCATION_PARAMS_METADATA,
       FORWARD_COOKIES_METADATA,
+      FRESHNESS_METADATA,
       AUTH_INSTANCE_METADATA,
       USE_BETTER_AUTH_METADATA,
     ].some((key) => Reflect.hasOwnMetadata(key, target));
@@ -423,10 +427,56 @@ export class BootValidator {
       }
     }
     if (!this.#globalScope) {
-      const uncovered = this.#claims
-        .filter((claim) => !this.local(claim, "scope"))
+      const affected = this.#claims.flatMap((claim) => {
+        if (this.local(claim, "scope")) {
+          return [];
+        }
+        const plan = this.#plans.find(
+          (site) =>
+            site.target === claim.target && site.method === claim.method,
+        )?.plan;
+        if (plan) {
+          return plan.declares
+            ? [{ claim, forwarding: plan.forwardDirectCalls }]
+            : [];
+        }
+        if (claim.method !== undefined) {
+          return [];
+        }
+        const entry = this.instances
+          .list()
+          .find(
+            (value) =>
+              value.name ===
+              (Reflect.getMetadata(AUTH_INSTANCE_METADATA, claim.target) ??
+                "default"),
+          );
+        const forwarding =
+          Reflect.getMetadata(FORWARD_COOKIES_METADATA, claim.target) ??
+          entry?.options.cookies?.forwardDirectCalls ??
+          false;
+        return forwarding ||
+          ancestors(claim.target).some((target) => this.trigger(target))
+          ? [{ claim, forwarding: Boolean(forwarding) }]
+          : [];
+      });
+      const seen = new Map<MetadataTarget, Set<string | undefined>>();
+      const uncovered = affected
+        .sort(
+          (left, right) => Number(right.forwarding) - Number(left.forwarding),
+        )
+        .filter(({ claim }) => {
+          const methods =
+            seen.get(claim.target) ?? new Set<string | undefined>();
+          seen.set(claim.target, methods);
+          if (methods.has(claim.method)) {
+            return false;
+          }
+          methods.add(claim.method);
+          return true;
+        })
         .slice(0, 20)
-        .map((claim) => `${claim.target.name}.${claim.method ?? "*"}`);
+        .map(({ claim }) => `${claim.target.name}.${claim.method ?? "*"}`);
       this.warn(
         "W_NO_GLOBAL_SCOPE",
         `BetterAuthScopeInterceptor is not global; unscoped direct auth.api calls have no origin proof, refresh suppression or cookie bridge. Enable globalScope or apply @UseBetterAuth(). ${uncovered.join(", ")}`,
@@ -630,9 +680,46 @@ export class BootValidator {
     this.#plans.length = 0;
     this.#claims.length = 0;
     const sites = this.sites();
-    const ready: Site[] = [];
+    const candidates = new Map<MetadataTarget, Map<string, Site>>();
+    const prepared = new Set<Site>();
+    const compiled = new Map<Site, RoutePlan>();
+    const failures = new Map<Site, unknown>();
+    const reported = new Set<unknown>();
     const references: Requirement[] = [];
-    for (const site of sites) {
+    const report = (error: unknown, detail: string): void => {
+      if (!reported.has(error)) {
+        reported.add(error);
+        issues.push(configurationIssue(error, "UNRESOLVED_POLICY", detail));
+      }
+    };
+    const candidate = (target: MetadataTarget, method: string): Site => {
+      let methods = candidates.get(target);
+      if (!methods) {
+        methods = new Map();
+        candidates.set(target, methods);
+      }
+      const existing = methods.get(method);
+      if (existing) {
+        return existing;
+      }
+      const handler = Reflect.get(target.prototype ?? {}, method);
+      if (typeof handler !== "function") {
+        throw new BetterAuthConfigurationError(
+          "UNKNOWN_HANDLER",
+          `${target.name}.${method} is not a handler.`,
+        );
+      }
+      const site = { target: target as Type, method, handler };
+      methods.set(method, site);
+      return site;
+    };
+    const prepare = (site: Site): void => {
+      if (failures.has(site)) {
+        throw failures.get(site);
+      }
+      if (prepared.has(site)) {
+        return;
+      }
       try {
         const leaves = requirementLeaves(
           this.planner.requirementsOf(site.target, site.method),
@@ -641,40 +728,47 @@ export class BootValidator {
         for (const requirement of leaves) {
           this.policies.resolve(requirement.policy);
         }
-        ready.push(site);
+        prepared.add(site);
       } catch (error) {
-        issues.push(
-          configurationIssue(
-            error,
-            "UNRESOLVED_POLICY",
-            `Cannot prepare ${site.target.name}.${site.method}.`,
-          ),
-        );
+        failures.set(site, error);
+        throw error;
       }
-    }
-    this.singletonChecks(issues, references);
-    for (const site of ready) {
+    };
+    const planOf = (target: MetadataTarget, method: string): RoutePlan => {
+      const site = candidate(target, method);
+      prepare(site);
+      const cached = compiled.get(site);
+      if (cached) {
+        return cached;
+      }
       try {
         const plan = this.planner.plan(site.target, site.method);
+        compiled.set(site, plan);
         this.#plans.push({ ...site, plan });
-        const entry = this.instances.get(plan.instance);
-        for (const requirement of requirementLeaves(plan.requirements)) {
-          await this.policies
-            .resolve(requirement.policy)
-            .validate?.(requirement.params, {
-              auth: entry.handle,
-              context: entry.context,
-              site: plan.site,
-            });
-        }
+        return plan;
       } catch (error) {
-        issues.push(
-          configurationIssue(
-            error,
-            "UNRESOLVED_POLICY",
-            `Cannot validate ${site.target.name}.${site.method}.`,
-          ),
-        );
+        failures.set(site, error);
+        throw error;
+      }
+    };
+    // Discovery remains broad for unclaimed metadata. Only explicit method
+    // metadata and transport-identified handlers enter the planning population.
+    for (const site of sites) {
+      if (
+        this.trigger(site.handler) ||
+        [
+          ACCESS_METADATA,
+          FRESHNESS_METADATA,
+          SKIP_ORIGIN_CHECK_METADATA,
+          SKIP_DEFAULT_REQUIREMENTS_METADATA,
+        ].some((key) => Reflect.hasOwnMetadata(key, site.handler))
+      ) {
+        const selected = candidate(site.target, site.method);
+        try {
+          prepare(selected);
+        } catch (error) {
+          report(error, `Cannot prepare ${site.target.name}.${site.method}.`);
+        }
       }
     }
     let canariesPassed = false;
@@ -698,23 +792,67 @@ export class BootValidator {
             reflector: this.reflector,
             moduleRef: this.moduleRef,
             hasHttpAdapter: this.mounts.adapter !== null,
-            planOf: (target, method) =>
-              this.planner.plan(target as Type, method),
+            // A transport may need the plan before claiming its handler. The
+            // same pre-resolution pass applies to that synchronous request.
+            planOf,
             claim: (target, method, reach, options) => {
               this.#claims.push({ transport, target, method, reach, options });
+              if (method !== undefined) {
+                candidate(target, method);
+              }
             },
             logger: this.logger,
           });
         } catch (error) {
-          issues.push(
-            configurationIssue(
-              error,
-              "TRANSPORT_VALIDATION_FAILED",
-              `Transport '${transport.id}' failed validation.`,
-            ),
-          );
+          if (!reported.has(error)) {
+            reported.add(error);
+            issues.push(
+              configurationIssue(
+                error,
+                "TRANSPORT_VALIDATION_FAILED",
+                `Transport '${transport.id}' failed validation.`,
+              ),
+            );
+          }
         }
       }
+    }
+    for (const methods of candidates.values()) {
+      for (const site of methods.values()) {
+        try {
+          prepare(site);
+        } catch (error) {
+          report(error, `Cannot prepare ${site.target.name}.${site.method}.`);
+        }
+      }
+    }
+    this.singletonChecks(issues, references);
+    for (const methods of candidates.values()) {
+      for (const site of methods.values()) {
+        try {
+          planOf(site.target, site.method);
+        } catch (error) {
+          report(error, `Cannot compile ${site.target.name}.${site.method}.`);
+        }
+      }
+    }
+    for (const site of this.#plans) {
+      try {
+        const entry = this.instances.get(site.plan.instance);
+        for (const requirement of requirementLeaves(site.plan.requirements)) {
+          await this.policies
+            .resolve(requirement.policy)
+            .validate?.(requirement.params, {
+              auth: entry.handle,
+              context: entry.context,
+              site: site.plan.site,
+            });
+        }
+      } catch (error) {
+        report(error, `Cannot validate ${site.target.name}.${site.method}.`);
+      }
+    }
+    if (canariesPassed) {
       this.coverage(sites, issues);
       for (const wrapper of this.discovery.getControllers()) {
         const target = wrapper.metatype;

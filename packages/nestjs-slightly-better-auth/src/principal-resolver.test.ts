@@ -14,7 +14,7 @@ import type { BridgeBinding, BridgeHandle } from "./bridge-protocol.js";
 import { BRIDGE_HANDLE } from "./bridge-protocol.js";
 import type { InstanceEntry } from "./instance-registry.js";
 import { nestjs } from "./plugin.js";
-import { ChainPrincipalResolver } from "./principal-resolver.js";
+import { ChainPrincipalResolver, MemoKeys } from "./principal-resolver.js";
 import { RequestScope } from "./request-scope.js";
 import { sessionPrincipal } from "./session-principal.js";
 import { TransportRegistry } from "./transport-registry.js";
@@ -218,4 +218,53 @@ describe("session source against the actual SDK", () => {
       registration.close();
     }
   });
+});
+
+it("scopes symbol/object identity numbering to collectible request owners", () => {
+  const keys = new MemoKeys(),
+    firstRequest = {},
+    a = Symbol("same"),
+    b = Symbol("same");
+  const first = keys.key(firstRequest, "memo", a);
+  expect(keys.key(firstRequest, "memo", a)).toBe(first);
+  expect(keys.key(firstRequest, "memo", b)).not.toBe(first);
+  expect(keys.key(firstRequest, "memo", {})).not.toBe(first);
+  expect(keys.key(firstRequest, "memo", "same")).not.toBe(first);
+  // Fresh requests restart identity allocation instead of retaining every request's symbols in an app registry.
+  for (let index = 0; index < 1000; index++) {
+    expect(keys.key({}, "memo", Symbol("request-local"))).toBe(first);
+  }
+  const registered = Symbol.for("nestjs-slightly-better-auth:test-memo-symbol");
+  expect(keys.key(firstRequest, "memo", registered)).toBe(
+    keys.key(firstRequest, "memo", registered),
+  );
+  expect(keys.key(firstRequest, "other-source", registered)).not.toBe(
+    keys.key(firstRequest, "memo", registered),
+  );
+});
+
+it("memoizes repeated symbol keys but separates identical descriptions and request lifetimes", async () => {
+  const a = Symbol("key"),
+    b = Symbol("key"),
+    registered = Symbol.for("nestjs-slightly-better-auth:test-source-memo");
+  const io = vi.fn(async () => true);
+  const f = fixture([
+    {
+      id: "session",
+      kinds: ["session"],
+      async resolve(request) {
+        await Promise.all([
+          request.memo(a, io),
+          request.memo(a, io),
+          request.memo(b, io),
+          request.memo(registered, io),
+        ]);
+        return { outcome: "absent" };
+      },
+    },
+  ]);
+  await f.resolver.resolve(f.call, f.request);
+  expect(io).toHaveBeenCalledTimes(3);
+  await f.resolver.resolve({ ...f.call, key: {}, invocation: {} }, f.request);
+  expect(io).toHaveBeenCalledTimes(6);
 });

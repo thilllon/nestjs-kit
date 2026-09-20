@@ -31,19 +31,39 @@ export const rejected = (failure: AuthFailure): PrincipalResult<never> => ({
 });
 
 export class MemoKeys {
-  private readonly objects = new WeakMap<object, number>();
-  private readonly symbols = new Map<symbol, number>();
-  private next = 0;
+  private readonly owners = new WeakMap<
+    object,
+    {
+      objects: WeakMap<object, number>;
+      symbols: Map<symbol, number>;
+      next: number;
+    }
+  >();
 
-  key(namespace: string, value: string | object | symbol): string {
+  key(
+    owner: object,
+    namespace: string,
+    value: string | object | symbol,
+  ): string {
     if (typeof value === "string") {
       return JSON.stringify([namespace, "string", value]);
     }
-    const map = typeof value === "symbol" ? this.symbols : this.objects;
-    let id = (map as Map<object | symbol, number>).get(value);
+    let identities = this.owners.get(owner);
+    if (!identities) {
+      identities = { objects: new WeakMap(), symbols: new Map(), next: 0 };
+      this.owners.set(owner, identities);
+    }
+    let id =
+      typeof value === "symbol"
+        ? identities.symbols.get(value)
+        : identities.objects.get(value);
     if (id === undefined) {
-      id = ++this.next;
-      (map as Map<object | symbol, number>).set(value, id);
+      id = ++identities.next;
+      if (typeof value === "symbol") {
+        identities.symbols.set(value, id);
+      } else {
+        identities.objects.set(value, id);
+      }
     }
     return JSON.stringify([namespace, typeof value, id]);
   }
@@ -138,7 +158,7 @@ export class ChainPrincipalResolver implements PrincipalResolver {
                 this.scope.memoPolicyIo(
                   call.key,
                   entry.name,
-                  this.keys.key(`source:${source.id}`, key),
+                  this.keys.key(call.key, `source:${source.id}`, key),
                   fn,
                   entry.options.limits?.maxAuthorizationCallsPerRequest,
                 ),

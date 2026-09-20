@@ -92,7 +92,7 @@ export class AuthorizationEvaluator {
         this.scope.memoPolicyIo(
           call.key,
           entry.name,
-          this.keys.key("policy-io", key),
+          this.keys.key(call.key, "policy-io", key),
           fn,
           entry.options.limits?.maxAuthorizationCallsPerRequest,
         ),
@@ -123,7 +123,7 @@ export class AuthorizationEvaluator {
       this.scope.memoDecision(
         call.invocation,
         entry.name,
-        this.keys.key("decision", expression),
+        this.keys.key(call.invocation, "decision", expression),
         async () => {
           if ("anyOf" in expression || "allOf" in expression) {
             const disjunction = "anyOf" in expression;

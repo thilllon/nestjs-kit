@@ -1,5 +1,6 @@
 import { Inject, Logger } from "@nestjs/common";
 import type { AbstractHttpAdapter } from "@nestjs/core";
+import type { InstanceWrapper } from "@nestjs/core/injector/instance-wrapper.js";
 import type {
   AuthContextView,
   AuthHandle,
@@ -18,6 +19,35 @@ import { createAuthHandle } from "./bridge-client.js";
 import { BRIDGE_HANDLE, type BridgeHandle } from "./bridge-protocol.js";
 import { OriginCheck, OriginDiagnostics } from "./origin-check.js";
 import type { RequestScope } from "./request-scope.js";
+
+/** Nest considers transient providers static; auth collaborators require singleton trees. */
+export function isSingletonDependencyTree(root: InstanceWrapper): boolean {
+  const pending = [root];
+  const seen = new Set<InstanceWrapper>();
+  while (pending.length) {
+    const wrapper = pending.pop()!;
+    if (seen.has(wrapper)) {
+      continue;
+    }
+    seen.add(wrapper);
+    if (wrapper.isTransient || !wrapper.isDependencyTreeStatic()) {
+      return false;
+    }
+    // useExisting aliases are constructor-injection edges to their real target.
+    for (const dependency of wrapper.getCtorMetadata() ?? []) {
+      if (dependency) {
+        pending.push(dependency);
+      }
+    }
+    for (const property of wrapper.getPropertiesMetadata() ?? []) {
+      pending.push(property.wrapper);
+    }
+    for (const enhancer of wrapper.getEnhancersMetadata() ?? []) {
+      pending.push(enhancer);
+    }
+  }
+  return true;
+}
 
 export interface InstanceEntry {
   readonly name: string;

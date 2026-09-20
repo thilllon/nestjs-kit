@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   Injectable,
+  Inject,
+  forwardRef,
   Logger,
   Scope,
   UseGuards,
@@ -30,10 +32,13 @@ import type {
   AuthContextView,
   AuthTransport,
   BetterAuthModuleOptions,
+  BootAdviceContext,
+  PrincipalSource,
   HttpPlatform,
 } from "./auth-contracts.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
+import { defineExtension } from "./auth-module-definition.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { AUTH_ENHANCER } from "./auth-tokens.js";
 import type { AuthLike, AuthHookContext } from "./auth-types.js";
@@ -734,4 +739,291 @@ it("fails closed when Nest enhancer metadata canaries fail, before consulting cl
     ),
   ).rejects.toThrow("NEST_METADATA_KEY_CHANGED");
   expect(validate).not.toHaveBeenCalled();
+});
+
+describe("review regressions: singleton dependency graphs", () => {
+  @Injectable({ scope: Scope.TRANSIENT })
+  class TransientDependency {}
+
+  it.each([
+    ["transient", Scope.TRANSIENT],
+    ["request-scoped", Scope.REQUEST],
+  ] as const)(
+    "rejects a %s source reached through an existing-provider alias",
+    async (_label, scope) => {
+      @Injectable({ scope })
+      class Source {
+        readonly id = "transient-source";
+        readonly kinds = ["session"] as const;
+
+        async resolve() {
+          return { outcome: "absent" } as const;
+        }
+      }
+      await expect(
+        boot({
+          auth: createTestAuth(),
+          principals: [
+            defineExtension({
+              providers: [Source],
+              use: { useExisting: Source },
+            }),
+          ],
+        }),
+      ).rejects.toThrow("NON_SINGLETON_EXTENSION");
+    },
+  );
+
+  it.each(["constructor", "property"])(
+    "rejects a singleton source's transient %s dependency",
+    async (injection) => {
+      class ConstructorSource {
+        readonly id = "constructor-source";
+        readonly kinds = ["session"] as const;
+
+        constructor(
+          @Inject(TransientDependency) readonly dependency: TransientDependency,
+        ) {}
+
+        async resolve() {
+          return { outcome: "absent" } as const;
+        }
+      }
+      class PropertySource {
+        readonly id = "property-source";
+        readonly kinds = ["session"] as const;
+        @Inject(TransientDependency) readonly dependency!: TransientDependency;
+
+        async resolve() {
+          return { outcome: "absent" } as const;
+        }
+      }
+      const useClass: Type<PrincipalSource> =
+        injection === "constructor" ? ConstructorSource : PropertySource;
+      await expect(
+        boot({
+          auth: createTestAuth(),
+          principals: [
+            defineExtension({
+              providers: [TransientDependency],
+              use: { useClass },
+            }),
+          ],
+        }),
+      ).rejects.toThrow("NON_SINGLETON_EXTENSION");
+    },
+  );
+
+  it("rejects transient dependencies of policy aliases and hook providers", async () => {
+    class Policy {
+      readonly id = "transient-backed-policy";
+
+      constructor(
+        @Inject(TransientDependency) readonly dependency: TransientDependency,
+      ) {}
+
+      async evaluate() {
+        return { effect: "allow" } as const;
+      }
+    }
+    class Hooks {
+      constructor(
+        @Inject(TransientDependency) readonly dependency: TransientDependency,
+      ) {}
+
+      @BeforeAuth("/get-session") run(
+        _context: AuthHookContext<"/get-session">,
+      ) {}
+    }
+    @Controller("policy")
+    class Protected {
+      @Get() @Require({ policy: "policy-alias", params: {} }) run() {}
+    }
+    await expect(
+      boot(
+        { auth: createTestAuth() },
+        {
+          controllers: [Protected],
+          providers: [
+            TransientDependency,
+            Policy,
+            Hooks,
+            { provide: "policy-alias", useExisting: Policy },
+          ],
+        },
+      ),
+    ).rejects.toMatchObject({
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: "NON_SINGLETON_EXTENSION",
+          detail: expect.stringContaining("policy-alias"),
+        }),
+        expect.objectContaining({
+          code: "NON_SINGLETON_EXTENSION",
+          detail: expect.stringContaining("Hooks"),
+        }),
+      ]),
+    });
+  });
+
+  it("does not reject unrelated application transient providers", async () => {
+    await boot(
+      { auth: createTestAuth() },
+      { providers: [TransientDependency] },
+    );
+  });
+});
+
+describe("review regressions: actual handler planning", () => {
+  it("omits provider/helper methods and unused default policies from public-only apps", async () => {
+    const validate = vi.fn();
+    const advise = vi.fn((_context: BootAdviceContext) => []);
+    const unused = {
+      id: "unused",
+      requires: { plugins: ["not-installed"] },
+      evaluate: async () => ({ effect: "allow" as const }),
+      validate,
+    };
+    @Controller("public")
+    class PublicController {
+      @Get() @Public() run() {}
+
+      helper() {}
+    }
+    class ApplicationHelper {
+      helper() {}
+    }
+    await boot(
+      {
+        auth: createTestAuth(),
+        defaultRequirements: [{ policy: unused, params: {} }],
+      },
+      {
+        controllers: [PublicController],
+        providers: [ApplicationHelper],
+        transports: [{ ...claimTransport("global", PublicController), advise }],
+      },
+    );
+    expect(validate).not.toHaveBeenCalled();
+    expect(advise).toHaveBeenCalledOnce();
+    expect(
+      advise.mock.calls[0]![0].handlers.map((handler) => handler.plan.site),
+    ).toEqual(["PublicController.run"]);
+    expect(advise.mock.calls[0]![0].policies).toEqual([]);
+  });
+
+  it("prepares and validates handlers requested by transport planOf before claim", async () => {
+    const validate = vi.fn();
+    const advise = vi.fn((_context: BootAdviceContext) => []);
+    const policy = {
+      id: "actual",
+      requires: { principals: ["session"] },
+      evaluate: async () => ({ effect: "allow" as const }),
+      validate,
+    };
+    class Handler {
+      run() {}
+    }
+    const transport = claimTransport("global", Handler);
+    transport.validate = (context) => {
+      expect(context.planOf(Handler, "run").requirements).toHaveLength(1);
+      context.claim(Handler, "run", "global", {
+        code: "COVERAGE",
+        hint: "Apply auth",
+      });
+    };
+    transport.advise = advise;
+    await boot(
+      {
+        auth: createTestAuth(),
+        defaultRequirements: [
+          { policy: "actual-policy", params: { key: "actual" } },
+        ],
+      },
+      {
+        providers: [Handler, { provide: "actual-policy", useValue: policy }],
+        transports: [transport],
+      },
+    );
+    expect(validate).toHaveBeenCalledOnce();
+    expect(validate).toHaveBeenCalledWith(
+      { key: "actual" },
+      expect.objectContaining({ site: "Handler.run" }),
+    );
+    expect(
+      advise.mock.calls[0]![0].handlers.map((handler) => handler.plan.site),
+    ).toEqual(["Handler.run"]);
+  });
+
+  it("prioritizes declared forwarding handlers before the B31 warning cap", async () => {
+    const warn = vi.spyOn(Logger.prototype, "warn");
+    class ManyHandlers {}
+    const names = [
+      ...Array.from({ length: 22 }, (_, index) => `required${index}`),
+      "undeclared",
+      "forwarding",
+    ];
+    for (const name of names) {
+      Object.defineProperty(ManyHandlers.prototype, name, {
+        value() {},
+        configurable: true,
+      });
+      const descriptor = Object.getOwnPropertyDescriptor(
+        ManyHandlers.prototype,
+        name,
+      )!;
+      if (name === "forwarding") {
+        ForwardAuthCookies()(ManyHandlers.prototype, name, descriptor);
+      } else if (name !== "undeclared") {
+        RequireAuth()(ManyHandlers.prototype, name, descriptor);
+      }
+    }
+    const transport = claimTransport("global", ManyHandlers);
+    transport.validate = (context) => {
+      for (const name of names) {
+        context.claim(ManyHandlers, name, "global", {
+          code: "COVERAGE",
+          hint: "Apply auth",
+        });
+      }
+    };
+    await boot(
+      { auth: createTestAuth(), globalScope: false },
+      { providers: [ManyHandlers], transports: [transport] },
+    );
+    const message = String(
+      warn.mock.calls.find((call) =>
+        String(call[0]).includes("W_NO_GLOBAL_SCOPE"),
+      )![0],
+    );
+    const listed = message.match(/ManyHandlers\.\w+/g)!;
+    expect(listed).toHaveLength(20);
+    expect(listed[0]).toBe("ManyHandlers.forwarding");
+    expect(listed).not.toContain("ManyHandlers.undeclared");
+  });
+});
+
+it("accepts singleton extension dependency cycles without following unrelated providers", async () => {
+  class Left {
+    constructor(@Inject(forwardRef(() => Right)) readonly right: object) {}
+  }
+  class Right {
+    constructor(@Inject(forwardRef(() => Left)) readonly left: object) {}
+  }
+  class Source {
+    readonly id = "cycle-source";
+    readonly kinds = ["session"] as const;
+
+    constructor(@Inject(Left) readonly dependency: Left) {}
+
+    async resolve() {
+      return { outcome: "absent" } as const;
+    }
+  }
+  await boot({
+    auth: createTestAuth(),
+    principals: [
+      defineExtension({ providers: [Left, Right], use: { useClass: Source } }),
+    ],
+  });
 });

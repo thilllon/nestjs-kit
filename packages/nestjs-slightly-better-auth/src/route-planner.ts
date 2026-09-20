@@ -117,27 +117,34 @@ export class RoutePlanner {
     const skips =
       closest<boolean>(keys.SKIP_DEFAULT_REQUIREMENTS_METADATA, levels) ===
       true;
-    const requirements =
+    const declaredRequirements =
       access === "required"
         ? [
-            ...(skips ? [] : (entry.options.defaultRequirements ?? [])),
+            ...(skips ? [] : (entry.options.defaultRequirements ?? [])).map(
+              (expression) => ({ expression, origin: "defaultRequirements" }),
+            ),
             ...(nested
               ? []
-              : [...chain]
-                  .reverse()
-                  .flatMap(
-                    (level) =>
-                      own<readonly RequirementExpr[]>(
-                        keys.REQUIREMENTS_METADATA,
-                        level,
-                      ) ?? [],
-                  )),
-            ...(own<readonly RequirementExpr[]>(
-              keys.REQUIREMENTS_METADATA,
-              handler,
-            ) ?? []),
+              : [...chain].reverse().flatMap((level) =>
+                  (
+                    own<readonly RequirementExpr[]>(
+                      keys.REQUIREMENTS_METADATA,
+                      level,
+                    ) ?? []
+                  ).map((expression) => ({
+                    expression,
+                    origin: `${(level as Type).name} (class)`,
+                  })),
+                )),
+            ...(
+              own<readonly RequirementExpr[]>(
+                keys.REQUIREMENTS_METADATA,
+                handler,
+              ) ?? []
+            ).map((expression) => ({ expression, origin: `${site} (method)` })),
           ]
         : [];
+    const requirements = declaredRequirements.map((item) => item.expression);
     return {
       handler,
       chain,
@@ -149,6 +156,7 @@ export class RoutePlanner {
       access,
       skips,
       requirements,
+      declaredRequirements,
     };
   }
 
@@ -259,12 +267,28 @@ export class RoutePlanner {
     }
     if (
       p.access === "required" &&
-      permitted.length &&
       !intersection([accepts, ...permitted], allKinds).size
     ) {
+      const describe = (expression: RequirementExpr): string => {
+        if ("anyOf" in expression) {
+          return `anyOf(${expression.anyOf.map(describe).join(", ")})`;
+        }
+        if ("allOf" in expression) {
+          return `allOf(${expression.allOf.map(describe).join(", ")})`;
+        }
+        return expression.label ?? this.policies.resolve(expression.policy).id;
+      };
+      const declarations = p.declaredRequirements.map(
+        ({ expression, origin }) => `${origin}: ${describe(expression)}`,
+      );
       throw new BetterAuthConfigurationError(
         "UNSATISFIABLE_PRINCIPAL_KINDS",
-        `${p.site} has no principal kind satisfying its requirements`,
+        `${p.site} has no eligible principal kind satisfying its requirements. Accepted kinds: ${[...accepts].join(", ") || "none"}.${declarations.length ? ` Requirements: ${declarations.join("; ")}.` : ""}`,
+        p.declaredRequirements.some(
+          (item) => item.origin === "defaultRequirements",
+        )
+          ? "Review the conflicting requirements; use @SkipDefaultRequirements() to explicitly opt this handler out of instance defaults."
+          : "Review accepted kinds and requirement restrictions; configure a default source or explicitly accept a registered principal kind.",
       );
     }
     const forwardDirectCalls =

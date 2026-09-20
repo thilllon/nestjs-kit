@@ -7,6 +7,7 @@ import {
   AcceptPrincipals,
   CurrentPrincipal,
   Public,
+  OptionalAuth,
   Require,
   RequireAuth,
   SkipDefaultRequirements,
@@ -78,6 +79,7 @@ function fixture(
   const transports = new TransportRegistry();
   Object.assign(transports, transport);
   return {
+    entry,
     planner: new RoutePlanner(entries, policies, transports),
     policies,
     get,
@@ -262,4 +264,72 @@ it("treats nested method acceptance as a real required plan while ignoring class
     sourceSet: "[1]",
   });
   expect(planner.plan(Nested, "explicitPublic").access).toBe("public");
+});
+
+it("rejects empty required kind sets without requirements while preserving anonymous plans", () => {
+  class Routes {
+    required() {}
+    @OptionalAuth() optional() {}
+    @Public() public() {}
+    @AcceptPrincipals("machine") accepted() {}
+  }
+  const { entry, planner } = fixture();
+  Object.assign(entry.options, { session: false });
+  Object.assign(entry, { sources: [sources[1]] });
+  expect(() => planner.plan(Routes, "required")).toThrowError(
+    expect.objectContaining({ code: "UNSATISFIABLE_PRINCIPAL_KINDS" }),
+  );
+  expect(planner.plan(Routes, "optional")).toMatchObject({
+    access: "optional",
+    accepts: new Set(),
+  });
+  expect(planner.plan(Routes, "public")).toMatchObject({
+    access: "public",
+    accepts: new Set(),
+  });
+  expect(planner.plan(Routes, "accepted")).toMatchObject({
+    access: "required",
+    accepts: new Set(["machine"]),
+  });
+});
+
+it("identifies conflicting requirement labels and origins and explains the default opt-out", () => {
+  const company = requirement(
+    policy("company", ["session"]),
+    {},
+    { label: "company membership" },
+  );
+  const machine = requirement(
+    policy("machine", ["machine"]),
+    {},
+    { label: "machine grant" },
+  );
+  const base = requirement(policy("base"), {}, { label: "base restriction" });
+  @Require(base)
+  class Base {
+    run() {}
+  }
+  class Routes extends Base {
+    @Require(machine) override run() {}
+  }
+  const { planner } = fixture([company]);
+  let failure: unknown;
+  try {
+    planner.plan(Routes, "run");
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toMatchObject({
+    code: "UNSATISFIABLE_PRINCIPAL_KINDS",
+    hint: expect.stringContaining("SkipDefaultRequirements"),
+  });
+  expect((failure as BetterAuthConfigurationError).detail).toContain(
+    "defaultRequirements: company membership",
+  );
+  expect((failure as BetterAuthConfigurationError).detail).toContain(
+    "Base (class): base restriction",
+  );
+  expect((failure as BetterAuthConfigurationError).detail).toContain(
+    "Routes.run (method): machine grant",
+  );
 });

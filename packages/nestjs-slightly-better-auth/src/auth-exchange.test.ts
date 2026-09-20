@@ -132,7 +132,17 @@ describe("AuthExchange", () => {
     const first = exchange.create(
       {
         ...entry,
-        context: { ...entry.context, rateLimit: { enabled: false } },
+        context: {
+          ...entry.context,
+          options: {
+            advanced: {
+              ipAddress: {
+                ipAddressHeaders: [entry.bridge.clientIpHeader!],
+              },
+            },
+          },
+          rateLimit: { enabled: false },
+        },
       },
       options,
     );
@@ -145,6 +155,73 @@ describe("AuthExchange", () => {
     expect(logger.warn).toHaveBeenCalledOnce();
     expect(logger.warn.mock.calls[0]![0]).toContain("W_PROXY_UNTRUSTED");
     expect(logger.warn.mock.calls[0]![0]).toContain("sessions only");
+  });
+
+  it("does not claim the socket IP is the rate-limit key when bridge insertion is disabled", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { exchange, entry, init, logger } = fixture();
+    const binding = exchange.create(
+      {
+        ...entry,
+        bridge: { ...entry.bridge, clientIpHeader: null },
+        context: {
+          ...entry.context,
+          options: {
+            advanced: {
+              ipAddress: { ipAddressHeaders: ["x-forwarded-for"] },
+            },
+          },
+        },
+      },
+      {
+        ...init,
+        proxyTrust: { mode: "none", detail: "trust proxy = false" },
+      },
+    );
+    await binding.handle(
+      inbound({
+        headers: new Headers({ "x-forwarded-for": "198.51.100.9" }),
+      }),
+    );
+    const warning = logger.warn.mock.calls[0]![0];
+    expect(warning).toContain("W_PROXY_UNTRUSTED");
+    expect(warning).toContain("does not insert this socket IP");
+    expect(warning).toContain("configured IP resolution");
+    expect(warning).not.toContain("This socket IP is the rate-limit key");
+  });
+
+  it("qualifies the rate-limit key when an SDK IP header precedes the bridge header", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { exchange, entry, init, logger } = fixture();
+    const binding = exchange.create(
+      {
+        ...entry,
+        context: {
+          ...entry.context,
+          options: {
+            advanced: {
+              ipAddress: {
+                ipAddressHeaders: ["x-client-ip", entry.bridge.clientIpHeader!],
+              },
+            },
+          },
+        },
+      },
+      {
+        ...init,
+        proxyTrust: { mode: "none", detail: "trust proxy = false" },
+      },
+    );
+    await binding.handle(
+      inbound({
+        headers: new Headers({ "x-forwarded-for": "198.51.100.9" }),
+      }),
+    );
+    const warning = logger.warn.mock.calls[0]![0];
+    expect(warning).toContain("W_PROXY_UNTRUSTED");
+    expect(warning).toContain("precedes the bridge header");
+    expect(warning).toContain("not necessarily the rate-limit key");
+    expect(warning).not.toContain("This socket IP is the rate-limit key");
   });
 
   it("redacts credentials introduced by around interceptors and handles aborted streams", async () => {

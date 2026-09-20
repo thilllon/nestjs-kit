@@ -5,7 +5,10 @@ import type { AuthHookContext, DatabaseHookMethod } from "./auth-types.js";
 import { BetterAuthConfigurationError } from "./auth-errors.js";
 import type { DatabaseHookTarget } from "./auth-contracts.js";
 import type { BridgeBinding, CompiledHook } from "./bridge-protocol.js";
-import type { InstanceRegistry } from "./instance-registry.js";
+import {
+  isSingletonDependencyTree,
+  type InstanceRegistry,
+} from "./instance-registry.js";
 
 export type HookTables = Pick<BridgeBinding, "before" | "after" | "database">;
 export const DATABASE_TARGETS: readonly DatabaseHookTarget[] = [
@@ -115,7 +118,7 @@ export class HookBinder {
           continue;
         }
         found = true;
-        if (!wrapper.isDependencyTreeStatic() || wrapper.isTransient) {
+        if (!isSingletonDependencyTree(wrapper)) {
           issues.push(
             new BetterAuthConfigurationError(
               "NON_SINGLETON_EXTENSION",

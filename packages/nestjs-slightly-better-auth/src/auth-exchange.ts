@@ -278,11 +278,36 @@ export class AuthExchange {
       return;
     }
     this.#warnedProxy = true;
-    const effect = entry.context.rateLimit.enabled
-      ? entry.context.options.advanced?.ipAddress?.trustedProxies?.length
-        ? "If better-auth trustedProxies covers this address, no client IP remains and all clients share one rate-limit bucket. Otherwise this socket IP is the rate-limit key."
-        : "This socket IP is the rate-limit key, so clients behind the proxy share its bucket."
-      : "Rate limiting is disabled; this IP is recorded on sessions only.";
+    const ip = entry.context.options.advanced?.ipAddress;
+    const bridgeHeader = entry.bridge.clientIpHeader;
+    const bridgeHeaderFirst =
+      bridgeHeader !== null &&
+      ip?.ipAddressHeaders?.[0]?.toLowerCase() === bridgeHeader.toLowerCase();
+    let effect: string;
+    if (!entry.context.rateLimit.enabled) {
+      if (bridgeHeader === null) {
+        effect =
+          "Rate limiting is disabled; the bridge does not insert this socket IP, so better-auth's configured IP resolution determines the session IP.";
+      } else if (!bridgeHeaderFirst) {
+        effect =
+          "Rate limiting is disabled; a configured better-auth IP header precedes the bridge header, so this socket IP is not necessarily recorded on sessions.";
+      } else {
+        effect =
+          "Rate limiting is disabled; this IP is recorded on sessions only.";
+      }
+    } else if (bridgeHeader === null) {
+      effect =
+        "The bridge does not insert this socket IP; better-auth's configured IP resolution determines the rate-limit key.";
+    } else if (!bridgeHeaderFirst) {
+      effect =
+        "A configured better-auth IP header precedes the bridge header, so this socket IP is not necessarily the rate-limit key.";
+    } else if (ip?.trustedProxies?.length) {
+      effect =
+        "If better-auth trustedProxies covers this address, no client IP remains and all clients share one rate-limit bucket. Otherwise this socket IP is the rate-limit key.";
+    } else {
+      effect =
+        "This socket IP is the rate-limit key, so clients behind the proxy share its bucket.";
+    }
     init.logger.warn(
       `W_PROXY_UNTRUSTED: platform resolved socket IP ${inbound.clientIp ?? "unknown"}. ${effect} Configure platform proxy trust (${init.proxyTrust.detail}).`,
     );
