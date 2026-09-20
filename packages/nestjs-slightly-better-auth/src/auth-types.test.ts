@@ -31,6 +31,8 @@ async function compile(source: string): Promise<void> {
           module: "NodeNext",
           moduleResolution: "NodeNext",
           strict: true,
+          experimentalDecorators: true,
+          emitDecoratorMetadata: true,
           noEmit: true,
           skipLibCheck: true,
           types: ["node"],

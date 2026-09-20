@@ -1,3 +1,10 @@
+import type { SessionPrincipal } from "./auth-types.js";
+
+/** Augment this public interface to register an optional principal kind. */
+export interface PrincipalKinds {
+  session: SessionPrincipal;
+}
+
 export {
   AuthFailures,
   BetterAuthConfigurationError,
@@ -102,7 +109,6 @@ export type {
   GetSessionWithHeaders,
   IsRegistered,
   PrincipalKind,
-  PrincipalKinds,
   PrincipalOfKind,
   Register,
   RegisteredAuth,
