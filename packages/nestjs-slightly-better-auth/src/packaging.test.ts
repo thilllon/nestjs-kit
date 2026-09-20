@@ -166,6 +166,60 @@ void invalidKind;
 }
 
 describe("built authentication package", () => {
+  it.each(["mts", "cts"] as const)(
+    "preserves RPC carrier declarations for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule, type AuthLike } from "nestjs-slightly-better-auth";
+import { rpcTransport, grpcCarrier, natsCarrier, kafkaCarrier, rmqCarrier, mqttCarrier, payloadCarrier, defaultCarriers, type RpcCredentialCarrier } from "nestjs-slightly-better-auth/microservices";
+declare const auth: AuthLike;
+const carriers: readonly RpcCredentialCarrier[] = [grpcCarrier({ metadata: ["authorization"] }), natsCarrier(), kafkaCarrier(), rmqCarrier(), mqttCarrier({ userProperties: ["cookie"] }), payloadCarrier({ field: "credentials" })];
+BetterAuthModule.forRoot({ auth, transports: [rpcTransport({ carriers, inheritAppConfig: true })], http: { mount: false } });
+const defaults: readonly RpcCredentialCarrier[] = defaultCarriers;
+// @ts-expect-error Carrier fields must name a payload property.
+payloadCarrier({ field: 123 });
+// @ts-expect-error Unknown coverage modes cannot disable boot checks.
+rpcTransport({ hybridCoverage: "ignore" });
+void defaults;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "initializes a Nest microservice with the actual %s RPC artifact",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const rpc = await load("./dist/microservices.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Transport } = await import("@nestjs/microservices");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [kit.BetterAuthModule.forRoot({ auth, transports: [rpc.rpcTransport()], http: { mount: false }, logSummary: false })] }).compile();
+         const app = moduleRef.createNestMicroservice({ transport: Transport.TCP, options: { host: "127.0.0.1", port: 0 }, logger: false });
+         try {
+           await app.init();
+           console.log(JSON.stringify({ originalInstance: app.get(kit.BetterAuthService).instance === auth, carriers: rpc.defaultCarriers.map(carrier => carrier.id) }));
+         } finally { await app.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstance: true,
+        carriers: ["grpc", "nats", "kafka", "rmq", "mqtt", "payload"],
+      });
+    },
+  );
+
   it.each([
     { format: "esm", platform: "express" },
     { format: "cjs", platform: "express" },

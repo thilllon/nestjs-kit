@@ -31,9 +31,9 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the authentication scaffold's ESM and CJS artifacts. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
+Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the authentication library's ESM and CJS artifacts. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
 
-For real PostgreSQL integration tests, install Docker with Compose and run:
+For integration tests against real databases and message brokers, install Docker with Compose and run:
 
 ```sh
 pnpm docker:up
@@ -41,7 +41,18 @@ pnpm test:e2e
 pnpm docker:down
 ```
 
-Compose starts an isolated PostgreSQL instance on `127.0.0.1:55432` and waits for its health check. The E2E suite verifies Drizzle queries, actual LISTEN/NOTIFY delivery, and connection cleanup. If the port is occupied, set `PGPORT` consistently for both Compose and the test command. Always stop the test services afterward; CI does so even on failure.
+Compose starts isolated services, binds their client ports to `127.0.0.1`, and waits for health checks:
+
+| Service    | Default port | Override        |
+| ---------- | ------------ | --------------- |
+| PostgreSQL | 55432        | `PGPORT`        |
+| NATS       | 54222        | `NATS_PORT`     |
+| Kafka      | 59092        | `KAFKA_PORT`    |
+| RabbitMQ   | 55672        | `RABBITMQ_PORT` |
+| MQTT 5     | 51883        | `MQTT_PORT`     |
+| Redis      | 56379        | `REDIS_PORT`    |
+
+Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery, HTTP authentication, WebSockets and native RPC credential carriers. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis persistence is disabled, and `docker:down` removes the fixture volumes.
 
 Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
 
