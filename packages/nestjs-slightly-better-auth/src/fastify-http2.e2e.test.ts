@@ -69,6 +69,19 @@ class Http2RecordingFilter implements ExceptionFilter {
 describe("FastifyPlatform HTTP/2", () => {
   it("drops pseudo-headers, uses authority, preserves bytes and cookies, suppresses HEAD bodies, and delegates errors", async () => {
     const filter = new Http2RecordingFilter();
+    let healthySignal: AbortSignal | undefined;
+    let disconnectReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      disconnectReady = resolve;
+    });
+    let disconnectObserved = false;
+    let observedDisconnect!: () => void;
+    const disconnected = new Promise<void>((resolve) => {
+      observedDisconnect = () => {
+        disconnectObserved = true;
+        resolve();
+      };
+    });
     const fixture = await startHttpFixture({
       auth: createTestAuth({ baseURL: undefined }),
       adapter: new FastifyAdapter({ http2: true }),
@@ -104,6 +117,30 @@ describe("FastifyPlatform HTTP/2", () => {
                   return new Response("must-not-be-sent", {
                     status: 208,
                     headers: { "x-head": "kept" },
+                  });
+                case "healthy-signal": {
+                  healthySignal = request.signal;
+                  const before = request.signal.aborted;
+                  await new Promise((resolve) => setTimeout(resolve, 30));
+                  return Response.json({
+                    before,
+                    after: request.signal.aborted,
+                  });
+                }
+                case "disconnect-signal":
+                  return new Promise<Response>((resolve) => {
+                    const onAbort = () => {
+                      observedDisconnect();
+                      resolve(new Response(null, { status: 204 }));
+                    };
+                    if (request.signal.aborted) {
+                      onAbort();
+                    } else {
+                      request.signal.addEventListener("abort", onAbort, {
+                        once: true,
+                      });
+                    }
+                    disconnectReady();
                   });
                 case "error":
                   throw new Error("http2 around failed");
@@ -182,6 +219,45 @@ describe("FastifyPlatform HTTP/2", () => {
       expect(head.status).toBe(208);
       expect(head.headers["x-head"]).toBe("kept");
       expect(head.body).toHaveLength(0);
+
+      const healthy = await http2Request(
+        fixture.url,
+        {
+          ":method": "POST",
+          ":path": "/api/auth/healthy-signal",
+          "content-type": "application/octet-stream",
+          "x-probe": "healthy-signal",
+        },
+        Uint8Array.from([1]),
+      );
+      expect(healthy.status).toBe(200);
+      expect(JSON.parse(healthy.body.toString())).toEqual({
+        before: false,
+        after: false,
+      });
+      expect(healthySignal?.aborted).toBe(false);
+
+      const disconnectSession = connect(fixture.url);
+      disconnectSession.on("error", () => undefined);
+      const disconnectStream = disconnectSession.request({
+        ":method": "POST",
+        ":path": "/api/auth/disconnect-signal",
+        "content-type": "application/octet-stream",
+        "x-probe": "disconnect-signal",
+      });
+      disconnectStream.on("error", () => undefined);
+      disconnectStream.end(Uint8Array.from([1]));
+      await ready;
+      expect(disconnectObserved).toBe(false);
+      disconnectSession.destroy();
+      await expect(
+        Promise.race([
+          disconnected.then(() => true),
+          new Promise<false>((resolve) =>
+            setTimeout(() => resolve(false), 1_000),
+          ),
+        ]),
+      ).resolves.toBe(true);
 
       const failed = await http2Request(fixture.url, {
         ":method": "GET",

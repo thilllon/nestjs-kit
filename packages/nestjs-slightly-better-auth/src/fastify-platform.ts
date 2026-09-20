@@ -13,7 +13,13 @@ import { toWebHeaders } from "./platform.js";
 
 interface RawReplyLike {
   headersSent?: boolean;
+  destroyed?: boolean;
   writableEnded?: boolean;
+  writableFinished?: boolean;
+  once(event: "close", listener: () => void): unknown;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  removeListener(event: "close", listener: () => void): unknown;
+  removeListener(event: "error", listener: (error: Error) => void): unknown;
 }
 
 interface FastifyReplyLike {
@@ -37,7 +43,6 @@ interface FastifyRequestLike {
   readonly params?: unknown;
   readonly protocol: string;
   readonly raw: IncomingMessage;
-  readonly signal?: AbortSignal;
 }
 
 interface FastifyInstanceLike {
@@ -133,6 +138,50 @@ function mergedVary(
       return true;
     })
     .join(", ");
+}
+
+function abortOnDisconnect(
+  request: IncomingMessage,
+  response: RawReplyLike,
+): { readonly signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  let disposed = false;
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+  const onRequestAborted = () => abort();
+  const onRequestError = () => abort();
+  const onResponseClose = () => {
+    if (!response.writableFinished) {
+      abort();
+    }
+  };
+  const onResponseError = () => abort();
+  const dispose = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    request.removeListener("aborted", onRequestAborted);
+    request.removeListener("error", onRequestError);
+    response.removeListener("close", onResponseClose);
+    response.removeListener("error", onResponseError);
+  };
+
+  request.once("aborted", onRequestAborted);
+  request.once("error", onRequestError);
+  response.once("close", onResponseClose);
+  response.once("error", onResponseError);
+  if (
+    request.aborted ||
+    response.destroyed ||
+    (request.socket.destroyed && !response.writableFinished)
+  ) {
+    abort();
+  }
+  return { signal: controller.signal, dispose };
 }
 
 async function sendWebResponse(
@@ -303,15 +352,29 @@ export class FastifyPlatform implements HttpPlatform {
           request: FastifyRequestLike,
           reply: FastifyReplyLike,
         ) => {
-          const response = await binding.handle({
-            method: request.method,
-            url: `${request.protocol}://${request.host}${request.originalUrl}`,
-            headers: toWebHeaders(request.raw.headers),
-            body: request.body instanceof Uint8Array ? request.body : null,
-            clientIp: this.options.clientIp?.(request) ?? request.ip ?? null,
-            platformRequest: request,
-            signal: request.signal,
-          });
+          const cancellation = abortOnDisconnect(request.raw, reply.raw);
+          let response: Response;
+          try {
+            response = await binding.handle({
+              method: request.method,
+              url: `${request.protocol}://${request.host}${request.originalUrl}`,
+              headers: toWebHeaders(request.raw.headers),
+              body: request.body instanceof Uint8Array ? request.body : null,
+              clientIp: this.options.clientIp?.(request) ?? request.ip ?? null,
+              platformRequest: request,
+              signal: cancellation.signal,
+            });
+          } catch (error) {
+            if (cancellation.signal.aborted) {
+              return undefined;
+            }
+            throw error;
+          } finally {
+            cancellation.dispose();
+          }
+          if (cancellation.signal.aborted) {
+            return undefined;
+          }
           return sendWebResponse(
             reply,
             response,

@@ -400,10 +400,19 @@ describe("FastifyPlatform", () => {
     }
   });
 
-  it("aborts the Web request when the HTTP client disconnects", async () => {
-    let observedAbort!: () => void;
-    const aborted = new Promise<void>((resolve) => {
-      observedAbort = resolve;
+  it("keeps healthy request signals live and aborts only after a synchronized client disconnect", async () => {
+    let healthySignal: AbortSignal | undefined;
+    let disconnectReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      disconnectReady = resolve;
+    });
+    let observedDisconnect!: () => void;
+    let disconnectObserved = false;
+    const disconnected = new Promise<void>((resolve) => {
+      observedDisconnect = () => {
+        disconnectObserved = true;
+        resolve();
+      };
     });
     const fixture = await startHttpFixture({
       auth: createTestAuth(),
@@ -414,9 +423,23 @@ describe("FastifyPlatform", () => {
         http: {
           around: [
             ({ request }) => {
+              if (new URL(request.url).pathname.endsWith("/healthy")) {
+                healthySignal = request.signal;
+                const before = request.signal.aborted;
+                return new Promise<Response>((resolve) => {
+                  setTimeout(() => {
+                    resolve(
+                      Response.json({
+                        before,
+                        after: request.signal.aborted,
+                      }),
+                    );
+                  }, 30);
+                });
+              }
               return new Promise<Response>((resolve) => {
                 const onAbort = () => {
-                  observedAbort();
+                  observedDisconnect();
                   resolve(new Response(null, { status: 204 }));
                 };
                 if (request.signal.aborted) {
@@ -425,6 +448,7 @@ describe("FastifyPlatform", () => {
                   request.signal.addEventListener("abort", onAbort, {
                     once: true,
                   });
+                  disconnectReady();
                 }
               });
             },
@@ -433,38 +457,46 @@ describe("FastifyPlatform", () => {
       },
     });
     try {
-      await new Promise<void>((resolve, reject) => {
-        const request = nodeRequest(
+      const healthy = await fetch(`${fixture.url}/api/auth/healthy`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "healthy request",
+      });
+      expect(healthy.status).toBe(200);
+      expect(await healthy.json()).toEqual({ before: false, after: false });
+      expect(healthySignal?.aborted).toBe(false);
+
+      let clientRequest!: ReturnType<typeof nodeRequest>;
+      const clientFinished = new Promise<void>((resolve, reject) => {
+        clientRequest = nodeRequest(
           `${fixture.url}/api/auth/disconnect`,
-          {
-            method: "POST",
-            headers: {
-              "content-type": "text/plain",
-              "content-length": "1",
-            },
-          },
+          { method: "POST", headers: { "content-type": "text/plain" } },
           (response) => {
             response.resume();
             response.once("end", resolve);
           },
         );
-        request.once("error", (error) => {
+        clientRequest.once("error", (error) => {
           if ((error as NodeJS.ErrnoException).code === "ECONNRESET") {
             resolve();
           } else {
             reject(error);
           }
         });
-        request.end("x", () => setTimeout(() => request.destroy(), 10));
+        clientRequest.end("complete body");
       });
+      await ready;
+      expect(disconnectObserved).toBe(false);
+      clientRequest.destroy();
       await expect(
         Promise.race([
-          aborted.then(() => true),
+          disconnected.then(() => true),
           new Promise<false>((resolve) =>
             setTimeout(() => resolve(false), 1_000),
           ),
         ]),
       ).resolves.toBe(true);
+      await clientFinished;
     } finally {
       await fixture.close();
     }
