@@ -28,7 +28,7 @@
 
 ## Execution status and review gates
 
-No implementation checkbox is checked. The existing source is an empty export and its packaging tests do not establish authentication behavior.
+Task 1 is implemented and independently reviewed at `6e747669375cc624964bd24301911083e3c75475` in [PR #547](https://github.com/thilllon/nestjs-kit/pull/547). Repository lint, formatting, tools/package typecheck, 120 unit tests, eight package builds with strict publint/attw, and four artifact tests passed. This establishes contracts, safe errors, named token injection and CJS/ESM declaration consumption; it does not establish runtime authentication or transport behavior. Tasks 2–12 remain open.
 
 - [x] Record the independent v7 reviewers' decisions and close all round-6 findings in the design and parent issue before production implementation. Final design SHA-256: `a653719b8a48ff049b9c47ef9cf9a03d845948dab0314e083ee350041706175b`; see the three round-7 reports, including their final snapshot confirmations.
 - [x] Freeze the reviewed v7 commit and the dependency-source evidence: design/plan commit `a6b720b98114c4c6701ee2d7b92509bf507cd966`, SDK 1.7.5 source commit `5468e6bfcdff799848537cf5ad06ebab15aad9dd`, Node 24.21.0 and Nest 12.0.3. Subsequent plan-only corrections do not change the reviewed design hash.
@@ -129,7 +129,7 @@ interface CookieSink {
 
 The foundation dependency direction is fixed: `auth-contracts.ts`, `auth-types.ts`, and `bridge-protocol.ts` import error shapes with `import type` from `auth-errors.ts`; `auth-errors.ts` owns those shapes and imports only the independent `error-redactor.ts`, SDK error detection, and type-only Nest context definitions. `error-redactor.ts` consumes supplied credential values/header names, never request scope, registry, module, transport, or plugin state. Neither foundation file imports Task 3 or a later implementation. Root explicitly exports the completed runtime errors; do not add stub classes, deferred throwing bodies, or ambient runtime declarations to satisfy compilation.
 
-- [ ] Add this actual redaction regression in `auth-errors.test.ts`:
+- [x] Add this actual redaction regression in `auth-errors.test.ts`:
 
 ```ts
 it("does not serialize session credentials in an infrastructure cause", () => {
@@ -154,9 +154,9 @@ it("does not serialize session credentials in an infrastructure cause", () => {
 
 Import `inspect` from `node:util`. Run `mise exec -- pnpm exec vitest run packages/nestjs-slightly-better-auth/src/auth-errors.test.ts`; verify failure, then implement branded, cross-copy-safe errors and credential redaction. Preserve allow-listed error fields, redacted nested causes, generic client messages, and raw-cause opt-in under a non-enumerable symbol.
 
-- [ ] Add `error-redactor.test.ts` cases for URL-decoded and signed cookie secrets, bearer credentials, declared API-key headers, nested cause depth, 300-character/first-line truncation, stack header redaction, and raw-cause visibility. Callers supply credential headers and secrets; Task 3 later gathers them from scopes. Verify serialized/inspected default errors never expose secrets and explicit raw-cause opt-in is non-enumerable.
-- [ ] Implement `AuthFailures.fromAPIError` and internal normalization against §13.2 using actual SDK `APIError` objects. Test 401/403/429 denials, Retry-After extraction, policy generic-401 session-loss candidates, unexpected 4xx configuration failures, unknown/5xx infrastructure failures, unchanged already-classified errors, and cross-copy branding. A storage error must never become an authentication denial. Request/operation deduplication belongs to Task 3, not these foundation classes.
-- [ ] Write this real Nest provider-coexistence regression in `auth-token-injection.test.ts`; it needs no not-yet-implemented auth module. Import `Inject`, `Injectable` from `@nestjs/common`, `Test` from `@nestjs/testing`, and the token helpers from `auth-tokens.ts`:
+- [x] Add `error-redactor.test.ts` cases for URL-decoded and signed cookie secrets, bearer credentials, declared API-key headers, nested cause depth, 300-character/first-line truncation, stack header redaction, and raw-cause visibility. Callers supply credential headers and secrets; Task 3 later gathers them from scopes. Verify serialized/inspected default errors never expose secrets and explicit raw-cause opt-in is non-enumerable.
+- [x] Implement `AuthFailures.fromAPIError` and internal normalization against §13.2 using actual SDK `APIError` objects. Test 401/403/429 denials, Retry-After extraction, policy generic-401 session-loss candidates, unexpected 4xx configuration failures, unknown/5xx infrastructure failures, unchanged already-classified errors, and cross-copy branding. A storage error must never become an authentication denial. Request/operation deduplication belongs to Task 3, not these foundation classes.
+- [x] Write this real Nest provider-coexistence regression in `auth-token-injection.test.ts`; it needs no not-yet-implemented auth module. Import `Inject`, `Injectable` from `@nestjs/common`, `Test` from `@nestjs/testing`, and the token helpers from `auth-tokens.ts`:
 
 ```ts
 it("resolves default and named collaborators independently through Nest DI", async () => {
@@ -193,11 +193,11 @@ it("resolves default and named collaborators independently through Nest DI", asy
 });
 ```
 
-- [ ] Run `mise exec -- pnpm exec vitest run packages/nestjs-slightly-better-auth/src/auth-token-injection.test.ts`; observe the missing implementation failure, then implement the named/default token helpers. This regression must also fail if aliases collide or the options namespace reuses the instance token. Reject empty aliases during module option validation in Task 4a. Preserve exact v7 base strings. Full module lifecycle and compiled consumer metadata are verified in Tasks 4a and 12.
-- [ ] Copy the reviewed declarations from the contract sections above into their owning flat files. Keep imports type-only where they are types; derive registered session/permission/hook types from the SDK instance. Root exports are explicit, without injection aliases, optional framework imports, or internal module-options token.
-- [ ] Export reusable build options from root `tsdown.config.mts` and consume them in the package config; keep the root default build behavior for the established integrations. Package differences are only the explicit entry map and separate pure-plugin build. Include `packages/*/*.mts` in root tooling typecheck. Preserve `module-sync`, strict publint/attw, matching declarations and external dependencies.
-- [ ] Install dependencies through pnpm only, with reviewed runtime/optional-peer separation; run `mise exec -- pnpm --filter nestjs-slightly-better-auth typecheck` and `mise exec -- pnpm exec vitest run packages/nestjs-slightly-better-auth/src/auth-token-injection.test.ts packages/nestjs-slightly-better-auth/src/auth-errors.test.ts packages/nestjs-slightly-better-auth/src/error-redactor.test.ts`. These files must compile and pass before Task 2 or Task 3 starts, without any later source files. Before promising Nest 11, SDK 1.7.0, or a GraphQL major, attach actual compatibility evidence from Task 12.
-- [ ] Commit the scoped private-package changes with `feat(auth): add typed contracts safe errors and isolated tokens`; keep this task open until typecheck and contract review pass.
+- [x] Run `mise exec -- pnpm exec vitest run packages/nestjs-slightly-better-auth/src/auth-token-injection.test.ts`; observe the missing implementation failure, then implement the named/default token helpers. This regression must also fail if aliases collide or the options namespace reuses the instance token. Reject empty aliases during module option validation in Task 4a. Preserve exact v7 base strings. Full module lifecycle and compiled consumer metadata are verified in Tasks 4a and 12.
+- [x] Copy the reviewed declarations from the contract sections above into their owning flat files. Keep imports type-only where they are types; derive registered session/permission/hook types from the SDK instance. Root exports are explicit, without injection aliases, optional framework imports, or internal module-options token.
+- [x] Export reusable build options from root `tsdown.config.mts` and consume them in the package config; keep the root default build behavior for the established integrations. The foundation uses an explicit entry map. Add the separate pure-plugin build when the plugin lands in Task 2; no unimplemented entry is declared. Include `packages/*/*.mts` in root tooling typecheck. Preserve `module-sync`, strict publint/attw, matching declarations and external dependencies.
+- [x] Install dependencies through pnpm only, with reviewed runtime/optional-peer separation; run `mise exec -- pnpm --filter nestjs-slightly-better-auth typecheck` and `mise exec -- pnpm exec vitest run packages/nestjs-slightly-better-auth/src/auth-token-injection.test.ts packages/nestjs-slightly-better-auth/src/auth-errors.test.ts packages/nestjs-slightly-better-auth/src/error-redactor.test.ts`. These files must compile and pass before Task 2 or Task 3 starts, without any later source files. Before promising Nest 11, SDK 1.7.0, or a GraphQL major, attach actual compatibility evidence from Task 12.
+- [x] Commit the scoped private-package changes with `feat(auth): add typed contracts safe errors and isolated tokens`; keep this task open until typecheck and contract review pass.
 
 ## Task 2: Implement the pure plugin and faithful hook dispatch
 
