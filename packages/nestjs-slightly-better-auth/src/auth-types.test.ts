@@ -67,7 +67,7 @@ it("derives unregistered SDK sessions and requires a mapper for custom sessions"
 import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
 import type { Session, User } from "better-auth";
-import type { AuthLike, AuthSession, AuthOf, UserOf, SessionOf, IsRegistered, AdminPermissions, OrgPermissions, PrincipalKind, UnvalidatedBody, DatabaseHookResult, DatabaseHookData } from ${JSON.stringify(typesPath)};
+import type { AuthLike, AuthSession, AuthOf, UserOf, SessionOf, IsRegistered, AdminPermissions, OrgPermissions, PrincipalKind, UnvalidatedBody, DatabaseHookResult, DatabaseHookData, DatabaseHookMethod } from ${JSON.stringify(typesPath)};
 import type { BetterAuthModuleOptions, BetterAuthModuleAsyncOptions, BetterAuthFactoryResult, NoAppOptions, AuthorizationPolicy, Requirement } from ${JSON.stringify(contractsPath)};
 ${assertions}
 type Unregistered = Assert<Equal<IsRegistered, false>>;
@@ -112,6 +112,10 @@ declare const raw: UnvalidatedBody<{ email: string }>;
 // @ts-expect-error Endpoint input has not been validated in hooks.
 const email: string = raw.email;
 const update: DatabaseHookData<"user.update"> = {};
+// Internal SDK writes outside an endpoint have no current endpoint context.
+const missingEndpoint: Parameters<DatabaseHookMethod<"user.create", "before">>[1] = undefined;
+// @ts-expect-error A callback must handle the missing context forwarded by the SDK.
+const unsafeContext: DatabaseHookMethod<"user.create", "before"> = (_data, _context: import("better-auth").GenericEndpointContext | null) => undefined;
 // @ts-expect-error Delete hooks cannot replace the deleted row.
 const deleteResult: DatabaseHookResult<"user.delete", "before"> = { data: { id: "u1" } };
 `);

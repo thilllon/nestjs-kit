@@ -146,7 +146,7 @@ export type DatabaseHookMethod<
   Ph extends "before" | "after",
 > = (
   data: DatabaseHookData<E, Ph>,
-  ctx: import("better-auth").GenericEndpointContext | null,
+  ctx: import("better-auth").GenericEndpointContext | null | undefined,
 ) => DatabaseHookResult<E, Ph> | Promise<DatabaseHookResult<E, Ph>>;
 
 /** Guard-established invariant helper (reference #163). Prefer @ActiveOrganizationId() (§8.3). */
