@@ -101,12 +101,12 @@ function routeMayOverlapMount(path: string, basePath: string): boolean {
     literalPrefix += token.value;
   }
   const route = literalPrefix.toLowerCase();
-  const base = basePath.toLowerCase().replace(/\/+$/, "") || "/";
+  const base = basePath.toLowerCase().replace(/(?<!\/)\/+$/, "") || "/";
   if (base === "/") {
     return route.startsWith("/");
   }
   if (!dynamic) {
-    const exact = route.replace(/\/+$/, "") || "/";
+    const exact = route.replace(/(?<!\/)\/+$/, "") || "/";
     return exact === base || exact.startsWith(`${base}/`);
   }
   if (base.startsWith(route)) {

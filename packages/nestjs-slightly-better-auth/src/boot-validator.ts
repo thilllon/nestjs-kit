@@ -129,8 +129,8 @@ function pathsOverlap(a = "/", b = "/"): boolean {
 }
 
 function routeMayWarnAboutMount(path: string, basePath: string): boolean {
-  const route = path.toLowerCase().replace(/\/+$/, "") || "/";
-  const base = basePath.toLowerCase().replace(/\/+$/, "") || "/";
+  const route = path.toLowerCase().replace(/(?<!\/)\/+$/, "") || "/";
+  const base = basePath.toLowerCase().replace(/(?<!\/)\/+$/, "") || "/";
   if (base === "/") {
     return route.startsWith("/");
   }
