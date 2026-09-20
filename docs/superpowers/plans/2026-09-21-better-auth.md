@@ -416,7 +416,7 @@ Inside a real scoped handler with an authenticated non-session principal, both t
 
 **Interfaces:** Consumes Tasks 3, 4a and 4b helpers/exchange/HTTP transport and produces v7 §2.2.11 Express factories implementing the full §4.1 platform contract. `AuthRouteBinding.handle(inbound: InboundAuthRequest): Promise<Response>` owns platform-neutral request construction; `CookieSink.append` preserves existing cookies and returns false after headers are sent. Root exports only built-in HTTP transport, not Express.
 
-- [ ] Add this real endpoint fixture to `express.e2e.test.ts` using `ExpressAdapter`, `expressPlatform()`, `createTestAuth`, and `startHttpFixture`:
+- [x] Add this real endpoint fixture to `express.e2e.test.ts` using `ExpressAdapter`, `expressPlatform()`, `createTestAuth`, and `startHttpFixture`:
 
 ```ts
 it("rejects an oversized auth body with the host CORS header", async () => {
@@ -442,18 +442,25 @@ it("rejects an oversized auth body with the host CORS header", async () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "https://app.example",
     );
-    expect(await response.json()).toEqual({ code: "PAYLOAD_TOO_LARGE" });
+    expect(await response.json()).toEqual({
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds the configured limit",
+    });
   } finally {
     await fixture.close();
   }
 });
 ```
 
-- [ ] Run `mise exec -- pnpm exec vitest run --config vitest.e2e.config.mts packages/nestjs-slightly-better-auth/src/express.e2e.test.ts`; confirm intended failure. Implement prepare-time bounded capture and init-time dispatch; capture never answers early before CORS. Overflow drains to the cap, then destroys the socket; non-auth application parsers remain unchanged.
-- [ ] Integrate the shared helpers and exchange through Express using raw undecoded path boundaries, post-init baseURL/basePath, exact bytes/query/encoding, static-origin substitution, hop-header removal and trusted platform IP injection. Add tests for JSON spacing, URL-encoded/multipart/binary/chunked bodies, limits, consumed-body fallback warning, pseudo headers, and Host/forwarding spoofing. No broad `toNodeHandler` shortcut.
-- [ ] Implement response write-back with individual cookie values, Vary union, retained host headers, backpressure, aborts, redirect preservation and no HEAD body. Verify SDK APIError hidden headers and unchanged rethrow with `onAPIError.throw`; actual Nest exception filters observe failures. Test all methods, controller precedence, prefix/versioning independence, async bootstrap, and Express reused-container failure.
-- [ ] Add real signup/login/protected/optional/public controller flows with cookie refresh and cleanup. Compare direct foreign credential forwarding, declared login proxy form-CSRF enforced even on cookie-free GET/HEAD/OPTIONS, safe-method advisory origin only for cookie-mode routes, and SDK router behavior under v7 security defaults; do not return a synthetic session fixture as authentication evidence.
-- [ ] Run targeted unit/E2E tests, package typecheck/build, and Tasks 4a–4b regression tests after integration. Commit the scoped changes as `feat(auth): preserve Express auth body and cookie semantics`.
+- [x] Run `mise exec -- pnpm exec vitest run --config vitest.e2e.config.mts packages/nestjs-slightly-better-auth/src/express.e2e.test.ts`; confirm intended failure. Implement prepare-time bounded capture and init-time dispatch; capture never answers early before CORS. Overflow drains to the cap, then destroys the socket; non-auth application parsers remain unchanged.
+- [x] Integrate the shared helpers and exchange through Express using raw undecoded path boundaries, post-init baseURL/basePath, exact bytes/query/encoding, static-origin substitution, hop-header removal and trusted platform IP injection. Add tests for JSON spacing, URL-encoded/multipart/binary/chunked bodies, limits, consumed-body fallback warning, pseudo headers, and Host/forwarding spoofing. No broad `toNodeHandler` shortcut.
+- [x] Implement response write-back with individual cookie values, Vary union, retained host headers, backpressure, aborts, redirect preservation and no HEAD body. Verify SDK APIError hidden headers and unchanged rethrow with `onAPIError.throw`; actual Nest exception filters observe failures. Test all methods, controller precedence, prefix/versioning independence, async bootstrap, and Express reused-container failure.
+- [x] Add real signup/login/protected/optional/public controller flows with cookie refresh and cleanup. Compare direct foreign credential forwarding, declared login proxy form-CSRF enforced even on cookie-free GET/HEAD/OPTIONS, safe-method advisory origin only for cookie-mode routes, and SDK router behavior under v7 security defaults; do not return a synthetic session fixture as authentication evidence.
+- [x] Run targeted unit/E2E tests, package typecheck/build, and Tasks 4a–4b regression tests after integration. Commit the scoped changes as `feat(auth): preserve Express auth body and cookie semantics`.
+
+**Controller ownership correction:** Bounded capture must skip native controller-owned routes before the body parser. Core provides immutable method/path descriptors resolved through Nest `RoutePathFactory`, including module paths, excluded global prefixes and URI versions. Express matches with the installed native routing grammar. Conditional body-capable host/non-URI-version overlaps fail boot with `CONDITIONAL_ROUTE_SHADOW`, because ownership cannot safely be decided before parsing. Bodyless and unrelated conditional routes remain supported.
+
+Express 5 materializes its router before later application-setting changes. Read the documented `app.router` reference's effective `caseSensitive` and `strict` flags through a narrow, read-only, feature-checked compatibility seam; those fields are not documented public getters. Reject an unsupported shape instead of guessing. Do not traverse/mutate the router stack. Native regressions must cover partial-segment parameters and settings applied both before and after adapter construction. Final compatibility testing owns this explicit dependency boundary.
 
 ## Task 6: Implement Fastify integration and HTTP/2 parity
 
@@ -461,7 +468,9 @@ it("rejects an oversized auth body with the host CORS header", async () => {
 
 **Interfaces:** Consumes the platform/exchange contracts from Tasks 3/4a; implement independently of Express once those ports are frozen. Produces `fastifyPlatform`, `FastifyPlatform`, structural options, mandatory live request accessor, reply lookup, `http2: true`, and `prepareAtInit: true` from v7 §§2.2.11 and 6.4.2.
 
-- [ ] Add this real Fastify regression to `fastify.e2e.test.ts`; import `FastifyAdapter`, `fastifyPlatform`, and the Task 4a test fixtures:
+**Verified platform limitation:** Fastify 5.12.4 does not expose `trustProxy` in its public `initialConfig`; the [Fastify server reference](https://fastify.dev/docs/latest/Reference/Server/#initialconfig) confirms the exposed fields. The frozen design's proposed read cannot determine that setting. Omit the optional `proxyTrust()` capability, so the existing boot summary reports `unknown` and setting-dependent diagnostics remain unavailable. Continue using native request IP resolution. Do not guess `none`, inspect private symbols, or add a second trust configuration that could disagree with the actual server.
+
+- [x] Add this real Fastify regression to `fastify.e2e.test.ts`; import `FastifyAdapter`, `fastifyPlatform`, and the Task 4a test fixtures:
 
 ```ts
 it("returns bounded-body failures through the host CORS layer", async () => {
@@ -487,19 +496,22 @@ it("returns bounded-body failures through the host CORS layer", async () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "https://app.example",
     );
-    expect(await response.json()).toEqual({ code: "PAYLOAD_TOO_LARGE" });
+    expect(await response.json()).toEqual({
+      code: "PAYLOAD_TOO_LARGE",
+      message: "Request body exceeds the configured limit",
+    });
   } finally {
     await fixture.close();
   }
 });
 ```
 
-Add another test where an `http.around` callback throws and an actual Nest global filter installed after app initialization records that error.
+Add another test where an `http.around` callback throws and an actual Nest global filter configured before `app.init()` records that error. The auth child mounts during `onModuleInit`, before Nest installs the root error handler later in the same initialization; resolve that handler at request time. Calling Nest `useGlobalFilters()` after completed initialization is not retroactive and is not a supported filter-registration contract here.
 
-- [ ] Run `mise exec -- pnpm exec vitest run --config vitest.e2e.config.mts packages/nestjs-slightly-better-auth/src/fastify.e2e.test.ts`; confirm failures. Implement root `onRequest` reply recording and an auth-only child plugin with buffer parser, unchanged application parsers, canonical limit error, and child error handler delegating to the current root error handler at request time.
-- [ ] Apply exact response merge logic through Fastify reply; do not bypass CORS by writing raw response headers prematurely. Implement request identity/liveness, raw request key, cookie sink and `responseFor` for Apollo on Fastify.
-- [ ] Add HTTP/2 tests using Node's HTTP/2 client for pseudo-header handling, authority fallback, cookies, HEAD, raw bytes and errors. Add a real second application created from the same compiled TestingModule after closing the first: both apps authenticate and bind hooks, with a fresh adapter and no stale reply map.
-- [ ] Run both Fastify E2E files plus shared helper/exchange tests and package typecheck. Compare Express/Fastify outputs for raw bytes, limits, cookies, CORS, method routing and filter behavior. Commit the scoped changes as `feat(auth): add isolated Fastify and HTTP2 support`.
+- [x] Run `mise exec -- pnpm exec vitest run --config vitest.e2e.config.mts packages/nestjs-slightly-better-auth/src/fastify.e2e.test.ts`; confirm failures. Implement root `onRequest` reply recording and an auth-only child plugin with buffer parser, unchanged application parsers, canonical limit error, and child error handler delegating to the current root error handler at request time.
+- [x] Apply exact response merge logic through Fastify reply; do not bypass CORS by writing raw response headers prematurely. Implement request identity/liveness, raw request key, cookie sink and `responseFor` for Apollo on Fastify.
+- [x] Add HTTP/2 tests using Node's HTTP/2 client for pseudo-header handling, authority fallback, cookies, HEAD, raw bytes and errors. Add a real second application created from the same compiled TestingModule after closing the first: both apps authenticate and bind hooks, with a fresh adapter and no stale reply map.
+- [x] Run both Fastify E2E files plus shared helper/exchange tests and package typecheck. Compare Express/Fastify outputs for raw bytes, limits, cookies, CORS, method routing and filter behavior. Commit the scoped changes as `feat(auth): add isolated Fastify and HTTP2 support`.
 
 ## Task 7: Implement admin, organization, and API-key authorization
 

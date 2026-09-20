@@ -3,8 +3,11 @@ import {
   Get,
   Inject,
   Logger,
+  RequestMethod,
   UseGuards,
   UseInterceptors,
+  VERSION_NEUTRAL,
+  VersioningType,
   type Type,
 } from "@nestjs/common";
 import {
@@ -12,10 +15,13 @@ import {
   DiscoveryService,
   MetadataScanner,
   ModuleRef,
+  ModulesContainer,
   Reflector,
 } from "@nestjs/core";
+import { RoutePathFactory } from "@nestjs/core/router/route-path-factory.js";
 import type {
   AdvisedHandler,
+  ApplicationRouteDescriptor,
   AuthorizationPolicy,
   AuthTransport,
   BootAdviceContext,
@@ -57,6 +63,8 @@ import type { MountCoordinator } from "./mount-coordinator.js";
 import type { PolicyResolver } from "./policy-resolver.js";
 import type { RoutePlanner } from "./route-planner.js";
 import type { TransportRegistry } from "./transport-registry.js";
+
+type NestRoutePathMetadata = Parameters<RoutePathFactory["create"]>[0];
 
 type MetadataTarget = Parameters<
   NonNullable<AuthTransport["defaultAccessFor"]>
@@ -118,6 +126,23 @@ function pathsOverlap(a = "/", b = "/"): boolean {
     a.startsWith(b.endsWith("/") ? b : `${b}/`) ||
     b.startsWith(a.endsWith("/") ? a : `${a}/`)
   );
+}
+
+function routeMayWarnAboutMount(path: string, basePath: string): boolean {
+  const route = path.toLowerCase().replace(/(?<!\/)\/+$/, "") || "/";
+  const base = basePath.toLowerCase().replace(/(?<!\/)\/+$/, "") || "/";
+  if (base === "/") {
+    return route.startsWith("/");
+  }
+  if (route === base || route.startsWith(`${base}/`)) {
+    return true;
+  }
+  const marker = route.search(/[:*{]/);
+  if (marker === -1) {
+    return false;
+  }
+  const literal = route.slice(0, marker);
+  return base.startsWith(literal) || literal.startsWith(`${base}/`);
 }
 
 export class BootValidator {
@@ -854,11 +879,28 @@ export class BootValidator {
     }
     if (canariesPassed) {
       this.coverage(sites, issues);
+      const applicationRoutes: ApplicationRouteDescriptor[] = [];
+      const routePathFactory = new RoutePathFactory(this.appConfig);
+      const globalPrefix = this.appConfig.getGlobalPrefix();
+      const versioningOptions = this.appConfig.getVersioning();
+      const modules = this.moduleRef.get(ModulesContainer, { strict: false });
       for (const wrapper of this.discovery.getControllers()) {
         const target = wrapper.metatype;
         if (!target?.prototype) {
           continue;
         }
+        const moduleType = wrapper.host?.metatype;
+        const modulePath = moduleType
+          ? (Reflect.getMetadata(
+              `__module_path__${modules.applicationId}`,
+              moduleType,
+            ) ?? Reflect.getMetadata("__module_path__", moduleType))
+          : undefined;
+        const host = Reflect.getMetadata("host", target) as unknown;
+        const controllerVersion = versioningOptions
+          ? (Reflect.getMetadata("__version__", target) ??
+            versioningOptions.defaultVersion)
+          : undefined;
         const rawPrefixes = Reflect.getMetadata("path", target) as
           | string
           | string[]
@@ -872,28 +914,79 @@ export class BootValidator {
             | string
             | string[]
             | undefined;
-          if (rawPaths === undefined) {
+          const requestMethod = Reflect.getMetadata("method", handler) as
+            | RequestMethod
+            | undefined;
+          if (rawPaths === undefined || requestMethod === undefined) {
             continue;
+          }
+          const methodVersion = Reflect.getMetadata(
+            "__version__",
+            handler,
+          ) as NestRoutePathMetadata["methodVersion"];
+          const effectiveVersion = methodVersion ?? controllerVersion;
+          const conditions: ("host" | "version")[] = [];
+          if (host !== undefined) {
+            conditions.push("host");
+          }
+          if (
+            versioningOptions &&
+            versioningOptions.type !== VersioningType.URI &&
+            effectiveVersion !== undefined &&
+            effectiveVersion !== VERSION_NEUTRAL
+          ) {
+            conditions.push("version");
           }
           for (const prefix of prefixes) {
             for (const path of Array.isArray(rawPaths)
               ? rawPaths
               : [rawPaths]) {
-              const route = `/${[this.appConfig.getGlobalPrefix(), prefix, path]
-                .map((part) => part.replace(/^\/+|\/+$/g, ""))
-                .filter(Boolean)
-                .join("/")}`;
-              const binding = this.mounts.route(route);
-              if (binding) {
+              const resolvedPaths = routePathFactory
+                .create(
+                  {
+                    ctrlPath: prefix,
+                    methodPath: path,
+                    modulePath,
+                    globalPrefix,
+                    controllerVersion:
+                      controllerVersion as NestRoutePathMetadata["controllerVersion"],
+                    methodVersion,
+                    versioningOptions,
+                  },
+                  requestMethod,
+                )
+                .map((route) => this.mounts.normalizeApplicationRoute(route));
+              const source = `${target.name}.${method}`;
+              applicationRoutes.push(
+                Object.freeze({
+                  method: RequestMethod[requestMethod] ?? String(requestMethod),
+                  paths: Object.freeze([...resolvedPaths]),
+                  conditions: Object.freeze([...conditions]),
+                  source,
+                }),
+              );
+              for (const route of resolvedPaths) {
+                const binding = this.mounts
+                  .bindings()
+                  .find((candidate) =>
+                    routeMayWarnAboutMount(route, candidate.basePath),
+                  );
+                if (!binding) {
+                  continue;
+                }
                 this.warn(
                   "W_ROUTE_SHADOWS_AUTH",
-                  `${target.name}.${method} at '${route}' shadows auth mount '${binding.basePath}'.`,
+                  `${source} at '${route}' may shadow auth mount '${binding.basePath}'.`,
                 );
               }
             }
           }
         }
       }
+      this.mounts.registerApplicationRoutes(
+        Object.freeze(applicationRoutes),
+        issues,
+      );
     }
     this.cookies(issues);
     for (const entry of this.instances.list()) {

@@ -1,6 +1,10 @@
 import { Inject, Logger } from "@nestjs/common";
 import { HttpAdapterHost, type AbstractHttpAdapter } from "@nestjs/core";
-import type { AuthRouteBinding, HttpPlatform } from "./auth-contracts.js";
+import type {
+  ApplicationRouteDescriptor,
+  AuthRouteBinding,
+  HttpPlatform,
+} from "./auth-contracts.js";
 import { BetterAuthConfigurationError } from "./auth-errors.js";
 import { AuthExchange } from "./auth-exchange.js";
 import { INSTANCE_REGISTRY, REQUEST_SCOPE } from "./auth-tokens.js";
@@ -220,6 +224,37 @@ export class MountCoordinator {
 
   binding(name: string): AuthRouteBinding | undefined {
     return this.#bindings.get(name);
+  }
+
+  bindings(): readonly AuthRouteBinding[] {
+    return [...this.#bindings.values()];
+  }
+
+  normalizeApplicationRoute(path: string): string {
+    const adapter = this.adapter;
+    return adapter && typeof adapter.normalizePath === "function"
+      ? adapter.normalizePath(path)
+      : path;
+  }
+
+  registerApplicationRoutes(
+    routes: readonly ApplicationRouteDescriptor[],
+    issues: BetterAuthConfigurationError[],
+  ): void {
+    try {
+      this.#selected?.applicationRoutes?.(
+        routes,
+        Object.freeze([...this.#bindings.values()]),
+      );
+    } catch (error) {
+      issues.push(
+        configurationIssue(
+          error,
+          "APPLICATION_ROUTE_REGISTRATION_FAILED",
+          "Cannot register application routes with the HTTP platform.",
+        ),
+      );
+    }
   }
 
   async mount(): Promise<void> {

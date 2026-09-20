@@ -4,7 +4,7 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 
 ## Current state
 
-- This is a private implementation workspace. The root entry implements the Nest module, named instances, lifecycle, service readers, route planning and authentication/authorization kernel alongside the foundation contracts. The plugin and platform subpaths contain the construction bridge and Node/Web helpers. Concrete platforms, optional transports, built-in authorization units and release acceptance are still being implemented.
+- This is a private implementation workspace. The root entry implements the Nest module, named instances, lifecycle, service readers, route planning and authentication/authorization kernel alongside the foundation contracts. The plugin and platform subpaths contain the construction bridge and Node/Web helpers; Express and Fastify have native HTTP integration and artifact tests. Optional transports, built-in authorization units and release acceptance are still being implemented.
 - Keep `private: true` until a reviewed implementation and its first intended release are ready. Never publish the empty scaffold to reserve an npm name.
 - Intermediate private implementation PRs do not add release Changesets. Add the coordinated major Changeset when the complete first public release is ready, as specified by Task 12. Keep the seven established integrations' publication workflow enabled.
 - `docs/design/design-v7.md` is the reviewed implementation specification. Independent round-7 BA, NEST and SEC reports approve its final snapshot; their original findings and re-review evidence remain in `docs/design/reviews`. Design approval is not implementation or release evidence.
@@ -20,6 +20,7 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 - Preserve `module-sync` ahead of `import` and `require` in package exports. Supported Node consumers must share one ESM module identity while real CommonJS output remains available as a fallback.
 - Do not mutate a Better Auth instance's options after construction. Keep optional platform integrations out of the root dependency graph when implementing them.
 - Test actual authentication, authorization, body/cookie handling, failures and instance isolation when they exist. Historical tests are not evidence that this scaffold implements them.
+- Fastify does not publicly expose its configured `trustProxy`. Keep that optional diagnostic capability unavailable rather than inferring `none` from an absent `initialConfig` field; native request IP resolution remains authoritative.
 
 ## Working here
 

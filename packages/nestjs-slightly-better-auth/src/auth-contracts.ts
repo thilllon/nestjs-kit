@@ -617,10 +617,29 @@ export interface HttpPlatform {
   proxyTrust?(adapter: AbstractHttpAdapter): ProxyTrust;
   /** Optional boot-time checks (throw BetterAuthConfigurationError to fail fast). */
   validate?(adapter: AbstractHttpAdapter): void;
+  /**
+   * Native controller routes and resolved auth bindings. Called after Nest has registered routes and auth mounts are resolved,
+   * before the application starts accepting requests. Platforms own route-grammar matching for controller precedence.
+   */
+  applicationRoutes?(
+    routes: readonly ApplicationRouteDescriptor[],
+    bindings: readonly AuthRouteBinding[],
+  ): void;
   /** Optional boot advice (§4). */
   advise?(
     ctx: BootAdviceContext,
   ): readonly BootAdvice[] | Promise<readonly BootAdvice[]>;
+}
+
+export interface ApplicationRouteDescriptor {
+  /** Nest RequestMethod name (GET, POST, ALL, ...). */
+  readonly method: string;
+  /** Paths resolved by Nest's RoutePathFactory, including module/global prefixes and URI versions. */
+  readonly paths: readonly string[];
+  /** Conditions evaluated inside the selected controller route after Express body parsing. */
+  readonly conditions: readonly ("host" | "version")[];
+  /** Controller and method name for boot diagnostics. */
+  readonly source: string;
 }
 
 export interface ProxyTrust {

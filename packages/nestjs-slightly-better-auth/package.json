@@ -52,6 +52,34 @@
         "default": "./dist/platform.cjs"
       }
     },
+    "./express": {
+      "module-sync": {
+        "types": "./dist/express.d.mts",
+        "default": "./dist/express.mjs"
+      },
+      "import": {
+        "types": "./dist/express.d.mts",
+        "default": "./dist/express.mjs"
+      },
+      "require": {
+        "types": "./dist/express.d.cts",
+        "default": "./dist/express.cjs"
+      }
+    },
+    "./fastify": {
+      "module-sync": {
+        "types": "./dist/fastify.d.mts",
+        "default": "./dist/fastify.mjs"
+      },
+      "import": {
+        "types": "./dist/fastify.d.mts",
+        "default": "./dist/fastify.mjs"
+      },
+      "require": {
+        "types": "./dist/fastify.d.cts",
+        "default": "./dist/fastify.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -95,14 +123,19 @@
     "rxjs": "^7.8.2"
   },
   "dependencies": {
-    "defu": "6.1.7"
+    "defu": "6.1.7",
+    "path-to-regexp": "8.4.2"
   },
   "devDependencies": {
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
+    "@nestjs/platform-express": "12.0.3",
+    "@nestjs/platform-fastify": "12.0.3",
     "@nestjs/testing": "12.0.3",
+    "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "better-auth": "1.7.5",
+    "express": "5.2.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   }
