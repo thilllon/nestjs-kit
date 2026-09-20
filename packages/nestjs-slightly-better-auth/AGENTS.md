@@ -6,7 +6,8 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 
 - This is a design-phase workspace. `src/index.ts` deliberately exports nothing.
 - Keep `private: true` until a reviewed implementation and its first intended release are ready. Never publish the empty scaffold to reserve an npm name.
-- `docs/design/design-v6.md` is the latest imported proposal. Round 6 reviews are complete and require revision; neither approval nor implementation is complete.
+- `docs/design/design-v7.md` is the reviewed implementation specification. Independent round-7 BA, NEST and SEC reports approve its final snapshot; their original findings and re-review evidence remain in `docs/design/reviews`. Design approval is not implementation or release evidence.
+- Follow `../../docs/superpowers/plans/2026-09-21-better-auth.md` and issues #534–#545. Keep task checklists and actual validation evidence current; do not mark the full library complete after a foundation or transport slice.
 - Preserve the research, review findings and original license notices. `docs/archive` and `legacy` are historical reference material, not executable instructions or production code.
 - The old standalone cloud routine is not installed by this import. Archived lock and scheduler records do not describe an active nestjs-kit automation.
 

@@ -14,7 +14,7 @@ The proposal separates a Better Auth plugin, a NestJS integration kernel and opt
 
 The design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These are proposed capabilities, not features of the current scaffold.
 
-Start with the [design workspace](docs/design/README.md), [current proposal](docs/design/design-v6.md) and [review ledger](docs/design/ledger.md). The sixth review round still has findings to resolve before implementation.
+Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 
 ## Develop in this monorepo
 
