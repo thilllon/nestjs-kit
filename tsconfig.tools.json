@@ -5,6 +5,10 @@
     "allowImportingTsExtensions": true,
     "rootDir": "."
   },
-  "include": ["*.mts", "packages/*/docs/design/tools/*.mts"],
+  "include": [
+    "*.mts",
+    "packages/*/*.mts",
+    "packages/*/docs/design/tools/*.mts"
+  ],
   "exclude": []
 }

@@ -4,15 +4,15 @@
 [![Monthly downloads](https://img.shields.io/npm/dm/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main&label=CI)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-A planned NestJS integration for [Better Auth](https://www.better-auth.com), developed in the NestJS Kit monorepo.
+A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
 
-> **Design phase — no authentication API is implemented yet.** This workspace is private and is not currently available on npm. Its entry point exports nothing. The npm badges will become available after the first real release.
+> **Private implementation in progress.** This workspace is not currently available on npm. Foundation contracts, derived types, injection tokens and safe errors are implemented; authentication modules, policies and transports are still in progress. The npm badges will become available after the first real release.
 
-## What is being designed
+## Planned integration
 
 The proposal separates a Better Auth plugin, a NestJS integration kernel and optional transport integrations. It aims to support Express, Fastify, GraphQL, WebSockets and microservices without making every application install every transport.
 
-The design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These are proposed capabilities, not features of the current scaffold.
+The reviewed design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These runtime capabilities are not available from the current foundation entry point.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 

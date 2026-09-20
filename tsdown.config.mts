@@ -1,6 +1,6 @@
-import { defineConfig } from "tsdown";
+import { defineConfig, type UserConfig } from "tsdown";
 
-export default defineConfig({
+export const sharedBuildOptions = {
   cwd: process.cwd(),
   entry: ["src/index.ts"],
   format: ["esm", "cjs"],
@@ -14,4 +14,6 @@ export default defineConfig({
   deps: { neverBundle: true },
   publint: { strict: true },
   attw: { level: "error" },
-});
+} satisfies UserConfig;
+
+export default defineConfig(sharedBuildOptions);

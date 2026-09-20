@@ -21,7 +21,7 @@ Install only the integrations you need. Packages have their own npm releases and
 
 ## Shared approach
 
-An authentication integration is also being designed in [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md). Its research, design reviews and reference source live in this monorepo; the workspace is private and does not provide an authentication API yet.
+An authentication integration is under development in [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md), following independently reviewed contracts. Its foundation types, tokens and error handling are implemented; runtime authentication and transport support remain in progress. The workspace is private until its first release is ready.
 
 - **Nest-native configuration.** Register options directly or resolve them asynchronously through dependency injection. Inject the client or adapter service using Nest's standard APIs.
 - **SDK access.** Use the underlying SDK's operations and types. Adapters add configuration, useful integration helpers, and connection cleanup where needed.
