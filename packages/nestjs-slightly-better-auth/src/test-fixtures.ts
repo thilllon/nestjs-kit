@@ -1,0 +1,69 @@
+import type { INestApplication, Provider, Type } from "@nestjs/common";
+import type { AbstractHttpAdapter } from "@nestjs/core";
+import { Test } from "@nestjs/testing";
+import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { memoryAdapter } from "better-auth/adapters/memory";
+import type {
+  BetterAuthRuntimeOptions,
+  ExtensionRef,
+  HttpPlatform,
+} from "./auth-contracts.js";
+import { BetterAuthModule } from "./auth-module.js";
+import type { AuthLike } from "./auth-types.js";
+import { nestjs } from "./plugin.js";
+
+export function createTestAuth(
+  options: BetterAuthOptions = {},
+): ReturnType<typeof betterAuth> {
+  return betterAuth<BetterAuthOptions>({
+    secret: globalThis.crypto.randomUUID() + globalThis.crypto.randomUUID(),
+    baseURL: "http://localhost:3000",
+    emailAndPassword: { enabled: true },
+    logger: { disabled: true },
+    ...options,
+    database: memoryAdapter({
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+    }),
+    advanced: { ...options.advanced, disableOriginCheck: false },
+    plugins: [...(options.plugins ?? []), nestjs()],
+  });
+}
+export interface HttpFixture {
+  readonly app: INestApplication;
+  readonly url: string;
+  close(): Promise<void>;
+}
+export async function startHttpFixture(options: {
+  auth: AuthLike;
+  adapter: AbstractHttpAdapter;
+  platform: ExtensionRef<HttpPlatform>;
+  controllers: readonly Type[];
+  providers?: readonly Provider[];
+  moduleOptions?: Partial<BetterAuthRuntimeOptions<AuthLike>>;
+  configure?: (app: INestApplication) => void | Promise<void>;
+}): Promise<HttpFixture> {
+  const module = await Test.createTestingModule({
+    imports: [
+      BetterAuthModule.forRoot({
+        ...options.moduleOptions,
+        auth: options.auth,
+        platforms: [options.platform],
+      }),
+    ],
+    controllers: [...options.controllers],
+    providers: [...(options.providers ?? [])],
+  }).compile();
+  const app = module.createNestApplication(options.adapter);
+  try {
+    await options.configure?.(app);
+    await app.init();
+    await app.listen(0, "127.0.0.1");
+    return { app, url: await app.getUrl(), close: () => app.close() };
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
+}

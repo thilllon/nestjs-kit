@@ -6,15 +6,15 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
 
-> **Private implementation in progress.** This workspace is not currently available on npm. Foundation contracts, injection tokens, safe errors, the construction plugin, request-state primitives and platform helpers are implemented; Nest authentication modules, policies and concrete transports are still in progress. The npm badges will become available after the first real release.
+> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and platform helpers are implemented. Concrete platforms, optional transports and built-in authorization units are still in progress. The npm badges will become available after the first real release.
 
 ## Implementation status
 
 The library separates a Better Auth construction plugin, a NestJS integration kernel and optional transports. The `./plugin` entry installs the hook and cookie bridge before Better Auth creates its pipeline. The `./platform` entry provides Node/Web request and response helpers. Neither entry requires Express, Fastify, GraphQL or WebSocket packages.
 
-The kernel and concrete integrations are being implemented to support Express, Fastify, GraphQL, WebSockets and microservices without making every application install every transport.
+The root entry provides synchronous and asynchronous module registration, default and named instances, service readers, guards, scoped execution and compositional authorization. Tests exercise actual Nest dependency injection and Better Auth sessions, including isolation between instances, caller-origin enforcement and application shutdown. Built ESM and CommonJS consumers verify the same registration and type contracts.
 
-The reviewed design covers named authentication instances, dependency injection, authorization, lifecycle management, request bodies and cookie forwarding. These end-to-end capabilities are not yet available from the root entry point.
+Express, Fastify, GraphQL, WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. Those integrations will use optional entry points so applications can install the transports they use. Kernel tests do not establish that these concrete integrations are ready.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
 

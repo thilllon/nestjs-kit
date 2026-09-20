@@ -45,6 +45,7 @@ async function compileConsumer(extension: "cts" | "mts"): Promise<void> {
       join(directory, `consumer.${extension}`),
       `import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
+import { BetterAuthModule, type BetterAuthService } from "nestjs-slightly-better-auth";
 import type {
   AuthOf,
   AuthPrincipalBase,
@@ -97,6 +98,23 @@ type RegisteredNamedInstance = Assert<Equal<RegisteredInstances["admin"], typeof
 type AdditionalUserField = Assert<Equal<AuthUser["department"], string>>;
 type CustomSessionUserId = Assert<Equal<AuthSession<"admin">["principal"]["uid"], string>>;
 type AugmentedPrincipal = Assert<Equal<PrincipalOfKind<"api-key">, ApiKeyPrincipal>>;
+
+BetterAuthModule.forRoot({ auth: primary, http: { mount: false } });
+BetterAuthModule.forRoot({ name: "admin", auth: admin, session: { userId: value => value.principal.uid } });
+BetterAuthModule.forRootAsync({ name: "worker", useFactory: async () => ({ auth: primary }) });
+
+// @ts-expect-error A named custom session without user.id requires an explicit user-id mapper.
+BetterAuthModule.forRoot({ name: "admin", auth: admin });
+// @ts-expect-error App platforms belong to the default registration.
+BetterAuthModule.forRoot({ name: "admin", auth: primary, platforms: [] });
+// @ts-expect-error Static aliases cannot come from the asynchronous runtime factory.
+BetterAuthModule.forRootAsync({ useFactory: () => ({ auth: primary, name: "hidden" }) });
+// @ts-expect-error The default registration must match the public Register augmentation.
+BetterAuthModule.forRoot({ auth: admin, session: { userId: value => value.principal.uid } });
+
+declare const adminService: BetterAuthService<typeof admin>;
+type CustomServiceSession = Assert<Equal<Awaited<ReturnType<typeof adminService.getSession>>, AuthSession<"admin"> | null>>;
+type UnwrappedSdkApi = Assert<Equal<typeof adminService.api, typeof admin.api>>;
 
 const kind: PrincipalKind = "api-key";
 // @ts-expect-error PrincipalKinds controls the accepted kind literals.
@@ -161,6 +179,70 @@ describe("built authentication package", () => {
     });
   });
 
+  it.each(["esm", "cjs"] as const)(
+    "initializes and closes default plus named services from the actual %s build",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const kit = ${format === "esm" ? 'await import("./dist/index.mjs")' : '(await import("node:module")).createRequire(import.meta.url)("./dist/index.cjs")'};
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs, NESTJS_PLUGIN_ID } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const names = ["default", "admin", "backup"];
+         const auths = names.map((name) => betterAuth({
+           baseURL: "http://localhost:3000",
+           secret: crypto.randomUUID().repeat(2),
+           database: memoryAdapter({}),
+           advanced: { cookiePrefix: name, disableOriginCheck: false },
+           plugins: [nestjs()],
+         }));
+         const originalOptions = auths.map((auth) => auth.options);
+         const originalPlugins = auths.map((auth) => auth.options.plugins);
+         const moduleRef = await Test.createTestingModule({
+           imports: auths.map((auth, index) => kit.BetterAuthModule.forRoot({
+             ...(index === 0 ? {} : { name: names[index] }),
+             auth,
+             http: { mount: false },
+             logSummary: false,
+           })),
+         }).compile();
+         const observed = {};
+         try {
+           await moduleRef.init();
+           const services = names.map((name) => moduleRef.get(kit.getBetterAuthServiceToken(name)));
+           const handles = names.map((name) => moduleRef.get(kit.getBetterAuthHandleToken(name)));
+           observed.originalInstances = services.every((service, index) => service.instance === auths[index] && service.api === auths[index].api);
+           observed.distinctServices = new Set(services).size === 3;
+           observed.defaultClassAlias = moduleRef.get(kit.BetterAuthService) === services[0];
+           observed.namedHandles = handles.every((handle, index) => handle.name === names[index] && handle.instance === auths[index]);
+           observed.unmodifiedOptions = auths.every((auth, index) => auth.options === originalOptions[index] && auth.options.plugins === originalPlugins[index]);
+           observed.absentScope = services.every((service) => {
+             try { service.getSession(); return false; }
+             catch (error) { return error.code === "NO_AUTH_SCOPE"; }
+           });
+         } finally {
+           await moduleRef.close();
+         }
+         observed.closed = (await Promise.all(auths.map((auth) => auth.$context))).every((context) =>
+           context.getPlugin(NESTJS_PLUGIN_ID)[Symbol.for("nestjs-slightly-better-auth:bridge")].state === "closed");
+         console.log(JSON.stringify(observed));`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstances: true,
+        distinctServices: true,
+        defaultClassAlias: true,
+        namedHandles: true,
+        unmodifiedOptions: true,
+        absentScope: true,
+        closed: true,
+      });
+    },
+  );
+
   it("loads the actual CJS artifact and interoperates with ESM through Nest tokens and error brands", () => {
     const result = node(`
       const cjs = require("./dist/index.cjs");
@@ -208,17 +290,64 @@ describe("built authentication package", () => {
         const configurationFromEsm = new esm.BetterAuthConfigurationError("BAD", "bad");
         const infrastructureFromCjs = new cjs.BetterAuthInfrastructureError(new Error("offline"));
         const runtimeExports = [
+          "AcceptPrincipals",
+          "AfterAuth",
+          "AfterDatabase",
           "AuthFailures",
+          "BeforeAuth",
+          "BeforeDatabase",
           "BetterAuthConfigurationError",
+          "BetterAuthGuard",
           "BetterAuthInfrastructureError",
+          "BetterAuthModule",
+          "BetterAuthScopeInterceptor",
+          "BetterAuthService",
+          "CurrentPrincipal",
+          "CurrentSession",
+          "CurrentUser",
+          "EXTENSION_DEFINITION",
+          "ForwardAuthCookies",
+          "GUARD_CORE",
+          "OptionalAuth",
+          "POLICY_INVOKER",
+          "PRINCIPAL_RESOLVER",
+          "Public",
+          "Require",
+          "RequireAuth",
+          "RequireFreshSession",
+          "SCOPE_CORE",
+          "SESSION_PRINCIPAL_KIND",
+          "SkipDefaultRequirements",
+          "SkipOriginCheck",
+          "UseAuthInstance",
+          "UseBetterAuth",
+          "absent",
+          "allOf",
+          "allow",
+          "anyOf",
+          "authenticated",
+          "betterAuthCorsOrigin",
+          "defineExtension",
+          "defineHttpPlatform",
+          "defineInvocationParam",
+          "definePolicy",
+          "definePrincipalParam",
+          "definePrincipalSource",
+          "defineTransport",
+          "deny",
+          "freshSession",
           "getBetterAuthHandleToken",
           "getBetterAuthInstanceToken",
           "getBetterAuthOptionsToken",
           "getBetterAuthServiceToken",
           "getRawCause",
+          "httpTransport",
           "isAuthFailure",
           "isConfigurationError",
           "isInfrastructureError",
+          "rejected",
+          "requirement",
+          "sessionPrincipal",
         ];
         console.log(JSON.stringify({
           cjsPath: require.resolve("./dist/index.cjs"),

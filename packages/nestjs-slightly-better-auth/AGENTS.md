@@ -4,7 +4,7 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 
 ## Current state
 
-- This is a private implementation workspace. The root entry exposes foundation contracts, derived types, tokens and safe errors. The plugin and platform subpaths contain the construction bridge and Node/Web helpers; full Nest authentication and concrete transport support are still being implemented.
+- This is a private implementation workspace. The root entry implements the Nest module, named instances, lifecycle, service readers, route planning and authentication/authorization kernel alongside the foundation contracts. The plugin and platform subpaths contain the construction bridge and Node/Web helpers. Concrete platforms, optional transports, built-in authorization units and release acceptance are still being implemented.
 - Keep `private: true` until a reviewed implementation and its first intended release are ready. Never publish the empty scaffold to reserve an npm name.
 - Intermediate private implementation PRs do not add release Changesets. Add the coordinated major Changeset when the complete first public release is ready, as specified by Task 12. Keep the seven established integrations' publication workflow enabled.
 - `docs/design/design-v7.md` is the reviewed implementation specification. Independent round-7 BA, NEST and SEC reports approve its final snapshot; their original findings and re-review evidence remain in `docs/design/reviews`. Design approval is not implementation or release evidence.
