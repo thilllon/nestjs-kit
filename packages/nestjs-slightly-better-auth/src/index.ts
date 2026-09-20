@@ -113,3 +113,59 @@ export type {
   UserOf,
   WithActiveOrganization,
 } from "./auth-types.js";
+
+export { BetterAuthModule } from "./auth-module.js";
+export { BetterAuthService } from "./auth-service.js";
+export { BetterAuthGuard } from "./auth-guard.js";
+export { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
+export {
+  defineExtension,
+  defineHttpPlatform,
+  defineTransport,
+} from "./auth-module-definition.js";
+export { EXTENSION_DEFINITION } from "./bridge-protocol.js";
+export {
+  GUARD_CORE,
+  SCOPE_CORE,
+  PRINCIPAL_RESOLVER,
+  POLICY_INVOKER,
+} from "./auth-tokens.js";
+export {
+  AcceptPrincipals,
+  AfterAuth,
+  AfterDatabase,
+  BeforeAuth,
+  BeforeDatabase,
+  CurrentPrincipal,
+  ForwardAuthCookies,
+  OptionalAuth,
+  Public,
+  Require,
+  RequireAuth,
+  SkipDefaultRequirements,
+  SkipOriginCheck,
+  UseAuthInstance,
+  UseBetterAuth,
+  allOf,
+  anyOf,
+  defineInvocationParam,
+  definePrincipalParam,
+  requirement,
+} from "./auth-decorators.js";
+export {
+  CurrentSession,
+  CurrentUser,
+  RequireFreshSession,
+  SESSION_PRINCIPAL_KIND,
+  freshSession,
+  sessionPrincipal,
+} from "./session-principal.js";
+export {
+  absent,
+  authenticated,
+  definePrincipalSource,
+  rejected,
+} from "./principal-resolver.js";
+export { allow, definePolicy, deny } from "./authorization-evaluator.js";
+export { betterAuthCorsOrigin } from "./auth-exchange.js";
+export { httpTransport } from "./http-transport.js";
