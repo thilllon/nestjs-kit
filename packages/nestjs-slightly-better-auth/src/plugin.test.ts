@@ -2,6 +2,7 @@ import { betterAuth, type BetterAuthPlugin } from "better-auth";
 import {
   APIError,
   createAuthEndpoint,
+  createAuthMiddleware,
   getSessionFromCtx,
   getShouldSkipSessionRefresh,
 } from "better-auth/api";
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   BridgeBinding,
   BridgeHandle,
+  CompiledHook,
   ScopeView,
 } from "./bridge-protocol.js";
 import { nestjs } from "./plugin.js";
@@ -191,6 +193,263 @@ describe("fixed plugin entries with the SDK", () => {
     );
     expect(handle(routerPlugin).producedByEndpoint(routerOnly)).toBe(false);
   });
+
+  it.each([
+    ["matcher", "Error"],
+    ["matcher", "APIError"],
+    ["handler", "Error"],
+    ["handler", "APIError"],
+  ] as const)(
+    "matches native after %s failures for %s across all later entries",
+    async (location, kind) => {
+      const execute = async (native: boolean) => {
+        const plugin = nestjs();
+        const bridge = handle(plugin);
+        const events: string[] = [];
+        const failure =
+          kind === "APIError"
+            ? new APIError("FORBIDDEN", { message: "hook failed" })
+            : new Error("hook failed");
+        const endpointResult = { endpoint: true };
+        const recovered = { recovered: true };
+        const hooks: CompiledHook[] = [
+          {
+            matches: () => {
+              events.push("matcher");
+              if (location === "matcher") {
+                throw failure;
+              }
+              return true;
+            },
+            run: async () => {
+              events.push("handler");
+              throw failure;
+            },
+          },
+          {
+            matches: () => {
+              events.push("later matcher");
+              return true;
+            },
+            run: async (ctx) => {
+              events.push("later handler");
+              expect(ctx.context.returned).toBe(failure);
+            },
+          },
+        ];
+        bridge.bind({
+          ...binding(),
+          after: native ? [] : hooks,
+          current: () =>
+            scope({
+              cookies: {
+                append: (cookies) => {
+                  events.push("cookies");
+                  expect(cookies).toEqual(["endpoint=one"]);
+                  return true;
+                },
+              },
+            }),
+        });
+        Object.freeze(plugin.hooks!.after!);
+        const auth = betterAuth({
+          ...base,
+          plugins: [
+            {
+              id: "probe",
+              endpoints: {
+                probe: createAuthEndpoint(
+                  "/probe",
+                  { method: "GET" },
+                  async (ctx) => {
+                    events.push("endpoint");
+                    ctx.setCookie("endpoint", "one");
+                    return ctx.json(endpointResult);
+                  },
+                ),
+              },
+            },
+            ...(native
+              ? [
+                  {
+                    id: "native-hooks",
+                    hooks: {
+                      after: hooks.map((item) => ({
+                        matcher: (ctx) => item.matches(ctx, undefined),
+                        handler: createAuthMiddleware(item.run),
+                      })),
+                    },
+                  } satisfies BetterAuthPlugin,
+                ]
+              : []),
+            plugin,
+            {
+              id: "later-sdk-plugin",
+              hooks: {
+                after: [
+                  {
+                    matcher: () => {
+                      events.push("sdk matcher");
+                      return true;
+                    },
+                    handler: createAuthMiddleware(async () => {
+                      events.push("sdk handler");
+                      return recovered;
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        const recoverable = location === "handler" && kind === "APIError";
+        if (recoverable) {
+          expect(await auth.api.probe({})).toBe(recovered);
+        } else {
+          await expect(auth.api.probe({})).rejects.toBe(failure);
+        }
+        expect(bridge.producedByEndpoint(endpointResult)).toBe(false);
+        expect(bridge.producedByEndpoint(failure)).toBe(recoverable);
+        return events;
+      };
+      const native = await execute(true);
+      expect(await execute(false)).toEqual(native);
+      expect(native).toEqual(
+        location === "handler" && kind === "APIError"
+          ? [
+              "endpoint",
+              "matcher",
+              "handler",
+              "later matcher",
+              "later handler",
+              "cookies",
+              "sdk matcher",
+              "sdk handler",
+            ]
+          : location === "handler"
+            ? ["endpoint", "matcher", "handler"]
+            : ["endpoint", "matcher"],
+      );
+    },
+  );
+
+  it.each(["Error", "APIError", "undefined"] as const)(
+    "isolates %s matcher failures between concurrent and nested dispatches",
+    async (kind) => {
+      const execute = async (native: boolean) => {
+        const plugin = nestjs();
+        const bridge = handle(plugin);
+        const failure =
+          kind === "APIError"
+            ? new APIError("FORBIDDEN")
+            : kind === "Error"
+              ? new Error("matcher failed")
+              : undefined;
+        const results = new Map<string, object>();
+        const matched: string[] = [];
+        const delivered: string[] = [];
+        const hooks: CompiledHook[] = [
+          {
+            matches: (ctx) => {
+              const call = ctx.headers!.get("x-call")!;
+              matched.push(call);
+              if (call === "nested" || call === "concurrent") {
+                throw failure;
+              }
+              return true;
+            },
+            run: async (ctx) => {
+              if (ctx.headers!.get("x-call") === "parent") {
+                await expect(
+                  auth.api.probe({
+                    headers: new Headers({ "x-call": "nested" }),
+                  }),
+                ).rejects.toBe(failure);
+              }
+            },
+          },
+        ];
+        bridge.bind({
+          ...binding(),
+          after: native ? [] : hooks,
+          current: () =>
+            scope({
+              cookies: {
+                append: (cookies) => {
+                  delivered.push(...cookies);
+                  return true;
+                },
+              },
+            }),
+        });
+        const auth = betterAuth({
+          ...base,
+          plugins: [
+            {
+              id: "probe",
+              endpoints: {
+                probe: createAuthEndpoint(
+                  "/probe",
+                  { method: "GET" },
+                  async (ctx) => {
+                    const call = ctx.headers!.get("x-call")!;
+                    const result = { call };
+                    results.set(call, result);
+                    ctx.setCookie("endpoint", call);
+                    return ctx.json(result);
+                  },
+                ),
+              },
+            },
+            ...(native
+              ? [
+                  {
+                    id: "native-hooks",
+                    hooks: {
+                      after: hooks.map((item) => ({
+                        matcher: (ctx) => item.matches(ctx, undefined),
+                        handler: createAuthMiddleware(item.run),
+                      })),
+                    },
+                  } satisfies BetterAuthPlugin,
+                ]
+              : []),
+            plugin,
+          ],
+        });
+        const settled = await Promise.allSettled(
+          ["parent", "concurrent", "success"].map((call) =>
+            auth.api.probe({ headers: new Headers({ "x-call": call }) }),
+          ),
+        );
+        expect(settled[0]).toEqual({
+          status: "fulfilled",
+          value: { call: "parent" },
+        });
+        expect(settled[1]).toEqual({ status: "rejected", reason: failure });
+        if (settled[1]!.status === "rejected") {
+          expect(settled[1]!.reason).toBe(failure);
+        }
+        expect(settled[2]).toEqual({
+          status: "fulfilled",
+          value: { call: "success" },
+        });
+        for (const [call, result] of results) {
+          expect(bridge.producedByEndpoint(result)).toBe(
+            call === "parent" || call === "success",
+          );
+        }
+        expect(bridge.producedByEndpoint(failure)).toBe(false);
+        return { matched: matched.sort(), delivered: delivered.sort() };
+      };
+      const native = await execute(true);
+      expect(await execute(false)).toEqual(native);
+      expect(native).toEqual({
+        matched: ["concurrent", "nested", "parent", "success"],
+        delivered: ["endpoint=parent", "endpoint=success"],
+      });
+    },
+  );
 
   it.each([
     ["none", {}, true],

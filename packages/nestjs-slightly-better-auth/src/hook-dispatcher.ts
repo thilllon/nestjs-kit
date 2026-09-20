@@ -108,9 +108,22 @@ export async function runAfter(
   binding: BridgeBinding,
   ctx: HookEndpointContext,
   scope: ScopeView | undefined,
+  relayMatcherError?: (error: unknown) => void,
 ): Promise<unknown> {
   for (const hook of binding.after) {
-    if (!hook.matches(ctx, scope)) {
+    let matched: boolean;
+    try {
+      matched = hook.matches(ctx, scope);
+    } catch (error) {
+      if (!relayMatcherError) {
+        throw error;
+      }
+      // A surrounding SDK handler catches APIErrors as recoverable results.
+      // Stop here and rethrow from the next fixed SDK matcher instead.
+      relayMatcherError(error);
+      return undefined;
+    }
+    if (!matched) {
       continue;
     }
     let result: { response: unknown; headers?: Headers | null };

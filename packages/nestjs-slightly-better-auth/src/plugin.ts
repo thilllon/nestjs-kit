@@ -64,6 +64,7 @@ export function nestjs(
   let registration: ReturnType<BridgeHandle["bind"]> | undefined;
   let unboundDispatches = 0;
   const endpointResults = new WeakSet<object>();
+  const afterMatcherErrors = new WeakMap<object, unknown>();
   const scope = () => binding?.current();
   const clientIpHeader =
     options.clientIpHeader === false
@@ -186,11 +187,22 @@ export function nestjs(
         {
           matcher: () => binding !== null && binding.after.length > 0,
           handler: createAuthMiddleware((ctx) =>
-            runAfter(binding!, ctx, scope()),
+            runAfter(binding!, ctx, scope(), (error) => {
+              afterMatcherErrors.set(ctx.context, error);
+            }),
           ),
         },
         {
-          matcher: (ctx) => binding !== null && !isRouter(ctx),
+          matcher: (ctx) => {
+            // Each endpoint dispatch owns this shared context, including nested
+            // calls. Rethrow outside the SDK's recoverable handler-error catch.
+            if (afterMatcherErrors.has(ctx.context)) {
+              const error = afterMatcherErrors.get(ctx.context);
+              afterMatcherErrors.delete(ctx.context);
+              throw error;
+            }
+            return binding !== null && !isRouter(ctx);
+          },
           handler: createAuthMiddleware(async (ctx) => {
             const value = ctx.context.returned;
             if (typeof value === "object" && value !== null) {

@@ -15,6 +15,7 @@ import type {
   CompiledHook,
 } from "./bridge-protocol.js";
 import { nestjs } from "./plugin.js";
+import { runAfter } from "./hook-dispatcher.js";
 
 const targets = ["user", "session", "account", "verification"].flatMap(
   (model) => ["create", "update", "delete"].map((op) => `${model}.${op}`),
@@ -283,6 +284,82 @@ describe("native SDK endpoint hook parity", () => {
     expect(native.response).toEqual({ previous: { replaced: 1 }, replaced: 2 });
     expect(new Headers(native.headers).getSetCookie()).toEqual(["after=one"]);
   });
+
+  it("evaluates each after predicate once against preceding replacements", async () => {
+    const execute = async (native: boolean) => {
+      const events: unknown[] = [];
+      const { auth } = setup(
+        native,
+        [],
+        [
+          hook(
+            () => ({ replaced: true }),
+            () => {
+              events.push("first predicate");
+              return true;
+            },
+          ),
+          hook(
+            () => undefined,
+            (ctx) => {
+              events.push(ctx.context.returned);
+              return false;
+            },
+          ),
+          hook(
+            () => ({ final: true }),
+            (ctx) => {
+              events.push(ctx.context.returned);
+              return true;
+            },
+          ),
+        ],
+      );
+      expect(await auth.api.probe({ body: {} })).toEqual({ final: true });
+      return events;
+    };
+    const native = await execute(true);
+    expect(await execute(false)).toEqual(native);
+    expect(native).toEqual([
+      "first predicate",
+      { replaced: true },
+      { replaced: true },
+    ]);
+  });
+
+  it.each([new Error("predicate"), new APIError("FORBIDDEN"), undefined])(
+    "propagates a standalone dispatcher matcher failure without a relay: %s",
+    async (failure) => {
+      const { auth } = setup(
+        true,
+        [],
+        [
+          hook(async (ctx) => {
+            await expect(
+              runAfter(
+                makeBinding(
+                  [],
+                  [
+                    hook(
+                      () => {
+                        throw new Error("must skip handler");
+                      },
+                      () => {
+                        throw failure;
+                      },
+                    ),
+                  ],
+                ),
+                ctx,
+                undefined,
+              ),
+            ).rejects.toBe(failure);
+          }),
+        ],
+      );
+      await auth.api.probe({ body: {} });
+    },
+  );
 
   it("continues after APIError and merges attached and explicit error headers once", async () => {
     const execute = async (native: boolean) => {

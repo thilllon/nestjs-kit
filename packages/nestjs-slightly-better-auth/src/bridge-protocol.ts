@@ -71,8 +71,9 @@ export interface CompiledHook {
   /**
    * Evaluate the user predicate once and let it throw. The dispatcher logs and
    * converts before-hook matcher failures to APIError 500; after-hook matcher
-   * failures propagate unchanged, matching the SDK. Never swallow a failure
-   * as a non-match or evaluate the predicate again in run().
+   * failures cross the next fixed SDK matcher boundary unchanged, so the SDK
+   * cannot recover them as handler APIErrors. Never swallow a failure as a
+   * non-match or evaluate the predicate again in run().
    */
   matches(ctx: HookEndpointContext, scope: ScopeView | undefined): boolean;
   run(ctx: HookEndpointContext): Promise<unknown>;
