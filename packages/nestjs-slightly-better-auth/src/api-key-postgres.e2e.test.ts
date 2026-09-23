@@ -20,14 +20,18 @@ const connection = {
   statement_timeout: 3000,
 };
 /**
- * `DROP DATABASE ... WITH (FORCE)` terminates whatever backend is still attached, which
- * can reach a pooled client that is already closing. pg reports that as an idle-client
- * error, and without a listener it becomes an unhandled exception that fails the run even
- * though every test passed. Other errors still propagate.
+ * `DROP DATABASE ... WITH (FORCE)` terminates whatever backend is still attached, which can
+ * reach a pooled client that is already closing. pg reports that as an idle-client error, and
+ * without a listener it becomes an unhandled exception that fails the run although every test
+ * passed. Only the teardown of the pools that use the dropped database suppresses it, so a
+ * termination during the test body still fails the test.
  */
-function ignoreAdministratorTermination(pool: Pool): Pool {
+function suppressTeardownTermination(
+  pool: Pool,
+  teardown: { started: boolean },
+): Pool {
   pool.on("error", (error: Error & { code?: string }) => {
-    if (error.code !== "57P01") {
+    if (!teardown.started || error.code !== "57P01") {
       throw error;
     }
   });
@@ -53,22 +57,23 @@ describe("real PostgreSQL API-key outage classification", () => {
   it.each(["default", "uuid", "serial"] as const)(
     "uses a no-op logical key probe with %s IDs and detects read-only and row-lock failures",
     async (mode) => {
-      const observer = ignoreAdministratorTermination(
-        new Pool({ ...connection, max: 1 }),
-      );
+      // The observer stays on the maintenance database, which is never dropped.
+      const observer = new Pool({ ...connection, max: 1 });
+      const teardown = { started: false };
       const database = `auth_keys_${crypto.randomUUID().replaceAll("-", "")}`;
       let pool: Pool | undefined;
       let module: TestingModule | undefined;
       let locker: Pool | undefined;
       try {
         await observer.query(`CREATE DATABASE "${database}"`);
-        pool = ignoreAdministratorTermination(
+        pool = suppressTeardownTermination(
           new Pool({
             ...connection,
             database,
             max: 1,
             options: "-c lock_timeout=300ms",
           }),
+          teardown,
         );
         const auth = betterAuth({
           database: pool,
@@ -138,8 +143,9 @@ describe("real PostgreSQL API-key outage classification", () => {
         expect(
           (await pool.query('SELECT * FROM "apikey" ORDER BY id')).rows,
         ).toEqual(before);
-        locker = ignoreAdministratorTermination(
+        locker = suppressTeardownTermination(
           new Pool({ ...connection, database, max: 1 }),
+          teardown,
         );
         await locker.query("BEGIN");
         await locker.query('SELECT id FROM "apikey" WHERE id = $1 FOR UPDATE', [
@@ -157,6 +163,7 @@ describe("real PostgreSQL API-key outage classification", () => {
           (await pool.query('SELECT * FROM "apikey" ORDER BY id')).rows,
         ).toEqual(before);
       } finally {
+        teardown.started = true;
         await locker?.query("ROLLBACK").catch(() => {});
         await locker?.end();
         await module?.close();
