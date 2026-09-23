@@ -47,6 +47,7 @@ A new public package cannot join OIDC publication before it exists on npm. Until
 
 | Package           | Checked-in placeholder | First release | Tracking                                                  |
 | ----------------- | ---------------------- | ------------- | --------------------------------------------------------- |
+| `nestjs-sendbird` | `0.0.0`                | `1.0.0`       | [#561](https://github.com/thilllon/nestjs-kit/issues/561) |
 | `nestjs-sendgrid` | `1.0.1`                | `2.0.0`       | [#560](https://github.com/thilllon/nestjs-kit/issues/560) |
 
 npm permanently reserves `nestjs-sendgrid` versions `0.0.1-0`, `0.0.2`, `1.0.0` and `1.0.1`, which a former owner published and unpublished, so its pending major Changeset starts from the `1.0.1` placeholder.
@@ -56,19 +57,24 @@ While a package is held, `pnpm exec changeset` does not offer it. Write its Chan
 To publish a held package:
 
 1. Merge a documentation PR that removes the package README's first-release note, as [#506](https://github.com/thilllon/nestjs-kit/pull/506) did for Nodemailer, so the npm page carries a durable installation guide.
-2. On a clean, up-to-date `main`, publish its first release with the owner's npm authentication without committing the version edit. `--no-git-checks` is needed only because of that edit:
+2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
-   PACKAGE=nestjs-sendgrid VERSION=2.0.0
-   mise install
-   mise exec -- pnpm install --frozen-lockfile
-   cd "packages/$PACKAGE"
-   mise exec -- pnpm pkg set "version=$VERSION"
-   mise exec -- pnpm build
-   mise exec -- pnpm pack --out "/tmp/$PACKAGE.tgz"
-   tar -tzf "/tmp/$PACKAGE.tgz"
-   mise exec -- pnpm login
-   mise exec -- pnpm publish "/tmp/$PACKAGE.tgz" --access public --provenance=false --no-git-checks
+   PACKAGE=nestjs-sendgrid VERSION=2.0.0 # the package's row in the table above
+   mise install &&
+     mise exec -- pnpm install --frozen-lockfile &&
+     cd "packages/$PACKAGE" &&
+     mise exec -- pnpm pkg set "version=$VERSION" &&
+     mise exec -- pnpm build &&
+     mise exec -- pnpm pack --out "/tmp/$PACKAGE.tgz" &&
+     tar -tzf "/tmp/$PACKAGE.tgz"
+   ```
+
+   Inspect the listed files: only `dist`, `README.md`, `LICENSE` and `package.json` belong in the archive. Then publish it with the owner's npm authentication from the same directory and restore the version edit. `--no-git-checks` is needed only because of that edit:
+
+   ```sh
+   mise exec -- pnpm login &&
+     mise exec -- pnpm publish "/tmp/$PACKAGE.tgz" --access public --provenance=false --no-git-checks
    git checkout -- package.json
    ```
 

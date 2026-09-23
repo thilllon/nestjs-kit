@@ -64,6 +64,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
+- `packages/nestjs-sendbird`: the Sendbird Platform API adapter, awaiting its first npm release.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter, awaiting its first npm release.
 - `packages/nestjs-slightly-better-auth`: private authentication design workspace, research and historical adapter reference; not a working authentication library yet.
 - `.github/workflows`: CI, dependency maintenance, and releases.
