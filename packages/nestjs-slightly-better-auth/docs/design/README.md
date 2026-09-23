@@ -2,8 +2,9 @@
 
 This directory preserves the design and review history of
 `nestjs-slightly-better-auth`, now maintained in the `nestjs-kit` monorepo.
-The library is still in its design phase: its public entry point exports nothing.
-The final v7 specification has independent design approval; it does not implement the API.
+The final v7 specification has independent design approval and is the contract the
+implementation follows. Version 1.0.0 implements its HTTP scope; GraphQL, WebSocket and
+RPC transports and the conformance kit are still to come.
 
 Three reviewers examine Better Auth fidelity, NestJS correctness and SOLID, and
 security and operations. Historical designs and research retain their original
