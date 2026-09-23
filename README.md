@@ -1,6 +1,6 @@
 # NestJS Kit
 
-NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
+NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, chat, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
 
 Install only the integrations you need. Packages have their own npm releases and usage guides, with shared tooling and maintenance in this repository.
 
@@ -19,6 +19,7 @@ Install only the integrations you need. Packages have their own npm releases and
 | `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle               | [README](packages/nestjs-pg-listen/README.md)          |
 | `@nestjs-kit/nodemailer` [(npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)       | [![Monthly downloads for @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)      | Email delivery through configurable Nodemailer transports                  | [README](packages/nestjskit__nodemailer/README.md)     |
 | `nestjs-sendgrid` (first release pending)                                                    | [![Monthly downloads for nestjs-sendgrid](https://img.shields.io/npm/dm/nestjs-sendgrid?logo=npm)](https://www.npmjs.com/package/nestjs-sendgrid)                               | Mail Send and Web API calls through isolated Twilio SendGrid accounts      | [README](packages/nestjs-sendgrid/README.md)           |
+| `nestjs-sendbird` (first release pending)                                                    | [![Monthly downloads for nestjs-sendbird](https://img.shields.io/npm/dm/nestjs-sendbird?logo=npm)](https://www.npmjs.com/package/nestjs-sendbird)                               | Sendbird Platform API calls with per-application tokens                    | [README](packages/nestjs-sendbird/README.md)           |
 
 Packages marked _first release pending_ are implemented in this repository but not yet published to npm.
 

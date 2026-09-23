@@ -47,6 +47,7 @@ A new public package cannot join OIDC publication before it exists on npm. Until
 
 | Package           | Checked-in placeholder | First release | Tracking                                                  |
 | ----------------- | ---------------------- | ------------- | --------------------------------------------------------- |
+| `nestjs-sendbird` | `0.0.0`                | `1.0.0`       | [#561](https://github.com/thilllon/nestjs-kit/issues/561) |
 | `nestjs-sendgrid` | `1.0.1`                | `2.0.0`       | [#560](https://github.com/thilllon/nestjs-kit/issues/560) |
 
 npm permanently reserves `nestjs-sendgrid` versions `0.0.1-0`, `0.0.2`, `1.0.0` and `1.0.1`, which a former owner published and unpublished, so its pending major Changeset starts from the `1.0.1` placeholder.
@@ -59,7 +60,7 @@ To publish a held package:
 2. On a clean, up-to-date `main`, publish its first release with the owner's npm authentication without committing the version edit. `--no-git-checks` is needed only because of that edit:
 
    ```sh
-   PACKAGE=nestjs-sendgrid VERSION=2.0.0
+   PACKAGE=nestjs-sendgrid VERSION=2.0.0 # the package's row in the table above
    mise install
    mise exec -- pnpm install --frozen-lockfile
    cd "packages/$PACKAGE"
