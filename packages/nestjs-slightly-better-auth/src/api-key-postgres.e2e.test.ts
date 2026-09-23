@@ -19,6 +19,20 @@ const connection = {
   connectionTimeoutMillis: 3000,
   statement_timeout: 3000,
 };
+/**
+ * `DROP DATABASE ... WITH (FORCE)` terminates whatever backend is still attached, which
+ * can reach a pooled client that is already closing. pg reports that as an idle-client
+ * error, and without a listener it becomes an unhandled exception that fails the run even
+ * though every test passed. Other errors still propagate.
+ */
+function ignoreAdministratorTermination(pool: Pool): Pool {
+  pool.on("error", (error: Error & { code?: string }) => {
+    if (error.code !== "57P01") {
+      throw error;
+    }
+  });
+  return pool;
+}
 function request(auth: AuthHandle, key: string): PrincipalRequest {
   const memo = new Map<unknown, Promise<unknown>>();
   return {
@@ -39,19 +53,23 @@ describe("real PostgreSQL API-key outage classification", () => {
   it.each(["default", "uuid", "serial"] as const)(
     "uses a no-op logical key probe with %s IDs and detects read-only and row-lock failures",
     async (mode) => {
-      const observer = new Pool({ ...connection, max: 1 });
+      const observer = ignoreAdministratorTermination(
+        new Pool({ ...connection, max: 1 }),
+      );
       const database = `auth_keys_${crypto.randomUUID().replaceAll("-", "")}`;
       let pool: Pool | undefined;
       let module: TestingModule | undefined;
       let locker: Pool | undefined;
       try {
         await observer.query(`CREATE DATABASE "${database}"`);
-        pool = new Pool({
-          ...connection,
-          database,
-          max: 1,
-          options: "-c lock_timeout=300ms",
-        });
+        pool = ignoreAdministratorTermination(
+          new Pool({
+            ...connection,
+            database,
+            max: 1,
+            options: "-c lock_timeout=300ms",
+          }),
+        );
         const auth = betterAuth({
           database: pool,
           secret: crypto.randomUUID() + crypto.randomUUID(),
@@ -120,7 +138,9 @@ describe("real PostgreSQL API-key outage classification", () => {
         expect(
           (await pool.query('SELECT * FROM "apikey" ORDER BY id')).rows,
         ).toEqual(before);
-        locker = new Pool({ ...connection, database, max: 1 });
+        locker = ignoreAdministratorTermination(
+          new Pool({ ...connection, database, max: 1 }),
+        );
         await locker.query("BEGIN");
         await locker.query('SELECT id FROM "apikey" WHERE id = $1 FOR UPDATE', [
           created.id,
