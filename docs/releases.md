@@ -35,7 +35,7 @@ Trusted publishing exchanges the workflow's OIDC identity for publish access; th
 
 All seven established package identities, including `@nestjs-kit/nodemailer`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
-`nestjs-slightly-better-auth` joins publication with its `1.0.0` release, which covers the HTTP scope of the reviewed design; its later transports ship as minor versions. Like any package that does not exist on the registry yet, its first publication is owner-authenticated and is followed by trusted-publisher setup for this repository, using the bootstrap steps below. Importing its old repository's release instructions does not transfer npm trust. Until that setup is complete, the release workflow cannot publish it and its publish step fails with an authentication error.
+`nestjs-slightly-better-auth` releases `1.0.0`, which covers the HTTP scope of its reviewed design; its later transports ship as minor versions. It is held below until its owner-authenticated first publication and trusted-publisher setup, like every other package that npm does not have yet. Importing its old repository's release instructions does not transfer npm trust.
 
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
@@ -45,10 +45,11 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-| Package           | Checked-in placeholder | First release | Tracking                                                  |
-| ----------------- | ---------------------- | ------------- | --------------------------------------------------------- |
-| `nestjs-sendbird` | `0.0.0`                | `1.0.0`       | [#561](https://github.com/thilllon/nestjs-kit/issues/561) |
-| `nestjs-sendgrid` | `1.0.1`                | `2.0.0`       | [#560](https://github.com/thilllon/nestjs-kit/issues/560) |
+| Package                       | Checked-in placeholder | First release | Tracking                                                  |
+| ----------------------------- | ---------------------- | ------------- | --------------------------------------------------------- |
+| `nestjs-sendbird`             | `0.0.0`                | `1.0.0`       | [#561](https://github.com/thilllon/nestjs-kit/issues/561) |
+| `nestjs-sendgrid`             | `1.0.1`                | `2.0.0`       | [#560](https://github.com/thilllon/nestjs-kit/issues/560) |
+| `nestjs-slightly-better-auth` | `0.0.1`                | `1.0.0`       | [#534](https://github.com/thilllon/nestjs-kit/issues/534) |
 
 npm permanently reserves `nestjs-sendgrid` versions `0.0.1-0`, `0.0.2`, `1.0.0` and `1.0.1`, which a former owner published and unpublished, so its pending major Changeset starts from the `1.0.1` placeholder.
 
