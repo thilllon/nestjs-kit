@@ -18,6 +18,9 @@ Install only the integrations you need. Packages have their own npm releases and
 | `nestjs-drizzle-pg` [(npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                 | [![Monthly downloads for nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg?logo=npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                         | Drizzle ORM with PostgreSQL pools or clients                               | [README](packages/nestjs-drizzle-pg/README.md)         |
 | `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle               | [README](packages/nestjs-pg-listen/README.md)          |
 | `@nestjs-kit/nodemailer` [(npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)       | [![Monthly downloads for @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)      | Email delivery through configurable Nodemailer transports                  | [README](packages/nestjskit__nodemailer/README.md)     |
+| `nestjs-sendgrid` (first release pending)                                                    | [![Monthly downloads for nestjs-sendgrid](https://img.shields.io/npm/dm/nestjs-sendgrid?logo=npm)](https://www.npmjs.com/package/nestjs-sendgrid)                               | Mail Send and Web API calls through isolated Twilio SendGrid accounts      | [README](packages/nestjs-sendgrid/README.md)           |
+
+Packages marked _first release pending_ are implemented in this repository but not yet published to npm.
 
 ## Shared approach
 

@@ -31,7 +31,7 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the authentication scaffold's ESM and CJS artifacts. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
+Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the built ESM and CJS artifacts of every package with a `src/packaging.test.ts`. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
 
 For real PostgreSQL integration tests, install Docker with Compose and run:
 
@@ -56,7 +56,7 @@ Use a Conventional Commit title to describe the change:
 
 Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
-Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
+Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Packages awaiting their first npm release are held in Changesets `ignore` and are not offered there; write their Changesets by hand in a separate file that names only held packages (see [packages awaiting first publication](docs/releases.md#packages-awaiting-first-publication)). Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
 
 ## Repository layout
 
@@ -64,6 +64,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
+- `packages/nestjs-sendgrid`: the Twilio SendGrid adapter, awaiting its first npm release.
 - `packages/nestjs-slightly-better-auth`: private authentication design workspace, research and historical adapter reference; not a working authentication library yet.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
