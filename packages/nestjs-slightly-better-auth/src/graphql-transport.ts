@@ -59,7 +59,11 @@ const MERCURIUS_UPGRADE = Symbol.for(
 export interface GraphqlTransportOptions {
   /** Case-insensitive connection-init credential keys; defaults to authorization and cookie. */
   connectionParamHeaders?: readonly string[];
-  /** Replaces socket credentials, preserving absent host and forwarded-host/proto headers. */
+  /**
+   * Replaces socket credentials, preserving absent host and forwarded-host/proto headers.
+   * Returning undefined presents no credentials: neither connectionParamHeaders nor the
+   * upgrade request's credential headers are used.
+   */
   subscriptionCredentials?: (
     connectionContext: unknown,
   ) => HeadersInit | undefined;

@@ -393,6 +393,13 @@ describe("GraphQL malformed credential conversion", () => {
     expect(failure).not.toHaveProperty("stack");
     expect(JSON.stringify(failure)).not.toContain("secret");
   });
+  it("presents no credentials when the custom mapping returns undefined", () => {
+    const headers = socketHeaders(
+      { subscriptionCredentials: () => undefined },
+      { authorization: "Bearer connection-param", cookie: "param=credential" },
+    )();
+    expect([...headers]).toEqual([["host", "localhost:3000"]]);
+  });
   it("sanitizes invalid selected header names and ignores unselected values", () => {
     expect(() =>
       socketHeaders(
