@@ -429,6 +429,25 @@ importers:
         specifier: 7.8.2
         version: 7.8.2
 
+  packages/nestjs-strategy:
+    dependencies:
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: ^7.8.2
+        version: 7.8.2
+    devDependencies:
+      '@nestjs/common':
+        specifier: 12.0.3
+        version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: 12.0.3
+        version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.0.3)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/testing':
+        specifier: 12.0.3
+        version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/platform-express@12.0.3)
+
   packages/nestjskit__cloudinary:
     dependencies:
       reflect-metadata:
