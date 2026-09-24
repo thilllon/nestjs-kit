@@ -1,7 +1,7 @@
 {
   "name": "nestjs-slightly-better-auth",
-  "version": "1.1.0",
-  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, microservice RPC transports, and admin, organization and API-key authorization",
+  "version": "1.2.0",
+  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, Socket.IO and ws gateways, microservice RPC transports, and admin, organization and API-key authorization",
   "license": "MIT",
   "author": "thilllon",
   "type": "module",
@@ -77,6 +77,20 @@
       "require": {
         "types": "./dist/fastify.d.cts",
         "default": "./dist/fastify.cjs"
+      }
+    },
+    "./websockets": {
+      "module-sync": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "import": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "require": {
+        "types": "./dist/websockets.d.cts",
+        "default": "./dist/websockets.cjs"
       }
     },
     "./microservices": {
@@ -164,6 +178,8 @@
     "nest",
     "better-auth",
     "authentication",
+    "websockets",
+    "socket.io",
     "microservices",
     "rpc",
     "grpc",
@@ -176,12 +192,16 @@
   "peerDependenciesMeta": {
     "@nestjs/microservices": {
       "optional": true
+    },
+    "@nestjs/websockets": {
+      "optional": true
     }
   },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
     "@nestjs/microservices": "^12.0.3",
+    "@nestjs/websockets": "^12.0.3",
     "better-auth": ">=1.7.5 <2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -200,10 +220,14 @@
     "@nestjs/microservices": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/platform-fastify": "12.0.3",
+    "@nestjs/platform-socket.io": "12.0.3",
+    "@nestjs/platform-ws": "12.0.3",
     "@nestjs/testing": "12.0.3",
+    "@nestjs/websockets": "12.0.3",
     "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1",
     "amqp-connection-manager": "5.0.0",
     "amqplib": "2.0.1",
     "better-auth": "1.7.5",
@@ -213,6 +237,9 @@
     "mqtt": "5.16.0",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "socket.io": "4.8.3",
+    "socket.io-client": "4.8.3",
+    "ws": "8.21.3"
   }
 }
