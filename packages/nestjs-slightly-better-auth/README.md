@@ -22,7 +22,7 @@ The `./graphql` entry has two optional peer dependencies, `@nestjs/graphql` ^14.
 # Apollo on Express
 pnpm add @nestjs/graphql graphql @nestjs/apollo @apollo/server @as-integrations/express5
 # Mercurius on Fastify
-pnpm add @nestjs/graphql graphql @nestjs/mercurius mercurius
+pnpm add @nestjs/graphql graphql @nestjs/mercurius mercurius @nestjs/platform-fastify
 ```
 
 ## What the package covers
@@ -45,7 +45,7 @@ Start with the [design workspace](docs/design/README.md), [reviewed specificatio
 
 The `./graphql` entry provides `apolloTransport()` for `@nestjs/apollo` and `mercuriusTransport()` for `@nestjs/mercurius`. Queries, mutations, subscriptions and federation reference resolvers use the same access decorators, principal parameters and authorization units as controllers. Only this entry imports `@nestjs/graphql` and `graphql`.
 
-Create the Better Auth instance with the construction plugin:
+Create the Better Auth instance with the construction plugin. The example stores data in PostgreSQL through `pg`, which the commands above do not install; add it with `pnpm add pg` or pass another [Better Auth database](https://www.better-auth.com/docs/concepts/database):
 
 ```ts
 // auth.ts
@@ -120,7 +120,7 @@ Field resolvers without access decorators inherit the principal of their actual 
 
 ### Subscriptions and socket operations
 
-Socket operations authenticate each operation independently from the WebSocket upgrade request and never refresh the session. Browser-origin checks always use the original upgrade headers, before any session read, so connection parameters cannot replace the browser's `Origin`.
+Socket operations authenticate each operation independently from the WebSocket upgrade request and never refresh the session. Browser-origin checks always use the original upgrade headers, before any session read, so connection parameters cannot replace the browser's `Origin`. The platform's own request predicate classifies HTTP operations before socket detection, so a client-sent `Upgrade: websocket` header on an HTTP operation keeps the platform client IP, response cookie forwarding and the completed-request check. Mercurius identifies sockets only through its subscription context, never through request headers.
 
 By default, `authorization` and `cookie` values in the `connection_init` payload replace the matching upgrade headers. `connectionParamHeaders` replaces that list of keys, matched case-insensitively. A selected value that is not a string or is not a valid header value rejects the operation with `UNAUTHENTICATED` and `reason: "MALFORMED_CREDENTIALS"`, without falling back to another credential and without echoing the value in errors or logs.
 
@@ -131,6 +131,8 @@ By default, `authorization` and `cookie` values in the `connection_init` payload
 ### Federation
 
 Both transports support `ApolloFederationDriver` and `MercuriusFederationDriver` with schema-first schemas and code-first federation versions 1 and 2. `@ResolveReference()` resolvers are always checked: without field guards, startup fails with `FEDERATION_FIELD_GUARDS_REQUIRED` or `REFERENCE_RESOLVER_UNGUARDED`, and `federationCoverage` relaxes the check.
+
+Federation schema generation in `@nestjs/graphql` loads `@apollo/subgraph`, which the install commands above do not include. Federation applications must install a compatible version, for example `pnpm add @apollo/subgraph@^2.15.1`; otherwise startup fails before authentication runs. `@apollo/subgraph` 2.15 requires `@nestjs/graphql` 14.0.2 or newer, as described under [Supported versions](#supported-versions).
 
 ### Supported versions
 
