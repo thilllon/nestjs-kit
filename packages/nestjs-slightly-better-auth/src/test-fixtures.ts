@@ -39,6 +39,38 @@ export function createTestAuth(
       ),
   });
 }
+export async function createTestIdentity(
+  auth: ReturnType<typeof createTestAuth>,
+  emailSuffix = globalThis.crypto.randomUUID(),
+): Promise<{ cookie: string; token: string; userId: string }> {
+  const response = await auth.api.signUpEmail({
+    body: {
+      name: "Integration user",
+      email: `${emailSuffix}@example.test`,
+      password: "integration-test-password",
+    },
+    asResponse: true,
+  });
+  if (!response.ok) {
+    throw new Error(`Test signup failed with status ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    token?: string;
+    user?: { id?: string };
+  };
+  if (!body.token || !body.user?.id) {
+    throw new Error("Test signup did not return a session token and user ID");
+  }
+  return {
+    cookie: response.headers
+      .getSetCookie()
+      .map((value) => value.split(";", 1)[0])
+      .join("; "),
+    token: body.token,
+    userId: body.user.id,
+  };
+}
+
 export interface HttpFixture {
   readonly app: INestApplication;
   readonly url: string;
