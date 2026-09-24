@@ -6,6 +6,8 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Write repository documentation, code comments, automated reviews, commit messages, and issue/PR titles and bodies in English. The project does not plan Korean-language support or localized documentation.
 - Keep conversation language independent: respond to the user in their preferred language without applying it to repository content.
+- Write repository content technically. Commit messages, READMEs, code comments and docs state what the code does and its technical reasons in the present tense. Do not add narratives about earlier implementations, past incidents, former owners, or the PRs and issues that led to the current state; Git history and issues hold that record. Generated changelogs and the design material other rules preserve are exempt.
+- Keep the root README to repository-wide information and a short package list. Package-specific details belong in that package's README.
 
 ## Package identities
 
@@ -21,6 +23,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
 - Order existing package.json scripts with `typecheck`, `build`, then `dev` first in the root and every package; do not add missing commands just for ordering.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
+- Spell out command-line flags in their long form in package scripts, workflows, hooks, Compose files and documented commands whenever the tool provides one, for example `tsc --project`, `docker compose up --detach` and `git commit --message`.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
 - Keep source and test files in the default package `tsconfig.json` project so editors apply the shared decorator settings to both. Use the test configuration for no-emit typechecking; production bundling stays limited to the package entry point.
@@ -73,8 +76,9 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Changesets is the single versioning engine. Every PR with publishable package changes must include an explicit Changeset naming the affected packages, bump types and user-facing summary. The agent implementing the change writes this file as part of the PR; commit messages do not infer versions.
 - Honor explicit maintainer-requested coordinated releases through a changeset; Changesets combines all pending requests into one bump per package.
 - Only changed packages are versioned/published. Do not introduce a competing semantic-release publisher or release unchanged packages for documentation-only edits.
-- All seven established integrations participate in native Changesets versioning and publication. Keep established packages out of `ignore`; verify any future package's first publication and trusted publisher before enabling its automated publication. Do not introduce a custom publication wrapper.
-- `nestjs-slightly-better-auth` is an additional private implementation workspace, not a released integration. Keep it private until its implementation and first intended release are ready; follow its package instructions and preserve its MIT licenses and historical design material. Intermediate private implementation PRs defer their release Changeset until the coordinated first public release.
+- All ten established integrations participate in native Changesets versioning and publication. Keep established packages out of `ignore`; verify any future package's first publication and trusted publisher before enabling its automated publication. Do not introduce a custom publication wrapper.
+- A new package that does not exist on npm stays in Changesets `ignore` until its owner-authenticated first publication and trusted publisher are verified; `docs/releases.md` lists held packages (none today) and the procedure. Write Changesets for held packages in files naming only held packages: a mixed file fails `changeset version` and blocks every release.
+- `nestjs-slightly-better-auth` published `1.0.0`, which covers the HTTP scope of its reviewed design; GraphQL, WebSocket and RPC transports and its conformance kit follow as minor versions. It releases like every other package. Follow its package instructions and preserve its MIT licenses and historical design material.
 - Prepare and publish only the workflow event commit (`github.sha`). Never publish in the run that merges a version PR: when the publication gate is enabled, dispatch a fresh Release run after the protected merge. Verify its event SHA, preparation base and checkout agree, so signed provenance describes the actual artifact source.
 - npm publishing uses trusted-publisher OIDC and provenance. Keep the established integrations' configured release gate enabled. New packages need an owner-authenticated first publication and trusted-publisher setup before joining automated publication; do not disable established releases merely because an unfinished package remains private.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.

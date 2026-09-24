@@ -1,6 +1,6 @@
 # NestJS Kit
 
-NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
+NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, chat, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
 
 Install only the integrations you need. Packages have their own npm releases and usage guides, with shared tooling and maintenance in this repository.
 
@@ -9,26 +9,25 @@ Install only the integrations you need. Packages have their own npm releases and
 
 ## Pick an integration
 
-| Package                                                                                      | npm                                                                                                                                                                             | Use it for                                                                 | Guide                                                  |
-| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `@nestjs-kit/s3` [(npm)](https://www.npmjs.com/package/@nestjs-kit/s3)                       | [![Monthly downloads for @nestjs-kit/s3](https://img.shields.io/npm/dm/%40nestjs-kit%2Fs3?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/s3)                              | S3-compatible storage clients, including AWS, NetApp, and Ceph             | [README](packages/nestjskit__s3/README.md)             |
-| `@nestjs-kit/cloudinary` [(npm)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)       | [![Monthly downloads for @nestjs-kit/cloudinary](https://img.shields.io/npm/dm/%40nestjs-kit%2Fcloudinary?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)      | Signing uploads and uploading media with Cloudinary transformation options | [README](packages/nestjskit__cloudinary/README.md)     |
-| `nestjs-pubnub` [(npm)](https://www.npmjs.com/package/nestjs-pubnub)                         | [![Monthly downloads for nestjs-pubnub](https://img.shields.io/npm/dm/nestjs-pubnub?logo=npm)](https://www.npmjs.com/package/nestjs-pubnub)                                     | Publishing and subscribing through an injectable PubNub client             | [README](packages/nestjs-pubnub/README.md)             |
-| `nestjs-azure-storage-blob` [(npm)](https://www.npmjs.com/package/nestjs-azure-storage-blob) | [![Monthly downloads for nestjs-azure-storage-blob](https://img.shields.io/npm/dm/nestjs-azure-storage-blob?logo=npm)](https://www.npmjs.com/package/nestjs-azure-storage-blob) | Blob storage operations and direct uploads through SAS URLs                | [README](packages/nestjs-azure-storage-blob/README.md) |
-| `nestjs-drizzle-pg` [(npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                 | [![Monthly downloads for nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg?logo=npm)](https://www.npmjs.com/package/nestjs-drizzle-pg)                         | Drizzle ORM with PostgreSQL pools or clients                               | [README](packages/nestjs-drizzle-pg/README.md)         |
-| `nestjs-pg-listen` [(npm)](https://www.npmjs.com/package/nestjs-pg-listen)                   | [![Monthly downloads for nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen?logo=npm)](https://www.npmjs.com/package/nestjs-pg-listen)                            | PostgreSQL LISTEN / NOTIFY with managed subscriber lifecycle               | [README](packages/nestjs-pg-listen/README.md)          |
-| `@nestjs-kit/nodemailer` [(npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)       | [![Monthly downloads for @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer?logo=npm)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)      | Email delivery through configurable Nodemailer transports                  | [README](packages/nestjskit__nodemailer/README.md)     |
+Each guide covers installation, registration options and complete examples.
+
+- [`@nestjs-kit/s3`](packages/nestjskit__s3/README.md): S3-compatible storage clients, including AWS, NetApp and Ceph. [npm](https://www.npmjs.com/package/@nestjs-kit/s3)
+- [`nestjs-azure-storage-blob`](packages/nestjs-azure-storage-blob/README.md): Azure Blob Storage operations and direct uploads through SAS URLs. [npm](https://www.npmjs.com/package/nestjs-azure-storage-blob)
+- [`@nestjs-kit/cloudinary`](packages/nestjskit__cloudinary/README.md): signed uploads and media uploads with Cloudinary transformation options. [npm](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
+- [`nestjs-drizzle-pg`](packages/nestjs-drizzle-pg/README.md): Drizzle ORM with PostgreSQL pools or clients. [npm](https://www.npmjs.com/package/nestjs-drizzle-pg)
+- [`nestjs-pg-listen`](packages/nestjs-pg-listen/README.md): PostgreSQL LISTEN / NOTIFY with a managed subscriber lifecycle. [npm](https://www.npmjs.com/package/nestjs-pg-listen)
+- [`@nestjs-kit/nodemailer`](packages/nestjskit__nodemailer/README.md): email delivery through configurable Nodemailer transports. [npm](https://www.npmjs.com/package/@nestjs-kit/nodemailer)
+- [`nestjs-sendgrid`](packages/nestjs-sendgrid/README.md): Mail Send and Web API calls through isolated Twilio SendGrid accounts. [npm](https://www.npmjs.com/package/nestjs-sendgrid)
+- [`nestjs-pubnub`](packages/nestjs-pubnub/README.md): publishing and subscribing through an injectable PubNub client. [npm](https://www.npmjs.com/package/nestjs-pubnub)
+- [`nestjs-sendbird`](packages/nestjs-sendbird/README.md): Sendbird Platform API calls with per-application tokens. [npm](https://www.npmjs.com/package/nestjs-sendbird)
+- [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md): Better Auth sessions, guards and authorization for NestJS applications. [npm](https://www.npmjs.com/package/nestjs-slightly-better-auth)
 
 ## Shared approach
-
-An authentication integration is under development in [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md), following independently reviewed contracts. Its foundation types, tokens and error handling are implemented; runtime authentication and transport support remain in progress. The workspace is private until its first release is ready.
 
 - **Nest-native configuration.** Register options directly or resolve them asynchronously through dependency injection. Inject the client or adapter service using Nest's standard APIs.
 - **SDK access.** Use the underlying SDK's operations and types. Adapters add configuration, useful integration helpers, and connection cleanup where needed.
 - **Separate integrations.** Each package is installed, versioned, and published independently. Its README documents supported registration options and lifecycle behavior.
 - **Both module formats.** Every library ships ESM and CommonJS builds with matching TypeScript declarations. Package exports select the correct files for `import` and `require()`.
-
-Choose an integration above for installation instructions and complete examples.
 
 ## Develop locally
 
@@ -48,4 +47,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for checks, commit conventions, and pull
 
 ## License
 
-The repository and established integrations use [ISC](LICENSE). The `nestjs-slightly-better-auth` workspace uses [MIT](packages/nestjs-slightly-better-auth/LICENSE), and its archived upstream source retains its [original MIT notice](packages/nestjs-slightly-better-auth/legacy/LICENSE). Consult each package's license when using its files.
+The repository and its packages use [ISC](LICENSE) unless a package's own `LICENSE` file states otherwise. Consult each package's license when using its files.

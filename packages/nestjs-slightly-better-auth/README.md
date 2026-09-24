@@ -4,11 +4,19 @@
 [![Monthly downloads](https://img.shields.io/npm/dm/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main&label=CI)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-A NestJS integration for [Better Auth](https://www.better-auth.com), under development in the NestJS Kit monorepo.
+A NestJS integration for [Better Auth](https://www.better-auth.com), built on an independently reviewed specification.
 
-> **Private implementation in progress.** This workspace is not currently available on npm. The Nest authentication kernel, construction plugin and Express/Fastify platforms are implemented. Admin, organization, API-key and GraphQL integrations are implemented on the development branch. WebSockets, RPC, conformance and release acceptance remain in progress. The npm badges will become available after the first real release.
+> **Scope of 1.0.0.** This release covers HTTP: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, and the admin, organization and API-key authorization units. GraphQL, WebSocket and RPC transports and the conformance testing kit are not included; they arrive in later minor versions behind their own entry points.
 
-## Implementation status
+## Install
+
+```sh
+pnpm add nestjs-slightly-better-auth better-auth
+```
+
+Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer.
+
+## What this release covers
 
 The library separates a Better Auth construction plugin, a NestJS integration kernel and optional transports. The `./plugin` entry installs the hook and cookie bridge before Better Auth creates its pipeline. The `./platform` entry provides Node/Web request and response helpers. Neither entry requires Express, Fastify, GraphQL or WebSocket packages.
 
@@ -20,15 +28,9 @@ Express preserves native controller parsing for unconditional routes that overla
 
 Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
 
-WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP platform tests do not establish that those integrations are ready.
+GraphQL, WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP platform tests do not establish that those integrations are ready.
 
-The `./graphql` entry provides `apolloTransport()` and `mercuriusTransport()` for native HTTP operations, WebSocket operations and schema-first federation. Operation and field identities stay separate: aliases can share authentication while enforcing different organization permissions. Nested readers inherit their actual ancestor's principal, including across named instances. Credential mapping never replaces the original browser handshake used for origin checks.
-
-For protected field and reference resolvers, set `fieldResolverEnhancers: ["guards", "filters"]` in your Nest GraphQL configuration. Add `"interceptors"` when using scoped service readers in those fields. Without `"filters"`, Nest does not log field errors through its exception pipeline; the library emits `W_FIELD_EXCEPTION_FILTERS_DISABLED`. Repeated infrastructure and reader errors are tested to produce one Nest ERROR per logical request with filters enabled, while every affected field receives a safe error. Application exception filters remain responsible for any custom logging behavior.
-
-Current native tests use Nest 12.0.3, Nest GraphQL 14.0.1, GraphQL 16.14.2 and Apollo subgraph **2.14.4**. Both Apollo and Mercurius are tested with schema-first federation and code-first federation modes 1 and 2. Pin Apollo subgraph to 2.14.4 for this combination: 2.15.0 and 2.15.1 fail inside Nest's schema builder before authentication runs. [#552](https://github.com/thilllon/nestjs-kit/issues/552) records that verified upstream version boundary. Broader version support remains a release gate.
-
-Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The complete implementation is tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534); design approval does not make the proposed API available yet.
+Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The remaining entry points are tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534).
 
 ## Develop in this monorepo
 
@@ -46,9 +48,9 @@ The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Buil
 
 [Contributing](../../CONTRIBUTING.md) explains repository checks and PRs. See [package instructions](AGENTS.md) and [import provenance](docs/provenance.md) before working with the historical material.
 
-## Release readiness
+## Releases
 
-Keep this workspace private until its authentication API, runtime compatibility, security behavior and package contents are reviewed and tested. The first real publication also needs the owner's npm authentication and trusted-publisher setup for `thilllon/nestjs-kit/release.yml`; see [release automation](../../docs/releases.md). Existing integrations continue releasing independently.
+Versions come from Changesets, and publication runs from the monorepo's release workflow with npm trusted publishing and provenance; see [release automation](../../docs/releases.md). New entry points are additive, so they ship as minor versions.
 
 ## License
 
