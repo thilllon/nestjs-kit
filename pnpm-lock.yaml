@@ -452,6 +452,9 @@ importers:
       ioredis:
         specifier: 6.0.0
         version: 6.0.0
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       kafkajs:
         specifier: 2.2.4
         version: 2.2.4
