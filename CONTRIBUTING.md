@@ -79,10 +79,13 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
 - `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
 - `packages/nestjs-strategy`: strategy-pattern registries for Nest providers.
+- `examples/better-auth-*`: private example applications for `nestjs-slightly-better-auth`. Their unit tests boot each application, and releases skip them.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
+
+A workspace package resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The root `devDependencies` therefore include every optional peer of `@nestjs/core` (`@nestjs/microservices`, `@nestjs/platform-express` and `@nestjs/websockets`); pnpm resolves peers from the workspace root, so every project links the same variant. The example tests fail to boot when the variants diverge.
 
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
 
