@@ -85,6 +85,8 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
 
+A workspace package resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The root `devDependencies` therefore include every optional peer of `@nestjs/core` (`@nestjs/microservices`, `@nestjs/platform-express` and `@nestjs/websockets`); pnpm resolves peers from the workspace root, so every project links the same variant. The example tests fail to boot when the variants diverge.
+
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
 
 The authentication workspace additionally puts `module-sync` first in its exports. Supported Node consumers then share one ESM identity for both `import` and `require()`, while the real CJS branch remains available when synchronous ESM loading is disabled. Keep its legacy code outside the active source graph and package archive; historical tests are reference material, not executed coverage.
