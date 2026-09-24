@@ -7,9 +7,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": [
-    "nestjs-sendgrid",
-    "nestjs-sendbird",
-    "nestjs-slightly-better-auth"
-  ]
+  "ignore": ["nestjs-slightly-better-auth"]
 }

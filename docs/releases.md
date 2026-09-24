@@ -33,7 +33,7 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All seven established package identities, including `@nestjs-kit/nodemailer`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
+All nine established package identities, including `nestjs-sendgrid` and `nestjs-sendbird`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
 `nestjs-slightly-better-auth` releases `1.0.0`, which covers the HTTP scope of its reviewed design; its later transports ship as minor versions. It is held below until its owner-authenticated first publication and trusted-publisher setup, like every other package that npm does not have yet. Importing its old repository's release instructions does not transfer npm trust.
 
@@ -47,11 +47,7 @@ A new public package cannot join OIDC publication before it exists on npm. Until
 
 | Package                       | Checked-in placeholder | First release | Tracking                                                  |
 | ----------------------------- | ---------------------- | ------------- | --------------------------------------------------------- |
-| `nestjs-sendbird`             | `0.0.0`                | `1.0.0`       | [#561](https://github.com/thilllon/nestjs-kit/issues/561) |
-| `nestjs-sendgrid`             | `1.0.1`                | `2.0.0`       | [#560](https://github.com/thilllon/nestjs-kit/issues/560) |
 | `nestjs-slightly-better-auth` | `0.0.1`                | `1.0.0`       | [#534](https://github.com/thilllon/nestjs-kit/issues/534) |
-
-npm permanently reserves `nestjs-sendgrid` versions `0.0.1-0`, `0.0.2`, `1.0.0` and `1.0.1`, which a former owner published and unpublished, so its pending major Changeset starts from the `1.0.1` placeholder.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
@@ -61,7 +57,7 @@ To publish a held package:
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
-   PACKAGE=nestjs-sendgrid VERSION=2.0.0 # the package's row in the table above
+   PACKAGE=nestjs-slightly-better-auth VERSION=1.0.0 # the package's row in the table above
    mise install &&
      mise exec -- pnpm install --frozen-lockfile &&
      cd "packages/$PACKAGE" &&
