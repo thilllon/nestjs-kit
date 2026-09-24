@@ -1,3 +1,6 @@
+# npm trusted publishers for every package are registered with this workflow
+# filename. Never rename or move this file: npm rejects OIDC publication from
+# any other workflow file.
 name: Release
 
 on:
