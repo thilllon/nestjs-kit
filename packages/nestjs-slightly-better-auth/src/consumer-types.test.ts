@@ -73,7 +73,9 @@ async function diagnostics(source: string): Promise<string> {
     return result.stdout + result.stderr;
   } catch (error) {
     if (error instanceof Error && "stdout" in error) {
-      return String(error.stdout);
+      // A crashed compiler may write only to stderr; never report it as a clean check.
+      const output = `${String(error.stdout)}${"stderr" in error ? String(error.stderr) : ""}`;
+      return output || `tsc failed without diagnostics: ${error.message}`;
     }
     throw error;
   } finally {
