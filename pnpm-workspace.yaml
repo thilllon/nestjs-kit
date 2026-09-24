@@ -4,6 +4,7 @@ packages:
 allowBuilds:
   "@swc/core": true
   esbuild: true
+  protobufjs: false
 minimumReleaseAgeExclude:
   - "@aws-sdk/client-s3@3.1135.0"
   - prettier@3.9.8
