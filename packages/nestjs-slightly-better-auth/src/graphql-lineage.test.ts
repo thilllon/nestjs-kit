@@ -410,12 +410,23 @@ describe("GraphQL malformed credential conversion", () => {
     expect([...headers]).toEqual([["host", "localhost:3000"]]);
   });
   it("sanitizes invalid selected header names and ignores unselected values", () => {
-    expect(() =>
+    let failure: unknown;
+    try {
       socketHeaders(
         { connectionParamHeaders: ["invalid header"] },
         { "invalid header": "secret" },
-      )(),
-    ).toThrow();
+      )();
+    } catch (error) {
+      failure = error;
+    }
+    expect(isAuthFailure(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      status: 401,
+      code: "UNAUTHENTICATED",
+      reason: "MALFORMED_CREDENTIALS",
+    });
+    expect(failure).not.toHaveProperty("cause");
+    expect(JSON.stringify(failure)).not.toContain("secret");
     expect(
       socketHeaders({}, { unselected: "secret\r\n" })().get("cookie"),
     ).toBe("valid=fallback");
