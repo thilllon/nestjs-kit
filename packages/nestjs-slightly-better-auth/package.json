@@ -1,7 +1,7 @@
 {
   "name": "nestjs-slightly-better-auth",
   "version": "1.0.0",
-  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, admin, organization and API-key authorization",
+  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, Socket.IO and ws gateways, admin, organization and API-key authorization",
   "license": "MIT",
   "author": "thilllon",
   "type": "module",
