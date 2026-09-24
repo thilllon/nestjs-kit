@@ -334,7 +334,14 @@ describe.each([
               client,
               "{ a: who b: who c: optionalWho d: optionalWho }",
             );
-            expect(inspect([result, f.errors])).not.toContain(marker);
+            // Unbounded inspection reaches nested GraphQL error messages and extensions.
+            expect(
+              inspect([result, f.errors], {
+                depth: Infinity,
+                maxArrayLength: Infinity,
+                maxStringLength: Infinity,
+              }),
+            ).not.toContain(marker);
             expect(result.errors).toHaveLength(4);
             for (const error of result.errors ?? []) {
               expect(error.extensions).toMatchObject({
