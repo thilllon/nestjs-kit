@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), built on an independently reviewed specification.
 
-> **Scope.** The package covers HTTP, WebSocket and RPC authentication. HTTP support comprises the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, and the admin, organization and API-key authorization units. The `./websockets` entry authenticates Socket.IO and raw `ws` gateways, and the `./microservices` entry authenticates Nest microservice messages. The GraphQL transport and the conformance testing kit are not included; they arrive in later minor versions behind their own entry points. The [changelog](CHANGELOG.md) records the version that introduces each entry point.
+> **Scope.** The package covers HTTP, WebSocket and RPC authentication. HTTP support comprises the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, and the admin, organization and API-key authorization units. The `./websockets` entry authenticates Socket.IO and raw `ws` gateways, and the `./microservices` entry authenticates Nest microservice messages. The `./testing` entry provides consumer testing helpers and `./testing/conformance` reusable conformance kits. The GraphQL transport is not included; it arrives in a later minor version behind its own entry point. The [changelog](CHANGELOG.md) records the version that introduces each entry point.
 
 ## Install
 
@@ -14,7 +14,7 @@ A NestJS integration for [Better Auth](https://www.better-auth.com), built on an
 pnpm add nestjs-slightly-better-auth better-auth
 ```
 
-Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer.
+Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer. The `./testing` and `./testing/conformance` entries also need the optional peer `@nestjs/testing` 12; the root entry never loads it or a test runner.
 
 The `./websockets` entry also needs the optional peer `@nestjs/websockets` 12 and the Nest adapter for your socket library:
 
@@ -175,6 +175,113 @@ Configure a static Better Auth base URL, or a fallback for a dynamic one: RPC tr
 In a hybrid application, Nest applies global guards to microservice handlers only when `connectMicroservice()` receives `{ inheritAppConfig: true }`. Either pass that option to every `connectMicroservice()` call and pass `rpcTransport({ inheritAppConfig: true })`, or apply `@UseBetterAuth()` to message controllers and `@Public()` to public handlers. Startup verifies the explicit form and fails with `RPC_HANDLER_UNGUARDED` for an uncovered message or event handler; `hybridCoverage: "warn"` or `"off"` lowers that check. The inheritance option is an assertion that the application passes the same flag to Nest, and startup logs the `W_RPC_INHERIT_APP_CONFIG_ASSERTED` warning for it.
 
 Failures become `RpcException` payloads with `statusCode`, `code` and, where present, `reason`. gRPC calls receive native status codes: 16 for authentication, 7 for authorization, 8 for throttling and 13 for redacted infrastructure failures. End-to-end tests run real TCP and gRPC servers and real NATS, Kafka, RabbitMQ, MQTT 5 and Redis brokers against Nest 12.0.3, including hybrid applications with both coverage modes and default plus named instances.
+
+## Testing helpers (`./testing`)
+
+The helpers replace one collaborator at a time in a `TestingModuleBuilder`, so the rest of the pipeline stays real.
+
+```ts
+import { Test } from "@nestjs/testing";
+import { allow } from "nestjs-slightly-better-auth";
+import {
+  initTestApp,
+  overrideAuthGuard,
+  overrideDecisions,
+  overridePrincipal,
+  stampPrincipal,
+} from "nestjs-slightly-better-auth/testing";
+
+// Fixed principal: acceptance, the origin check and policies still run; Better Auth is not called for resolution.
+const builder = overridePrincipal(
+  Test.createTestingModule({ imports: [AppModule] }),
+  {
+    kind: "session",
+    source: "better-auth:session",
+    userId: "u1",
+    session,
+  },
+);
+
+// Stub a policy decision; returning undefined runs the real policy.
+overrideDecisions(
+  builder,
+  (policyId) =>
+    policyId === "better-auth:organization/permission" ? allow() : undefined, // gitleaks:allow: public policy identifier
+);
+
+// Replace the guard everywhere: the global APP_GUARD and every @UseBetterAuth()/@UseGuards(BetterAuthGuard) site.
+overrideAuthGuard(builder, {
+  canActivate(ctx) {
+    stampPrincipal(ctx, testUser); // publishes the principal to @CurrentPrincipal(), @CurrentSession() and the service
+    return true;
+  },
+});
+
+// Inside a Vitest test or beforeEach: onTestFinished closes this app when the test ends (node:test: t.after).
+const app = await initTestApp(
+  (await builder.compile()).createNestApplication(),
+  { closeWith: onTestFinished },
+);
+```
+
+- `overridePrincipal(builder, principal, { instance })` overrides `PRINCIPAL_RESOLVER` for one instance (default `'default'`). A policy's re-classification read of a generic 401 answers absent, so organization policies deny 401 under a fixed principal; stub them with `overrideDecisions` or use real sessions from `authHeadersFor`. The admin policy judges the stored user row of the fixed `userId`.
+- `overrideAuthGuard(builder, guard | { principal })` overrides `GUARD_CORE` and `SCOPE_CORE` once each. `overrideProvider(BetterAuthGuard)` and `overrideGuard(BetterAuthGuard)` cannot be combined: `TestingModuleBuilder` keeps one override per token, so one set of call sites would keep the real guard. An object with a `canActivate` method always runs as the guard, even when it also has a `principal` property. The stand-in scope reads the test stamp first; `{ principal }` stamps for the handler's instance, including named instances.
+- `stampPrincipal(ctx, principal, { instance })` records the principal on the invocation's argument array and its object elements. Readers accept it from the same array (WebSocket, RPC and GraphQL guards and interceptors share it) or from another array with the same elements when at least two elements are objects (an HTTP request and its response). A lone shared element, such as a socket beside a primitive payload, never identifies an invocation, so concurrent invocations do not see each other's stamps. A stand-in that stamps nothing makes principal readers fail with the generic `NO_AUTH_RESULT` error.
+- `testPrincipal(principal | (request) => principal | null, { kinds, acceptance, delegates })` is a principal source for composed test modules.
+- `authHeadersFor(auth, userId)` creates real session headers through Better Auth's `testUtils()` plugin.
+- `initTestApp(app, { closeWith })` runs `init()` and Fastify `ready()`. A Better Auth instance binds to one application at a time (a second bound application fails with `INSTANCE_ALREADY_BOUND`), so the helper first closes the previous application that it initialized for the same instance; a failed `init()` leaves its binding to the next application, which takes it over with `W_INSTANCE_TAKEN_OVER`. The helper makes `app.close()` idempotent and passes it to `closeWith`, a per-test cleanup such as Vitest's `onTestFinished` or node:test's `t.after`. Jest cannot register hooks while a test runs, so collect the closes and run them in a suite-level `afterEach`. Without `closeWith`, close the last application yourself. On Express, compile one `TestingModule` per application.
+
+Better Auth treats a process with `NODE_ENV=test` or a truthy `TEST` variable (Vitest sets it; Jest sets `NODE_ENV=test`) as a test run and then skips its origin checks, and this library's origin check follows the same flags. Set `advanced.disableOriginCheck: false` on test instances that exercise origin rules.
+
+## Conformance kits (`./testing/conformance`)
+
+The kits verify extension units against the invariants of the [reviewed specification](docs/design/design-v7.md) (§4 and §14.1). Each kit returns `ConformanceCase[]` (`{ id, title, skip?, run() }`) that `runConformance(cases, { describe, it })` registers with Vitest, Jest or `node:test`. Assertions use `node:assert/strict`; the kits import no test runner.
+
+Applicability comes from the unit, not from the options a harness passes. A platform that declares `capabilities.http2` needs the `http2` option. A transport with a lineage needs `invokeTwice`, one that nests handlers (`defaultAccessFor`) needs `invokeGraph`, and one that claims the kit's federation reference resolver needs `invokeEntities`. Such a case fails when the helper is missing. A case whose optional capability is absent is skipped with the reason. The kits read these members from unit objects before running; for classes and `defineExtension()` definitions they boot once and read the resolved unit. A case known to be inapplicable registers with its reason in the test name. A case that finds out at run time resolves with `{ skipped: reason }`, which `runConformance` reports through the runner's `context.skip(reason)` (Vitest, `node:test`; Jest has no runtime skip, so the test passes).
+
+```ts
+import { ExpressAdapter } from "@nestjs/platform-express";
+import { describe, it } from "vitest";
+import {
+  createConformanceAuth,
+  httpPlatformConformance,
+  policyConformance,
+  principalSourceConformance,
+  runConformance,
+} from "nestjs-slightly-better-auth/testing/conformance";
+
+runConformance(
+  httpPlatformConformance({
+    platform: myPlatform(),
+    createHttpAdapter: () => new ExpressAdapter(),
+  }),
+  { describe, it },
+);
+
+const auth = createConformanceAuth({ plugins: [myPlugin()] });
+runConformance(
+  principalSourceConformance({
+    source: myTokenSource(),
+    auth,
+    credentials: {
+      valid: issueToken,
+      invalid: () => new Headers({ authorization: "Bearer invalid" }),
+    },
+  }),
+  { describe, it },
+);
+```
+
+| Kit                          | Unit                  | Covers                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `httpPlatformConformance`    | `HttpPlatform`        | Mounting, byte-exact bodies, limits with host CORS, URL and header facts, client IP, HTTP/2, write-back, request accessors, error delivery, lifecycle (no adapter, late adapter, reused `TestingModule`, double `forRoot`), diagnostics and log hygiene                                                                                                                                |
+| `transportConformance`       | `AuthTransport`       | Selection, credentials, per-request memoization, per-invocation decisions, acceptance, cookie forwarding or refresh suppression, origin and form-CSRF rules including forwarding on safe operations, error shapes and logging, the exact coverage report of the transport's claims, `globalScope: false`, mixed-kind session reads, lazy scope construction and fail-closed extraction |
+| `principalSourceConformance` | `PrincipalSource`     | Rejection without throwing, storage outages, delivery of every own-credential `Set-Cookie` exactly once, refresh suppression, clean absence, principal shape, declared credential headers, `sessionBacked` and `delegates` declarations                                                                                                                                                |
+| `policyConformance`          | `AuthorizationPolicy` | Deny values, storage outages, APIError mapping and re-classification, delegation scope, unnamed-kind gating, per-invocation decisions with shared I/O and plugin prerequisites; requirements name policy objects (construct a DI policy with its dependencies)                                                                                                                         |
+
+Every case boots real Nest applications or modules with a real Better Auth instance that includes `conformanceProbePlugin()`. The probe counts and faults every operation of the instance's database adapter, so storage outages reach endpoints that would swallow them, and records the `Set-Cookie` lines each call produces. `createConformanceAuth({ plugins })` builds such an instance: memory adapter, `testUtils()`, `bearer()`, the probe plugin, `nestjs()` last, and `session.updateAge: 0` and origin checks on, whatever `options` says. The principal-source and policy kits take that instance as `auth`; the principal-source kit rejects an instance without `session.updateAge: 0`. The transport kit creates its own instance and passes it to your `createApp` harness together with the kit's API-key source in `principals`, a `logger` to boot with, and the `globalScope`, `appEnhancers`, `fieldResolverEnhancers` and `federation` settings of each boot. Apply every fixture decorator, including the kit's `SetMetadata()` marker, which maps the transport's claims to fixtures.
+
+This repository runs the platform kit against Express and Fastify, the transport kit against the built-in HTTP transport and an in-process reference transport, the principal-source kit against the session and API-key sources, and the policy kit against the admin, organization, API-key and fresh-session policies. Mutation tests confirm that each of these defects fails the intended case: a platform merging `Set-Cookie`, a transport sharing invocation state across aliases, a transport without a browser leg on safe operations, a `defineExtension()` transport with a lineage or nesting and no helper, a source throwing its denial, a source dropping its refresh cookie, a source turning a storage outage into a 401, and a policy widening delegated principals.
 
 ## Develop in this monorepo
 
