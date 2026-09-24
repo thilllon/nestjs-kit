@@ -2,6 +2,7 @@ packages:
   - "packages/*"
   - "examples/*"
 allowBuilds:
+  "@apollo/protobufjs": false
   "@swc/core": true
   esbuild: true
   protobufjs: false

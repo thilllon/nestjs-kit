@@ -94,13 +94,13 @@ async function fixture(syntheticSessions = false) {
       nestjs(),
     ],
   });
-  const moduleOptions = { principals: [apiKeyPrincipal()], logSummary: false };
   const http = await startHttpFixture({
     auth,
     adapter: new ExpressAdapter(),
     platform: expressPlatform(),
     controllers: [AuthorizedController],
-    moduleOptions,
+    principals: [apiKeyPrincipal()],
+    moduleOptions: { logSummary: false },
   });
   try {
     const signup = await auth.api.signUpEmail({
