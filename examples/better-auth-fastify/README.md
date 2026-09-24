@@ -21,11 +21,11 @@ mise exec -- pnpm --filter better-auth-fastify-example start
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. The application listens on port 3000 of `localhost`, the Fastify default; pass a host such as `0.0.0.0` to `app.listen()` in `src/main.ts` to accept external connections.
 
-| Variable             | Default                 | Purpose                                                                         |
-| -------------------- | ----------------------- | ------------------------------------------------------------------------------- |
-| `PORT`               | `3000`                  | HTTP port.                                                                      |
-| `BETTER_AUTH_URL`    | `http://localhost:3000` | Better Auth base URL; its origin is trusted for cookie-authenticated requests.  |
-| `BETTER_AUTH_SECRET` | random per process      | Secret that signs cookies and tokens. Set it to keep sessions valid on restart. |
+| Variable             | Default                 | Purpose                                                                                                              |
+| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `PORT`               | `3000`                  | HTTP port.                                                                                                           |
+| `BETTER_AUTH_URL`    | `http://localhost:3000` | Better Auth base URL; its origin is trusted for cookie-authenticated requests.                                       |
+| `BETTER_AUTH_SECRET` | random per process      | Secret that signs cookies and tokens. Sessions survive a restart only with a fixed secret and a persistent database. |
 
 ## Try it
 

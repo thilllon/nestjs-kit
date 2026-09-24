@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./create-app.js";
 
 const origin = "http://localhost:3000";
-let app: INestApplication;
+let app: INestApplication | undefined;
 let url: string;
 
 async function signUp(basePath: string, email: string): Promise<Response> {
@@ -40,7 +40,7 @@ describe("Express example", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   it("authenticates default and named instances independently", async () => {
