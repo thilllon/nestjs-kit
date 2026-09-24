@@ -12,7 +12,7 @@ Install it in your NestJS application:
 pnpm add nestjs-pubnub pubnub
 ```
 
-Requires Node.js 24 or newer and NestJS 12. Both ESM and CommonJS are supported.
+Requires Node.js 24 or newer, NestJS 12 and PubNub 13.0.3 or a later 13.x release. Both ESM and CommonJS are supported, including strict consumers that set `skipLibCheck: false`.
 
 ## Register
 
