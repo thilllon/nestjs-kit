@@ -433,15 +433,19 @@ async function securityFixture(
         return { response, body: await response.json() };
       },
       /** Sends headers fetch forbids, such as Upgrade, over a plain HTTP/1.1 POST. */
-      rawQuery(query: string, headers: Record<string, string>) {
-        const payload = JSON.stringify({ query });
+      rawQuery(
+        query: string,
+        headers: Record<string, string>,
+        extra: { body?: Record<string, unknown>; search?: string } = {},
+      ) {
+        const payload = JSON.stringify({ ...extra.body, query });
         return new Promise<{
           status: number;
           setCookie: string[];
           body: { data?: Record<string, unknown>; errors?: unknown[] };
         }>((resolve, reject) => {
           const request = httpRequest(
-            `${f.url}/graphql`,
+            `${f.url}/graphql${extra.search ?? ""}`,
             {
               method: "POST",
               headers: {
@@ -772,6 +776,45 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
     });
   },
 );
+
+describe("native mercurius GraphQL request classification", () => {
+  it.each([
+    {
+      name: "body",
+      context: (request: { body: unknown }) => ({
+        ...(request.body as object),
+      }),
+      extra: { body: { _connectionInit: {} } },
+    },
+    {
+      name: "query",
+      context: (request: { query: unknown }) => ({
+        ...(request.query as object),
+      }),
+      extra: { search: "?_connectionInit=1" },
+    },
+  ])(
+    "keeps the HTTP path when a $name-spread context carries _connectionInit",
+    async ({ context, extra }) => {
+      const f = await securityFixture("mercurius", { context });
+      try {
+        const response = await f.rawQuery(
+          "{ guarded }",
+          { cookie: f.cookie, origin: "http://localhost:3000" },
+          extra,
+        );
+        expect(response.body, JSON.stringify(response.body)).toEqual({
+          data: { guarded: "guarded" },
+        });
+        expect(response.setCookie.length).toBeGreaterThan(0);
+        expect(f.sessionIps).toHaveLength(1);
+        expect(f.sessionIps[0]).toMatch(/^(::ffff:)?127\.0\.0\.1$|^::1$/);
+      } finally {
+        await f.close();
+      }
+    },
+  );
+});
 
 describe.each(["apollo", "apollo-fastify"] as const)(
   "native %s GraphQL request classification",

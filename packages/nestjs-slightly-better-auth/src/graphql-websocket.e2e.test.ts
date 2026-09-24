@@ -143,6 +143,7 @@ async function fixture(
   };
   let reads = 0;
   let sessionCalls = 0;
+  let hold: { started: () => void; released: Promise<void> } | undefined;
   const memory = memoryAdapter(database);
   const auth = betterAuth({
     secret: crypto.randomUUID() + crypto.randomUUID(),
@@ -171,6 +172,12 @@ async function fixture(
         findOne: async (input: Parameters<typeof adapter.findOne>[0]) => {
           if (input.model === "session") {
             reads++;
+            const current = hold;
+            if (current) {
+              hold = undefined;
+              current.started();
+              await current.released;
+            }
           }
           return adapter.findOne(input);
         },
@@ -266,6 +273,19 @@ async function fixture(
       bearer: `Bearer ${signup.response.token}`,
       errors,
       calls: () => module.get(SocketResolver).calls,
+      /** Holds the next session read until release() is called. */
+      holdSessionRead() {
+        let started = () => {};
+        let release = () => {};
+        const reached = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        const released = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        hold = { started, released };
+        return { reached, release };
+      },
       database,
       oldUpdatedAt,
       reads: () => reads,
@@ -385,6 +405,35 @@ describe.each([
       );
     },
   );
+  it("keeps a disconnect during authentication a socket outcome without an ERROR log", async () => {
+    const f = await fixture(mode);
+    try {
+      const held = f.holdSessionRead();
+      const client = f.client({
+        cookie: f.cookie,
+        origin: "http://localhost:3000",
+      });
+      void execute(client, "{ who }").catch(() => undefined);
+      await held.reached;
+      await client.dispose();
+      // Let the server observe the close before the session read completes.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      held.release();
+      const deadline = Date.now() + 3000;
+      while (
+        f.calls() === 0 &&
+        f.errors.length === 0 &&
+        Date.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(inspect(f.errors)).not.toContain("misconfigured");
+      expect(f.errors).toEqual([]);
+      expect(f.calls()).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });
   it("authenticates queries, mutations and subscriptions independently and never refreshes", async () => {
     const f = await fixture(mode);
     try {

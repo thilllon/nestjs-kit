@@ -10,7 +10,7 @@ function info(operation: object, keys: readonly (string | number)[]) {
   }
   return { operation, path };
 }
-/** The graphql-ws `extra.socket` shape: an open WebSocket. */
+/** The graphql-ws `extra.socket` shape: a WebSocket, open unless stated otherwise. */
 function openSocket(readyState = 1) {
   return { readyState, send() {}, close() {} };
 }
@@ -70,7 +70,11 @@ import type {
   HttpRequestAccessor,
   PrincipalReading,
 } from "./auth-contracts.js";
-import { apolloTransport, type GraphqlTransportOptions } from "./graphql.js";
+import {
+  apolloTransport,
+  mercuriusTransport,
+  type GraphqlTransportOptions,
+} from "./graphql.js";
 import { isAuthFailure } from "./auth-errors.js";
 import { PrincipalReadings } from "./principal-readings.js";
 import { RequestScope } from "./request-scope.js";
@@ -509,10 +513,14 @@ function httpCarrier(platform: "express" | "fastify") {
     originalUrl: "/graphql",
     ip: "203.0.113.7",
   };
+  // Like Fastify, the reply refers back to its request.
+  Object.assign(reply, { request: req });
   onRequest?.(req, reply, () => {});
   return {
     http: fastify.requests,
     carrier: { req },
+    req,
+    reply,
     key: raw,
     written,
     state,
@@ -569,11 +577,14 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         url: "/graphql",
       };
       const extra = { socket: openSocket(), request };
+      // A connection that closes during authentication remains a socket operation.
+      const closed = { socket: openSocket(3), request };
       for (const carrier of [
         // Nest's default context: the graphql-ws Context at context.req.
         { req: { connectionParams: {}, extra } },
         // A custom context keeping graphql-ws extra beside its own req.
         { req: request, extra, connectionParams: {} },
+        { req: { connectionParams: {}, extra: closed } },
       ]) {
         const call = (apolloTransport() as AuthTransport).describe(
           graphqlContext(carrier),
@@ -600,7 +611,7 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         { extra: { request } },
         { req: { connectionParams: {}, extra: { request } } },
         { req: request, extra: { socket: {}, request } },
-        { req: request, extra: { socket: openSocket(3), request } },
+        { req: request, extra: { socket: { send: "", close: "" }, request } },
       ]) {
         const call = (apolloTransport() as AuthTransport).describe(
           graphqlContext(carrier),
@@ -617,4 +628,34 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
       }
     },
   );
+});
+
+describe("Mercurius HTTP classification with client-spread fields", () => {
+  it("keeps the route's Fastify reply on the platform path despite _connectionInit in the context root", () => {
+    const f = httpCarrier("fastify");
+    for (const carrier of [
+      { reply: f.reply, _connectionInit: {} },
+      { reply: f.reply, _connectionInit: {}, request: { headers: {} } },
+    ]) {
+      const call = (mercuriusTransport() as AuthTransport).describe(
+        graphqlContext(carrier),
+        { http: f.http },
+      );
+      expect(call.connection).toBeUndefined();
+      expect(call.key).toBe(f.key);
+      expect(call.clientIp).toBe("203.0.113.7");
+      expect(call.cookies?.append(["refreshed=1"])).toBe(true);
+    }
+  });
+  it("keeps a subscription context whose plain reply wraps the recognized upgrade request on the socket path", () => {
+    const f = httpCarrier("fastify");
+    const carrier = { reply: { request: f.req }, _connectionInit: {} };
+    const call = (mercuriusTransport() as AuthTransport).describe(
+      graphqlContext(carrier),
+      { http: f.http },
+    );
+    expect(call.connection).toBe(f.req);
+    expect(call.clientIp).toBeNull();
+    expect(call.cookies).toBeNull();
+  });
 });

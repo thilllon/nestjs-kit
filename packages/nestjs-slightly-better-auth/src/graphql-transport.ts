@@ -136,19 +136,19 @@ function upgrade(value: unknown): Upgrade | undefined {
     ? (candidate as unknown as Upgrade)
     : undefined;
 }
-const WEBSOCKET_OPEN = 1;
 /**
- * The upgrade request of a graphql-ws `extra` ({ socket, request }) whose socket is an open
- * WebSocket. Only the graphql-ws server creates that pair; request headers cannot, so a
- * client-sent Upgrade header never selects the socket path.
+ * The upgrade request of a graphql-ws `extra` ({ socket, request }) whose socket is a
+ * WebSocket. Only the graphql-ws server creates that pair; parsed request data cannot carry
+ * functions, so a client-sent header or field never selects the socket path. The socket's
+ * state is deliberately ignored: a connection closing during authentication stays a socket
+ * operation instead of turning into an unrecognized context.
  */
 function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
   const extra = record(value);
   const socket = record(extra?.socket);
   return socket &&
     typeof socket.send === "function" &&
-    typeof socket.close === "function" &&
-    socket.readyState === WEBSOCKET_OPEN
+    typeof socket.close === "function"
     ? upgrade(extra?.request)
     : undefined;
 }
@@ -172,6 +172,18 @@ function ambientHeaders(request: unknown): Headers {
   }
   return toWebHeaders((value?.headers ?? {}) as IncomingHttpHeaders);
 }
+/**
+ * Mercurius assigns the route's Fastify reply to context.reply for HTTP operations. Its
+ * subscription contexts carry the platform-recognized upgrade request inside a plain reply
+ * object instead, so the reply's identity, not the request alone, marks an HTTP operation.
+ */
+function platformReply(http: TransportKit["http"], value: unknown): boolean {
+  const request = record(value)?.request;
+  if (http?.isRequest(request) !== true) {
+    return false;
+  }
+  return http.responseFor ? http.responseFor(request) === value : true;
+}
 function carrierDetails(
   context: unknown,
   driver: "apollo" | "mercurius",
@@ -180,10 +192,13 @@ function carrierDetails(
   const carrier = record(context) ?? {};
   const req = record(carrier.req);
   const extra = record(carrier.extra);
-  // A positive platform answer keeps the HTTP path and its liveness check.
+  // A positive platform answer keeps the HTTP path and its liveness check, before any socket
+  // heuristic: a custom context can spread client data such as _connectionInit into its root.
   const httpRequest =
-    driver === "apollo" &&
-    (http?.isRequest(req) === true || http?.isRequest(extra?.request) === true);
+    driver === "apollo"
+      ? http?.isRequest(req) === true ||
+        http?.isRequest(extra?.request) === true
+      : platformReply(http, carrier.reply);
   // Nest assigns the graphql-ws Context to context.req unless a custom context sets req.
   const wsContext =
     driver === "apollo" &&
@@ -193,13 +208,10 @@ function carrierDetails(
     graphqlWsUpgrade(req.extra)
       ? req
       : undefined;
-  const socket =
-    driver === "apollo"
-      ? httpRequest
-        ? undefined
-        : wsContext
-          ? graphqlWsUpgrade(wsContext.extra)
-          : graphqlWsUpgrade(extra)
+  const socket = httpRequest
+    ? undefined
+    : driver === "apollo"
+      ? graphqlWsUpgrade(wsContext ? wsContext.extra : extra)
       : (upgrade(carrier[MERCURIUS_UPGRADE]) ??
         ("_connectionInit" in carrier
           ? (upgrade(carrier.request) ??
