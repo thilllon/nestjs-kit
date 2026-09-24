@@ -33,9 +33,9 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All nine established package identities, including `nestjs-sendgrid` and `nestjs-sendbird`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
+All ten established package identities, including `nestjs-slightly-better-auth`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
-`nestjs-slightly-better-auth` releases `1.0.0`, which covers the HTTP scope of its reviewed design; its later transports ship as minor versions. It is held below until its owner-authenticated first publication and trusted-publisher setup, like every other package that npm does not have yet. Importing its old repository's release instructions does not transfer npm trust.
+`nestjs-slightly-better-auth` published `1.0.0` on September 24, 2026, covering the HTTP scope of its reviewed design; its later transports ship as minor versions. Importing its old repository's release instructions does not transfer npm trust.
 
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
@@ -45,9 +45,7 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-| Package                       | Checked-in placeholder | First release | Tracking                                                  |
-| ----------------------------- | ---------------------- | ------------- | --------------------------------------------------------- |
-| `nestjs-slightly-better-auth` | `0.0.1`                | `1.0.0`       | [#534](https://github.com/thilllon/nestjs-kit/issues/534) |
+No package is held today. List one here while it waits, with its checked-in placeholder version, its intended first release and its tracking issue.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
@@ -57,7 +55,7 @@ To publish a held package:
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
-   PACKAGE=nestjs-slightly-better-auth VERSION=1.0.0 # the package's row in the table above
+   PACKAGE=<package> VERSION=<first release> # the held package and the version it publishes
    mise install &&
      mise exec -- pnpm install --frozen-lockfile &&
      cd "packages/$PACKAGE" &&
@@ -76,7 +74,7 @@ To publish a held package:
    ```
 
 3. Configure its trusted publisher with the settings above and confirm the registry with `npm view "$PACKAGE@$VERSION" version`.
-4. Right away, open a checked PR that removes the package from `ignore`, from the table above, and from the first-release markers in the root README and CONTRIBUTING. The next Release run versions its pending Changesets to the already-published version; `changeset publish` skips it because npm has it, and `changeset git-tag` adds its tag. Merge no changes to the package between steps 2 and 4: their Changesets would be folded into the already-published version and never released.
+4. Right away, open a checked PR that removes the package from `ignore`, from the held list above, and from the first-release markers in the root README and CONTRIBUTING. The next Release run versions its pending Changesets to the already-published version; `changeset publish` skips it because npm has it, and `changeset git-tag` adds its tag. Merge no changes to the package between steps 2 and 4: their Changesets would be folded into the already-published version and never released.
 
 In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After trusted publishers are configured for every package participating in publication, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 

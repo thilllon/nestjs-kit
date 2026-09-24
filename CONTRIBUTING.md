@@ -66,7 +66,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
-- `packages/nestjs-slightly-better-auth`: private authentication design workspace, research and historical adapter reference; not a working authentication library yet.
+- `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
