@@ -167,16 +167,17 @@ BetterAuthModule.forRootAsync({ name: "custom", useFactory: async () => ({ auth:
 import { betterAuth } from "better-auth";
 import { BetterAuthModule } from "nestjs-slightly-better-auth";
 import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import { rpcTransport } from "nestjs-slightly-better-auth/microservices";
 
 const auth = betterAuth({});
-BetterAuthModule.forRootAsync({ platforms: [expressPlatform()], transports: [], principals: [], globalScope: true, useFactory: async () => ({ auth, http: { mount: false } }) });
+BetterAuthModule.forRootAsync({ platforms: [expressPlatform()], transports: [rpcTransport()], principals: [], globalScope: true, useFactory: async () => ({ auth, http: { mount: false } }) });
 BetterAuthModule.forRootAsync({ name: "worker", isGlobal: false, globalGuard: false, useFactory: () => ({ auth }) });
 // @ts-expect-error The registration alias is static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, name: "worker" }) });
 // @ts-expect-error App platforms are static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, platforms: [expressPlatform()] }) });
 // @ts-expect-error App transports are static.
-BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, transports: [] }) });
+BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, transports: [rpcTransport()] }) });
 // @ts-expect-error Principal sources define providers and are static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, principals: [] }) });
 // @ts-expect-error Enhancer registration is static.
@@ -184,7 +185,7 @@ BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, globalScope: false })
 // @ts-expect-error Named registrations cannot own app platforms.
 BetterAuthModule.forRootAsync({ name: "worker", platforms: [expressPlatform()], useFactory: () => ({ auth }) });
 // @ts-expect-error Named registrations cannot own app transports.
-BetterAuthModule.forRoot({ name: "worker", auth, transports: [] });
+BetterAuthModule.forRoot({ name: "worker", auth, transports: [rpcTransport()] });
 `;
     expect(await diagnostics(source)).toBe("");
     expect(

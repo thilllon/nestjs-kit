@@ -61,6 +61,7 @@ const units: Readonly<Record<string, readonly string[]>> = {
   http: ["http-transport.ts"],
   express: ["express-platform.ts", "express.ts"],
   fastify: ["fastify-platform.ts", "fastify.ts"],
+  rpc: ["microservices.ts", "rpc-carriers.ts", "rpc-transport.ts"],
   admin: ["admin.ts"],
   organization: ["organization.ts"],
   "api-key": ["api-key.ts"],
@@ -154,6 +155,11 @@ const entryPolicies: Readonly<
     specifiers: requiredPeers,
     nodeBuiltins: true,
     units: ["fastify"],
+  },
+  "./microservices": {
+    specifiers: [...requiredPeers, "@nestjs/microservices"],
+    nodeBuiltins: true,
+    units: ["rpc"],
   },
   "./admin": {
     specifiers: requiredPeers,
