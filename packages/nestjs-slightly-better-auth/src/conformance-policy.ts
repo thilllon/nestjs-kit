@@ -289,7 +289,8 @@ export function policyConformance(
     skip?: string,
   ) => conformanceCase(id, title, () => withHarness(options, run), skip);
   const known = staticPolicies(options.requirement);
-  const kindsNamed = requirementsOf(options.requirement).every(
+  // Z5 is about leaves that name no kinds; a leaf that names the delegated kind may allow it, so any naming leaf skips.
+  const kindsNamed = requirementsOf(options.requirement).some(
     (item, index) =>
       item.principals !== undefined ||
       known[index]?.requires?.principals !== undefined,
@@ -507,13 +508,16 @@ export function policyConformance(
               delegation: { description: "conformance", allows: () => true },
             } as AuthPrincipal);
         const decision = await decide(principal);
-        assert.deepEqual(decision, {
-          effect: "deny",
-          reason: "PRINCIPAL_NOT_SUPPORTED",
-        });
+        // anyOf denials add a status and a joined message; the effect and reason are the invariant.
+        assert.equal(decision.effect, "deny", JSON.stringify(decision));
+        assert.equal(
+          (decision as { reason?: string }).reason,
+          "PRINCIPAL_NOT_SUPPORTED",
+          JSON.stringify(decision),
+        );
       },
       kindsNamed
-        ? "the requirement names the principal kinds it judges"
+        ? "a requirement leaf names the principal kinds it judges"
         : undefined,
     ),
     add(

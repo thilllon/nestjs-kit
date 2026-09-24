@@ -467,14 +467,7 @@ async function bootHttp(
       await options.trustOneProxy(app);
     }
     await app.init();
-    let url: string;
-    if (options.listen) {
-      url = await options.listen(app);
-    } else {
-      await app.listen(0, "127.0.0.1");
-      url = await app.getUrl();
-    }
-    url = url.replace("[::1]", "127.0.0.1").replace(/\/$/, "");
+    const url = await baseUrl(options, app);
     return {
       app,
       url,
@@ -491,6 +484,21 @@ async function bootHttp(
     await app.close().catch(() => undefined);
     throw error;
   }
+}
+
+/** The base URL of an initialized app: the `listen` option, or listen(0) and getUrl(), normalized. */
+async function baseUrl(
+  options: HttpConformanceOptions,
+  app: INestApplication,
+): Promise<string> {
+  let url: string;
+  if (options.listen) {
+    url = await options.listen(app);
+  } else {
+    await app.listen(0, "127.0.0.1");
+    url = await app.getUrl();
+  }
+  return url.replace("[::1]", "127.0.0.1").replace(/\/$/, "");
 }
 
 async function withBoot(
@@ -1577,8 +1585,7 @@ export function httpPlatformConformance(
           true,
           `prepareAtInit platform failed: ${String(!result.ok && result.error)}`,
         );
-        await second.listen(0, "127.0.0.1");
-        const url = (await second.getUrl()).replace("[::1]", "127.0.0.1");
+        const url = await baseUrl(o, second);
         const before = hooks.length;
         const response = await sendRaw(`${url}${AUTH}/probe/html`);
         assert.equal(response.status, 200);

@@ -124,8 +124,9 @@ function registryOf(app: INestApplication): InstanceRegistry | undefined {
  * init() plus Fastify ready() when the adapter exposes it. Before init, closes the previous application that
  * initTestApp initialized for the same Better Auth instance and that is still bound to it: an instance binds
  * exclusively to one application (B06). A failed init() leaves its binding for the next application, which takes it
- * over with W_INSTANCE_TAKEN_OVER. app.close() becomes idempotent, and `closeWith` (for example afterEach) receives it;
- * without `closeWith`, close the last application yourself. On Express, compile one TestingModule per application: a
+ * over with W_INSTANCE_TAKEN_OVER. app.close() becomes idempotent, and `closeWith` receives it: a per-test cleanup such as
+ * Vitest's onTestFinished or node:test's t.after, or a list that a suite-level afterEach drains (Jest registers no hooks
+ * while a test runs). Without `closeWith`, close the last application yourself. On Express, compile one TestingModule per application: a
  * second application of one container fails init() with APP_ADAPTER_CHANGED.
  */
 export async function initTestApp<T extends INestApplication>(

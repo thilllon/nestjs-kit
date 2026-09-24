@@ -1748,9 +1748,20 @@ export function transportConformance(
         claims.some((claim) => claim.fixture),
         "the transport claimed none of the kit's fixture handlers",
       );
-      // Boot 3: the bare fixtures fail with exactly the handlers B16 reports, each with its claim's code.
-      const error = await bootFailure(options, env, { globalGuard: false });
-      const issues = ((error as { issues?: unknown }).issues ??
+      // Boot 3: the bare fixtures fail with exactly the handlers B16 reports, each with its claim's code, and boot
+      // when no claim calls for a report.
+      const bare = await settle(() =>
+        withApp(options, env, async () => undefined, { globalGuard: false }),
+      );
+      assert.equal(
+        bare.ok,
+        expected.size === 0,
+        bare.ok
+          ? `the bare fixtures booted, but the claims call for reports of ${JSON.stringify([...expected])}`
+          : `no claim calls for a coverage report, but boot failed: ${String(bare.error)}`,
+      );
+      const issues = ((!bare.ok &&
+        (bare.error as { issues?: unknown } | undefined)?.issues) ||
         []) as readonly { code?: string; detail?: string }[];
       const reported = new Map<string, string>();
       for (const claim of claims) {
