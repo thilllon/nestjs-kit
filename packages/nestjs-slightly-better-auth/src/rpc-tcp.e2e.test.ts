@@ -19,14 +19,30 @@ import { createAuthMiddleware } from "better-auth/api";
 import { bearer } from "better-auth/plugins";
 import { firstValueFrom, timeout } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
-import { OptionalAuth, Public, RequireAuth } from "./auth-decorators.js";
+import {
+  OptionalAuth,
+  Public,
+  RequireAuth,
+  UseAuthInstance,
+} from "./auth-decorators.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
+import { BRIDGE_HANDLE, type BridgeHandle } from "./bridge-protocol.js";
 import { expressPlatform } from "./express.js";
 import { rpcTransport } from "./microservices.js";
+import { NESTJS_PLUGIN_ID } from "./plugin.js";
 import { CurrentUser } from "./session-principal.js";
 import { createTestAuth, createTestIdentity } from "./test-fixtures.js";
+
+async function bridgeState(
+  auth: ReturnType<typeof createTestAuth>,
+): Promise<BridgeHandle["state"]> {
+  const plugin = (await auth.$context).getPlugin(
+    NESTJS_PLUGIN_ID,
+  ) as unknown as Record<symbol, BridgeHandle>;
+  return plugin[BRIDGE_HANDLE]!.state;
+}
 
 @Controller()
 class TcpController {
@@ -247,6 +263,156 @@ describe("RPC TCP", () => {
           await app.close();
         }
       }
+    },
+  );
+
+  it.each(["standalone", "hybrid"] as const)(
+    "isolates default and named instances per message and closes both (%s)",
+    async (mode) => {
+      const reads = { default: 0, secondary: 0 };
+      const counting = (name: keyof typeof reads) =>
+        createAuthMiddleware(async (context) => {
+          if (context.path === "/get-session") {
+            reads[name]++;
+          }
+        });
+      const primary = createTestAuth({
+        plugins: [bearer()],
+        hooks: { before: counting("default") },
+      });
+      const secondary = createTestAuth({
+        plugins: [bearer()],
+        advanced: { cookiePrefix: "secondary" },
+        hooks: { before: counting("secondary") },
+      });
+      @Controller()
+      class InstanceController {
+        @MessagePattern("default-user")
+        defaultUser(@CurrentUser() user: { id: string }) {
+          return { userId: user.id };
+        }
+
+        @UseAuthInstance("secondary")
+        @MessagePattern("secondary-user")
+        secondaryUser(@CurrentUser() user: { id: string }) {
+          return { userId: user.id };
+        }
+      }
+      const hybrid = mode === "hybrid";
+      @Module({
+        imports: [
+          BetterAuthModule.forRoot({
+            auth: primary,
+            platforms: hybrid ? [expressPlatform()] : [],
+            transports: [rpcTransport({ inheritAppConfig: hybrid })],
+          }),
+          BetterAuthModule.forRoot({
+            name: "secondary",
+            auth: secondary,
+            http: { mount: false },
+          }),
+        ],
+        controllers: [InstanceController],
+      })
+      class Fixture {}
+      const config = {
+        transport: Transport.TCP as const,
+        options: { host: "127.0.0.1", port: 0 },
+        logger: false as const,
+        abortOnError: false,
+      };
+      const http = hybrid
+        ? await NestFactory.create(Fixture, {
+            logger: false,
+            abortOnError: false,
+          })
+        : undefined;
+      const app = http
+        ? http.connectMicroservice(config, { inheritAppConfig: true })
+        : await NestFactory.createMicroservice(Fixture, config);
+      let client: ReturnType<typeof ClientProxyFactory.create> | undefined;
+      try {
+        if (http) {
+          await http.init();
+        }
+        await app.listen();
+        expect([
+          await bridgeState(primary),
+          await bridgeState(secondary),
+        ]).toEqual(["bound", "bound"]);
+        const port = (app.unwrap<Server>().address() as AddressInfo).port;
+        client = ClientProxyFactory.create({
+          transport: Transport.TCP,
+          options: { host: "127.0.0.1", port },
+        });
+        const send = async (pattern: string, credentials: object) => {
+          const before = { ...reads };
+          const result = await firstValueFrom(
+            client!.send(pattern, { auth: credentials }).pipe(timeout(4000)),
+          ).then(
+            (value: unknown) => ({ value }),
+            (error: unknown) => ({ error }),
+          );
+          return {
+            ...result,
+            reads: {
+              default: reads.default - before.default,
+              secondary: reads.secondary - before.secondary,
+            },
+          };
+        };
+        const first = await createTestIdentity(primary);
+        const second = await createTestIdentity(secondary);
+        expect(first.cookie).toMatch(/^better-auth\.session_token=/);
+        expect(second.cookie).toMatch(/^secondary\.session_token=/);
+        await expect(
+          send("default-user", { cookie: first.cookie }),
+        ).resolves.toEqual({
+          value: { userId: first.userId },
+          reads: { default: 1, secondary: 0 },
+        });
+        await expect(
+          send("secondary-user", { authorization: `Bearer ${second.token}` }),
+        ).resolves.toEqual({
+          value: { userId: second.userId },
+          reads: { default: 0, secondary: 1 },
+        });
+        await expect(
+          send("secondary-user", { authorization: `Bearer ${first.token}` }),
+        ).resolves.toMatchObject({
+          error: { statusCode: 401, code: "UNAUTHENTICATED" },
+          reads: { default: 0, secondary: 1 },
+        });
+        await expect(
+          send("secondary-user", { cookie: first.cookie }),
+        ).resolves.toMatchObject({
+          error: { statusCode: 401, code: "UNAUTHENTICATED" },
+          reads: { default: 0 },
+        });
+        await expect(
+          send("default-user", { cookie: second.cookie }),
+        ).resolves.toMatchObject({
+          error: { statusCode: 401, code: "UNAUTHENTICATED" },
+          reads: { secondary: 0 },
+        });
+        await expect(
+          send("default-user", { authorization: `Bearer ${second.token}` }),
+        ).resolves.toMatchObject({
+          error: { statusCode: 401, code: "UNAUTHENTICATED" },
+          reads: { default: 1, secondary: 0 },
+        });
+      } finally {
+        client?.close();
+        if (http) {
+          await http.close();
+        } else {
+          await app.close();
+        }
+      }
+      expect([
+        await bridgeState(primary),
+        await bridgeState(secondary),
+      ]).toEqual(["closed", "closed"]);
     },
   );
 
