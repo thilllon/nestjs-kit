@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), built on an independently reviewed specification.
 
-> **Scope.** The package covers HTTP and GraphQL: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, the admin, organization and API-key authorization units, and the Apollo and Mercurius transports of the `./graphql` entry. WebSocket and RPC transports and the conformance testing kit are not included; they ship in later minor versions behind their own entry points. The [changelog](CHANGELOG.md) records the version that adds each entry point.
+> **Scope.** The package covers HTTP, GraphQL and RPC: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, the admin, organization and API-key authorization units, the Apollo and Mercurius transports of the `./graphql` entry and the Nest microservice transport of the `./microservices` entry. WebSocket transports and the conformance testing kit are not included; they ship in later minor versions behind their own entry points. The [changelog](CHANGELOG.md) records the version that adds each entry point.
 
 ## Install
 
@@ -25,9 +25,17 @@ pnpm add @nestjs/graphql graphql @nestjs/apollo @apollo/server @as-integrations/
 pnpm add @nestjs/graphql graphql @nestjs/mercurius mercurius @nestjs/platform-fastify
 ```
 
-## What the package covers
+The `./microservices` entry also needs the optional peer `@nestjs/microservices` 12 and the client library Nest uses for your transport, for example:
 
-The library separates a Better Auth construction plugin, a NestJS integration kernel and optional transports. The `./plugin` entry installs the hook and cookie bridge before Better Auth creates its pipeline. The `./platform` entry provides Node/Web request and response helpers. Neither entry requires Express, Fastify, GraphQL or WebSocket packages.
+```sh
+pnpm add @nestjs/microservices @nats-io/transport-node
+```
+
+Nest's gRPC transport uses `@grpc/grpc-js` and `@grpc/proto-loader`, Kafka uses `kafkajs`, RabbitMQ uses `amqplib` and `amqp-connection-manager`, MQTT uses `mqtt`, and Redis uses `ioredis`. TCP needs no client library. Applications that do not import `./microservices` do not need any of these packages.
+
+## What this release covers
+
+The library separates a Better Auth construction plugin, a NestJS integration kernel and optional transports. The `./plugin` entry installs the hook and cookie bridge before Better Auth creates its pipeline. The `./platform` entry provides Node/Web request and response helpers. Neither entry requires Express, Fastify, GraphQL, WebSocket or microservice packages.
 
 The root entry provides synchronous and asynchronous module registration, default and named instances, service readers, guards, scoped execution and compositional authorization. Tests exercise actual Nest dependency injection and Better Auth sessions, including isolation between instances, caller-origin enforcement and application shutdown. Built ESM and CommonJS consumers verify the same registration and type contracts.
 
@@ -37,7 +45,7 @@ Express preserves native controller parsing for unconditional routes that overla
 
 Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
 
-WebSocket and microservice integrations have separate implementation and end-to-end acceptance gates. They will use optional entry points so applications can install the transports they use. HTTP and GraphQL tests do not establish that those integrations are ready.
+WebSocket integrations have separate implementation and end-to-end acceptance gates. They will use an optional entry point so applications install only the transports they use. HTTP, GraphQL and RPC tests do not establish that the WebSocket integration is ready.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The remaining entry points are tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534).
 
@@ -137,6 +145,70 @@ Federation schema generation in `@nestjs/graphql` loads `@apollo/subgraph`, whic
 ### Supported versions
 
 The native GraphQL tests run Nest 12.0.3 with `@nestjs/graphql`, `@nestjs/apollo` and `@nestjs/mercurius` 14.0.2, `graphql` 16.14.2, `@apollo/server` 5.5.1, `mercurius` 16.10.0, `@mercuriusjs/federation` 5.1.1 and `@apollo/subgraph` 2.15.1. Code-first federation with `@apollo/subgraph` 2.15 requires `@nestjs/graphql` 14.0.2 or newer. With `@nestjs/graphql` 14.0.1, schema generation fails before authentication runs: federation 1 cannot load the subgraph directives module that 2.15 removed, and federation 2 fails with `TypeError: doc.definitions is not iterable`. The `@nestjs/graphql` peer range therefore starts at 14.0.2.
+
+## RPC authentication
+
+The `./microservices` entry authenticates messages in standalone and hybrid Nest microservices. `rpcTransport()` reads credentials from the transport's native carrier: gRPC metadata, NATS headers, Kafka headers, RabbitMQ message headers and MQTT 5 user properties. TCP and Redis messages have no header carrier, so they send credentials in a payload envelope field, `auth` by default. Every message is authenticated separately.
+
+```ts
+import { Controller, Module } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import {
+  MessagePattern,
+  Transport,
+  type MicroserviceOptions,
+} from "@nestjs/microservices";
+import { betterAuth } from "better-auth";
+import { bearer } from "better-auth/plugins";
+import {
+  BetterAuthModule,
+  CurrentUser,
+  Public,
+} from "nestjs-slightly-better-auth";
+import { rpcTransport } from "nestjs-slightly-better-auth/microservices";
+import { nestjs } from "nestjs-slightly-better-auth/plugin";
+
+const auth = betterAuth({
+  // RPC messages have no HTTP origin, so the base URL must be static.
+  baseURL: "https://auth.example.com",
+  // Add your database adapter and other Better Auth options.
+  plugins: [bearer(), nestjs()],
+});
+
+@Controller()
+class ProfileController {
+  @MessagePattern("profile.get")
+  profile(@CurrentUser() user: { id: string }) {
+    return { userId: user.id };
+  }
+
+  @Public()
+  @MessagePattern("health")
+  health() {
+    return { ok: true };
+  }
+}
+
+@Module({
+  imports: [BetterAuthModule.forRoot({ auth, transports: [rpcTransport()] })],
+  controllers: [ProfileController],
+})
+class AppModule {}
+
+const app = await NestFactory.createMicroservice<MicroserviceOptions>(
+  AppModule,
+  { transport: Transport.TCP, options: { host: "127.0.0.1", port: 4000 } },
+);
+await app.listen();
+```
+
+A TCP client puts credentials in the envelope, for example `{ auth: { authorization: "Bearer <token>" }, id: 1 }`; a NATS client sets an `authorization` header through `NatsRecordBuilder`. Carriers accept only the `authorization`, `cookie` and `x-api-key` fields by default. Pass carrier factories such as `grpcCarrier({ metadata: ["authorization"] })` or `payloadCarrier({ field: "credentials" })` in `rpcTransport({ carriers })` to change the accepted fields or the envelope. Host, forwarding and `set-cookie` metadata never reach Better Auth, so a broker message cannot claim an HTTP origin.
+
+Configure a static Better Auth base URL, or a fallback for a dynamic one: RPC transports have no request host, and startup fails with `DYNAMIC_BASE_URL_WITHOUT_FALLBACK` otherwise. Message authentication never refreshes or sets cookies. Public messages run without credentials; protected messages without a matching carrier are rejected as unauthenticated. Malformed credential values, such as values containing CR, LF or NUL, are rejected with reason `MALFORMED_CREDENTIALS` without reaching Better Auth, the handler or logs.
+
+In a hybrid application, Nest applies global guards to microservice handlers only when `connectMicroservice()` receives `{ inheritAppConfig: true }`. Either pass that option to every `connectMicroservice()` call and pass `rpcTransport({ inheritAppConfig: true })`, or apply `@UseBetterAuth()` to message controllers and `@Public()` to public handlers. Startup verifies the explicit form and fails with `RPC_HANDLER_UNGUARDED` for an uncovered message or event handler; `hybridCoverage: "warn"` or `"off"` lowers that check. The inheritance option is an assertion that the application passes the same flag to Nest, and startup logs the `W_RPC_INHERIT_APP_CONFIG_ASSERTED` warning for it.
+
+Failures become `RpcException` payloads with `statusCode`, `code` and, where present, `reason`. gRPC calls receive native status codes: 16 for authentication, 7 for authorization, 8 for throttling and 13 for redacted infrastructure failures. End-to-end tests run real TCP and gRPC servers and real NATS, Kafka, RabbitMQ, MQTT 5 and Redis brokers against Nest 12.0.3, including hybrid applications with both coverage modes and default plus named instances.
 
 ## Develop in this monorepo
 

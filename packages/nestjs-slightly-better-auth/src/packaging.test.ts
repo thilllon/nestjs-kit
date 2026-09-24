@@ -233,6 +233,60 @@ apolloTransport({ fieldResolverCoverage: "ignore" });
     },
   );
 
+  it.each(["mts", "cts"] as const)(
+    "preserves RPC carrier declarations for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule, type AuthLike } from "nestjs-slightly-better-auth";
+import { rpcTransport, grpcCarrier, natsCarrier, kafkaCarrier, rmqCarrier, mqttCarrier, payloadCarrier, defaultCarriers, type RpcCredentialCarrier } from "nestjs-slightly-better-auth/microservices";
+declare const auth: AuthLike;
+const carriers: readonly RpcCredentialCarrier[] = [grpcCarrier({ metadata: ["authorization"] }), natsCarrier(), kafkaCarrier(), rmqCarrier(), mqttCarrier({ userProperties: ["cookie"] }), payloadCarrier({ field: "credentials" })];
+BetterAuthModule.forRoot({ auth, transports: [rpcTransport({ carriers, inheritAppConfig: true })], http: { mount: false } });
+const defaults: readonly RpcCredentialCarrier[] = defaultCarriers;
+// @ts-expect-error Carrier fields must name a payload property.
+payloadCarrier({ field: 123 });
+// @ts-expect-error Unknown coverage modes cannot disable boot checks.
+rpcTransport({ hybridCoverage: "ignore" });
+void defaults;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "initializes a Nest microservice with the actual %s RPC artifact",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const rpc = await load("./dist/microservices.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Transport } = await import("@nestjs/microservices");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [kit.BetterAuthModule.forRoot({ auth, transports: [rpc.rpcTransport()], http: { mount: false }, logSummary: false })] }).compile();
+         const app = moduleRef.createNestMicroservice({ transport: Transport.TCP, options: { host: "127.0.0.1", port: 0 }, logger: false });
+         try {
+           await app.init();
+           console.log(JSON.stringify({ originalInstance: app.get(kit.BetterAuthService).instance === auth, carriers: rpc.defaultCarriers.map(carrier => carrier.id) }));
+         } finally { await app.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstance: true,
+        carriers: ["grpc", "nats", "kafka", "rmq", "mqtt", "payload"],
+      });
+    },
+  );
+
   it.each([
     { format: "esm", platform: "express" },
     { format: "cjs", platform: "express" },
@@ -694,6 +748,122 @@ void organization;
       middlewareLoaded: true,
     });
   });
+
+  // Entry points that import each optional peer; every other entry must run without it.
+  const optionalPeerEntries: Record<string, readonly string[]> = {
+    "@nestjs/graphql": ["graphql"],
+    "@nestjs/microservices": ["microservices"],
+    graphql: ["graphql"],
+  };
+  const entryPoints = Object.keys(manifest.exports)
+    .filter((path) => path !== "./package.json")
+    .map((path) => (path === "." ? "index" : path.slice(2)));
+
+  it("declares an entry mapping for every optional peer", () => {
+    expect(Object.keys(optionalPeerEntries).sort()).toEqual(
+      Object.keys(manifest.peerDependenciesMeta).sort(),
+    );
+    for (const entries of Object.values(optionalPeerEntries)) {
+      for (const entry of entries) {
+        expect(entryPoints).toContain(entry);
+      }
+    }
+  });
+
+  it.each(
+    Object.entries(optionalPeerEntries).flatMap(([peer, dependents]) =>
+      (["esm", "cjs"] as const).map((format) => ({
+        peer,
+        dependents,
+        format,
+      })),
+    ),
+  )(
+    "runs every other $format entry point without the optional $peer peer",
+    ({ peer, dependents, format }) => {
+      const extension = format === "esm" ? "mjs" : "cjs";
+      const independent = entryPoints.filter(
+        (entry) => !dependents.includes(entry),
+      );
+      const result = node(
+        `import { createRequire, registerHooks } from "node:module";
+         import { pathToFileURL } from "node:url";
+         process.env.NODE_ENV = "test";
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const dist = pathToFileURL(process.cwd() + "/dist/").href;
+         const peer = ${JSON.stringify(peer)};
+         const requests = [];
+         // Resolve the optional peer as an absent package, as Node does when it is not installed.
+         const hooks = registerHooks({
+           resolve(specifier, context, nextResolve) {
+             if (specifier === peer || specifier.startsWith(peer + "/")) {
+               requests.push(context.parentURL?.startsWith(dist) ? "dist" : "external");
+               throw Object.assign(new Error("Cannot find package '" + specifier + "'"), { code: "ERR_MODULE_NOT_FOUND" });
+             }
+             return nextResolve(specifier, context);
+           },
+         });
+         const observed = {};
+         try {
+           const modules = {};
+           for (const entry of ${JSON.stringify(independent)}) {
+             modules[entry] = await load("./dist/" + entry + ".${extension}");
+           }
+           const { Test } = await import("@nestjs/testing");
+           const { Logger } = await import("@nestjs/common");
+           const { ExpressAdapter } = await import("@nestjs/platform-express");
+           const { betterAuth } = await import("better-auth");
+           const { memoryAdapter } = await import("better-auth/adapters/memory");
+           Logger.overrideLogger(false);
+           const auth = betterAuth({
+             baseURL: "http://localhost:3000",
+             secret: crypto.randomUUID().repeat(2),
+             database: memoryAdapter({}),
+             logger: { disabled: true },
+             plugins: [modules.plugin.nestjs()],
+           });
+           const moduleRef = await Test.createTestingModule({
+             imports: [modules.index.BetterAuthModule.forRoot({
+               auth,
+               platforms: [modules.express.expressPlatform()],
+               logSummary: false,
+             })],
+           }).compile();
+           const app = moduleRef.createNestApplication(new ExpressAdapter(), { logger: false });
+           try {
+             await app.init();
+             observed.initialized = app.get(modules.index.BetterAuthService).instance === auth;
+           } finally {
+             await app.close();
+           }
+           observed.loaded = Object.keys(modules);
+           observed.distRequests = requests.filter((source) => source === "dist").length;
+           observed.dependents = {};
+           for (const entry of ${JSON.stringify(dependents)}) {
+             observed.dependents[entry] = await Promise.resolve().then(() => load("./dist/" + entry + ".${extension}")).then(
+               () => "loaded",
+               (error) => error.code + " " + String(error.message).includes("'" + peer),
+             );
+           }
+           observed.peerRequested = requests.length > 0;
+         } finally {
+           hooks.deregister();
+         }
+         console.log(JSON.stringify(observed));`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        initialized: true,
+        loaded: independent,
+        distRequests: 0,
+        dependents: Object.fromEntries(
+          dependents.map((entry) => [entry, "ERR_MODULE_NOT_FOUND true"]),
+        ),
+        peerRequested: true,
+      });
+    },
+  );
 
   it("carries public registry augmentation through both built declaration formats", async () => {
     await Promise.all([compileConsumer("mts"), compileConsumer("cts")]);
