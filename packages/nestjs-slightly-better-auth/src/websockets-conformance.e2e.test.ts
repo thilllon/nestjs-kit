@@ -325,11 +325,11 @@ function nextMessage(client: WebSocket, label: string): Promise<unknown> {
   });
 }
 
-async function wsConnect(
+function wsConnect(
   url: string,
   headers: HeadersInit,
   path: string,
-): Promise<{ client: WebSocket; opened: Promise<void> }> {
+): { client: WebSocket; opened: Promise<void> } {
   const { headers: upgrade, token } = handshake(headers);
   const client = new WebSocket(wsUrl(url, path, token), { headers: upgrade });
   const opened = new Promise<void>((resolve, reject) => {
@@ -340,7 +340,7 @@ async function wsConnect(
 }
 
 async function wsClient(url: string, headers: HeadersInit): Promise<Client> {
-  const { client, opened } = await wsConnect(url, headers, "/");
+  const { client, opened } = wsConnect(url, headers, "/");
   try {
     await opened;
   } catch (error) {
@@ -378,11 +378,14 @@ async function wsAuthenticate(
   url: string,
   headers: HeadersInit,
 ): Promise<ConnectionAuthenticationResult> {
-  const { client, opened } = await wsConnect(url, headers, CONNECTION_ROUTE);
+  const { client, opened } = wsConnect(url, headers, CONNECTION_ROUTE);
   try {
-    const outcome = nextMessage(client, "ws connection authentication");
-    await opened;
-    const value = (await outcome) as { event?: string; data?: unknown };
+    // The gateway answers right after the upgrade, so listen before the socket opens.
+    const [, reply] = await Promise.all([
+      opened,
+      nextMessage(client, "ws connection authentication"),
+    ]);
+    const value = reply as { event?: string; data?: unknown };
     return value.event === "exception"
       ? { ok: false, error: failureOf(value.data).error }
       : { ok: true };

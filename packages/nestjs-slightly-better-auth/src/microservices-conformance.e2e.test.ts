@@ -174,14 +174,39 @@ function proxyClient(
   };
 }
 
+function isEmpty(headers: Headers): boolean {
+  return headers.keys().next().done === true;
+}
+
+/** Rejects when `promise` does not settle in time, so a stalled broker step fails its case with the step's name. */
+async function within<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(`${label} did not finish in ${REPLY_TIMEOUT_MS} ms`),
+            ),
+          REPLY_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Credentials in the message payload's `auth` object (payloadCarrier). */
 function payloadEnvelope(
   data: Record<string, unknown>,
   headers: Headers,
 ): unknown {
-  return [...headers.keys()].length
-    ? { ...data, auth: Object.fromEntries(headers) }
-    : data;
+  return isEmpty(headers)
+    ? data
+    : { ...data, auth: Object.fromEntries(headers) };
 }
 
 function tcp(hybrid: boolean): RpcFamily {
@@ -361,6 +386,9 @@ function nats(): RpcFamily {
         client,
         (fixture) => `${boot.id}.${fixture}`,
         (data, headers) => {
+          if (isEmpty(headers)) {
+            return data;
+          }
           const values = natsHeaders();
           for (const [name, value] of headers) {
             values.set(name, value);
@@ -380,7 +408,8 @@ function rmq(): RpcFamily {
         `amqp://nestjs_kit_test:local_test_password@127.0.0.1:${port("RABBITMQ_PORT", 55672)}`,
       ],
       queue,
-      queueOptions: { durable: false, autoDelete: true },
+      // RabbitMQ 4 refuses transient non-exclusive queues.
+      queueOptions: { durable: true, autoDelete: true },
       noAck: true,
     },
   });
@@ -397,9 +426,11 @@ function rmq(): RpcFamily {
         client,
         (fixture) => fixture,
         (data, headers) =>
-          new RmqRecordBuilder(data)
-            .setOptions({ headers: Object.fromEntries(headers) })
-            .build(),
+          isEmpty(headers)
+            ? data
+            : new RmqRecordBuilder(data)
+                .setOptions({ headers: Object.fromEntries(headers) })
+                .build(),
       );
     },
   };
@@ -423,10 +454,13 @@ function mqtt(): RpcFamily {
       return proxyClient(
         client,
         (fixture) => `${boot.id}.${fixture}`,
+        // An MQTT v5 publish without credentials carries no user properties.
         (data, headers) =>
-          new MqttRecordBuilder(data)
-            .setProperties({ userProperties: Object.fromEntries(headers) })
-            .build(),
+          isEmpty(headers)
+            ? data
+            : new MqttRecordBuilder(data)
+                .setProperties({ userProperties: Object.fromEntries(headers) })
+                .build(),
       );
     },
   };
@@ -599,7 +633,9 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
   );
   const client = (app: INestApplication): Promise<RpcClient> => {
     const boot = boots.get(app)!;
-    boot.state.client ??= boot.start().then(() => family.connect(boot));
+    boot.state.client ??= within(boot.start(), "the transport server").then(
+      () => within(family.connect(boot), "the client connection"),
+    );
     return boot.state.client;
   };
   return {
@@ -684,9 +720,12 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
       const close = app.close.bind(app);
       app.close = async () => {
         try {
-          await (await state.client?.catch(() => undefined))?.close();
+          const connected = await state.client?.catch(() => undefined);
+          if (connected) {
+            await within(connected.close(), "closing the client");
+          }
         } finally {
-          await close();
+          await within(close(), "closing the app");
         }
       };
       const nest = app as unknown as INestApplication;
