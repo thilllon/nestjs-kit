@@ -31,6 +31,8 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 | Environment       | Leave empty; the workflow does not specify an environment |
 | Permission        | Allow publishing                                          |
 
+The workflow filename is part of every package's trusted-publisher registration, and npm checks the calling workflow file of an OIDC publication. Never rename or move `.github/workflows/release.yml`; publication runs in it or in a reusable workflow it calls. Publication from any other calling workflow fails for every package.
+
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
 All ten established package identities, including `nestjs-slightly-better-auth`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
@@ -62,7 +64,7 @@ To publish a held package:
      mise exec -- pnpm pkg set "version=$VERSION" &&
      mise exec -- pnpm build &&
      mise exec -- pnpm pack --out "/tmp/$PACKAGE.tgz" &&
-     tar -tzf "/tmp/$PACKAGE.tgz"
+     tar --list --gzip --file "/tmp/$PACKAGE.tgz"
    ```
 
    Inspect the listed files: only `dist`, `README.md`, `LICENSE` and `package.json` belong in the archive. Then publish it with the owner's npm authentication from the same directory and restore the version edit. `--no-git-checks` is needed only because of that edit:
