@@ -773,6 +773,46 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
   },
 );
 
+describe.each(["apollo", "apollo-fastify"] as const)(
+  "native %s GraphQL request classification",
+  (driver) => {
+    it.each([false, true])(
+      "fails closed for an unrecognized request object whatever its Upgrade header (upgrade=%s)",
+      async (upgrade) => {
+        // Fastify: the raw IncomingMessage; Express: a copied headers object. Neither is a platform request.
+        const f = await securityFixture(driver, {
+          context:
+            driver === "apollo-fastify"
+              ? (request: { raw: unknown }, reply: unknown) => ({
+                  req: request.raw,
+                  reply,
+                })
+              : ({ req }: { req: { headers: unknown } }) => ({
+                  req: { headers: req.headers },
+                }),
+        });
+        try {
+          for (const query of ["{ guarded }", "mutation { change }"]) {
+            const { body } = await f.rawQuery(query, {
+              cookie: f.cookie,
+              origin: "http://localhost:3000",
+              ...(upgrade ? { upgrade: "websocket" } : {}),
+            });
+            expect(body.errors?.[0], JSON.stringify(body)).toMatchObject({
+              message: "Internal server error",
+              extensions: { reason: "AUTH_MISCONFIGURED" },
+            });
+          }
+          expect(f.resolver.sideEffects).toBe(0);
+          expect(f.reads()).toBe(0);
+        } finally {
+          await f.close();
+        }
+      },
+    );
+  },
+);
+
 import type { PrincipalSource } from "./auth-contracts.js";
 import { sessionPrincipal } from "./session-principal.js";
 

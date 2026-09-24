@@ -136,12 +136,20 @@ function upgrade(value: unknown): Upgrade | undefined {
     ? (candidate as unknown as Upgrade)
     : undefined;
 }
-function websocket(value: unknown): Upgrade | undefined {
-  const candidate = upgrade(value);
-  return candidate &&
-    toWebHeaders(candidate.headers).get("upgrade")?.toLowerCase() ===
-      "websocket"
-    ? candidate
+const WEBSOCKET_OPEN = 1;
+/**
+ * The upgrade request of a graphql-ws `extra` ({ socket, request }) whose socket is an open
+ * WebSocket. Only the graphql-ws server creates that pair; request headers cannot, so a
+ * client-sent Upgrade header never selects the socket path.
+ */
+function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
+  const extra = record(value);
+  const socket = record(extra?.socket);
+  return socket &&
+    typeof socket.send === "function" &&
+    typeof socket.close === "function" &&
+    socket.readyState === WEBSOCKET_OPEN
+    ? upgrade(extra?.request)
     : undefined;
 }
 function ambientHeaders(request: unknown): Headers {
@@ -172,31 +180,35 @@ function carrierDetails(
   const carrier = record(context) ?? {};
   const req = record(carrier.req);
   const extra = record(carrier.extra);
-  // The Upgrade header is client-controlled: an HTTP operation may carry it.
   // A positive platform answer keeps the HTTP path and its liveness check.
   const httpRequest =
     driver === "apollo" &&
     (http?.isRequest(req) === true || http?.isRequest(extra?.request) === true);
-  const defaultConnection =
-    !httpRequest && req && "connectionParams" in req
-      ? record(req.extra)
+  // Nest assigns the graphql-ws Context to context.req unless a custom context sets req.
+  const wsContext =
+    driver === "apollo" &&
+    !httpRequest &&
+    req &&
+    "connectionParams" in req &&
+    graphqlWsUpgrade(req.extra)
+      ? req
       : undefined;
   const socket =
     driver === "apollo"
       ? httpRequest
         ? undefined
-        : (upgrade(defaultConnection?.request) ??
-          websocket(req) ??
-          websocket(extra?.request))
+        : wsContext
+          ? graphqlWsUpgrade(wsContext.extra)
+          : graphqlWsUpgrade(extra)
       : (upgrade(carrier[MERCURIUS_UPGRADE]) ??
         ("_connectionInit" in carrier
           ? (upgrade(carrier.request) ??
             upgrade(record(carrier.reply)?.request) ??
             upgrade(carrier.req))
           : undefined));
-  const connection = defaultConnection ? req : carrier;
+  const connection = wsContext ? req : carrier;
   const params = record(
-    defaultConnection
+    wsContext
       ? req?.connectionParams
       : (carrier.connectionParams ?? carrier._connectionInit),
   );

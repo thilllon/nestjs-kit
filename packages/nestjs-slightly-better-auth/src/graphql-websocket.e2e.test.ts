@@ -78,6 +78,8 @@ class SocketResolver {
 type Mode =
   | "apollo-default"
   | "apollo-custom"
+  | "apollo-fastify-default"
+  | "apollo-fastify-custom"
   | "mercurius"
   | "mercurius-native";
 interface Result {
@@ -128,6 +130,10 @@ async function fixture(
   mode: Mode,
   transportOptions: GraphqlTransportOptions = {},
   dynamicBaseURL = false,
+  context?: (context: {
+    extra?: { request?: unknown };
+    connectionParams?: unknown;
+  }) => object,
 ) {
   const database: Record<string, Record<string, unknown>[]> = {
     user: [],
@@ -173,6 +179,7 @@ async function fixture(
     plugins: [bearer(), nestjs()],
   });
   const mercurius = mode.startsWith("mercurius");
+  const fastify = mercurius || mode.startsWith("apollo-fastify");
   const module = await Test.createTestingModule({
     imports: [
       GraphQLModule.forRoot({
@@ -188,23 +195,26 @@ async function fixture(
               },
             }
           : { subscriptions: { "graphql-ws": true } }),
-        ...(mode === "apollo-custom"
+        ...(mode === "apollo-custom" || mode === "apollo-fastify-custom"
           ? {
+              // Keeps graphql-ws's extra ({ socket, request }) beside a custom req.
               context: (context: {
                 req?: unknown;
                 extra?: { request?: unknown };
                 connectionParams?: unknown;
               }) => ({
                 req: context.req ?? context.extra?.request,
+                extra: context.extra,
                 connectionParams: context.connectionParams,
               }),
             }
           : {}),
+        ...(context ? { context } : {}),
       }),
       BetterAuthModule.forRoot({
         auth,
         logSummary: false,
-        platforms: [mercurius ? fastifyPlatform() : expressPlatform()],
+        platforms: [fastify ? fastifyPlatform() : expressPlatform()],
         transports: [
           mercurius
             ? mercuriusTransport(transportOptions)
@@ -216,7 +226,7 @@ async function fixture(
   }).compile();
   const errors: unknown[][] = [];
   const app = module.createNestApplication(
-    mercurius ? new FastifyAdapter() : new ExpressAdapter(),
+    fastify ? new FastifyAdapter() : new ExpressAdapter(),
     {
       logger: {
         log() {},
@@ -291,6 +301,8 @@ async function fixture(
 describe.each([
   "apollo-default",
   "apollo-custom",
+  "apollo-fastify-default",
+  "apollo-fastify-custom",
   "mercurius",
   "mercurius-native",
 ] as const)("native %s socket operations", (mode) => {
@@ -513,3 +525,36 @@ describe.each([
     }
   });
 });
+
+describe.each(["apollo-default", "apollo-fastify-default"] as const)(
+  "native %s socket classification",
+  (mode) => {
+    it("fails closed when a custom context keeps the upgrade request without graphql-ws extra", async () => {
+      const f = await fixture(mode, {}, false, (context) => ({
+        req: context.extra?.request,
+        connectionParams: context.connectionParams,
+      }));
+      try {
+        const client = f.client({
+          authorization: f.bearer,
+          origin: "http://localhost:3000",
+        });
+        for (const query of [
+          "{ who }",
+          "mutation { change }",
+          "subscription { notice }",
+        ]) {
+          const result = await execute(client, query);
+          expect(result.errors?.[0], JSON.stringify(result)).toMatchObject({
+            message: "Internal server error",
+            extensions: { reason: "AUTH_MISCONFIGURED" },
+          });
+        }
+        expect(f.calls()).toBe(0);
+        expect(f.reads()).toBe(0);
+      } finally {
+        await f.close();
+      }
+    });
+  },
+);

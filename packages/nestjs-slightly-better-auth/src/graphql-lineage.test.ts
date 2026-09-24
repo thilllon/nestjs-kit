@@ -10,6 +10,10 @@ function info(operation: object, keys: readonly (string | number)[]) {
   }
   return { operation, path };
 }
+/** The graphql-ws `extra.socket` shape: an open WebSocket. */
+function openSocket(readyState = 1) {
+  return { readyState, send() {}, close() {} };
+}
 describe("GraphQL invocation lineage", () => {
   it("isolates aliases, list indexes and batched operations while preserving ancestors", () => {
     const carrier = {};
@@ -260,7 +264,7 @@ describe("GraphQL socket credential envelopes", () => {
           cookie: "replacement=credential",
           origin: "https://spoof.example.test",
         },
-        extra: { request },
+        extra: { socket: openSocket(), request },
       },
     };
     const context = new ExecutionContextHost(
@@ -309,6 +313,7 @@ function socketHeaders(
         req: {
           connectionParams: params,
           extra: {
+            socket: openSocket(),
             request: {
               headers: {
                 host: "localhost:3000",
@@ -556,26 +561,59 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
     },
   );
   it.each(["express", "fastify"] as const)(
-    "keeps graphql-ws and subscriptions-transport upgrade requests on the socket path with %s predicates",
+    "keeps graphql-ws connections on the socket path with %s predicates",
     (platform) => {
       const { http } = httpCarrier(platform);
       const request = {
         headers: { host: "localhost:3000", upgrade: "websocket" },
         url: "/graphql",
       };
+      const extra = { socket: openSocket(), request };
       for (const carrier of [
-        { req: { connectionParams: {}, extra: { request } } },
-        { req: request },
-        { extra: { request } },
+        // Nest's default context: the graphql-ws Context at context.req.
+        { req: { connectionParams: {}, extra } },
+        // A custom context keeping graphql-ws extra beside its own req.
+        { req: request, extra, connectionParams: {} },
       ]) {
         const call = (apolloTransport() as AuthTransport).describe(
           graphqlContext(carrier),
           { http },
         );
         expect(call.connection).toBe(request);
-        expect(call.key).toBe(carrier);
         expect(call.clientIp).toBeNull();
         expect(call.cookies).toBeNull();
+      }
+    },
+  );
+  it.each(["express", "fastify"] as const)(
+    "never selects the socket path from an Upgrade header alone with %s predicates",
+    (platform) => {
+      const { http } = httpCarrier(platform);
+      const request = {
+        method: "POST",
+        headers: { host: "localhost:3000", upgrade: "websocket" },
+        url: "/graphql",
+      };
+      for (const carrier of [
+        { req: request },
+        { req: { raw: request } },
+        { extra: { request } },
+        { req: { connectionParams: {}, extra: { request } } },
+        { req: request, extra: { socket: {}, request } },
+        { req: request, extra: { socket: openSocket(3), request } },
+      ]) {
+        const call = (apolloTransport() as AuthTransport).describe(
+          graphqlContext(carrier),
+          { http },
+        );
+        expect(call.connection).toBeUndefined();
+        let failure: unknown;
+        try {
+          call.headers();
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toHaveProperty("code", "GRAPHQL_CONTEXT_UNRECOGNIZED");
       }
     },
   );
