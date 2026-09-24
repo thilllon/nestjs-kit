@@ -1,7 +1,7 @@
 {
   "name": "nestjs-slightly-better-auth",
-  "version": "1.1.0",
-  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, microservice RPC transports, and admin, organization and API-key authorization",
+  "version": "1.2.0",
+  "description": "A Better Auth integration for NestJS with Express and Fastify platforms, Socket.IO and ws gateways, microservice RPC transports, and admin, organization and API-key authorization",
   "license": "MIT",
   "author": "thilllon",
   "type": "module",
@@ -79,6 +79,20 @@
         "default": "./dist/fastify.cjs"
       }
     },
+    "./websockets": {
+      "module-sync": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "import": {
+        "types": "./dist/websockets.d.mts",
+        "default": "./dist/websockets.mjs"
+      },
+      "require": {
+        "types": "./dist/websockets.d.cts",
+        "default": "./dist/websockets.cjs"
+      }
+    },
     "./microservices": {
       "module-sync": {
         "types": "./dist/microservices.d.mts",
@@ -135,6 +149,34 @@
         "default": "./dist/api-key.cjs"
       }
     },
+    "./testing": {
+      "module-sync": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "import": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "require": {
+        "types": "./dist/testing.d.cts",
+        "default": "./dist/testing.cjs"
+      }
+    },
+    "./testing/conformance": {
+      "module-sync": {
+        "types": "./dist/testing/conformance.d.mts",
+        "default": "./dist/testing/conformance.mjs"
+      },
+      "import": {
+        "types": "./dist/testing/conformance.d.mts",
+        "default": "./dist/testing/conformance.mjs"
+      },
+      "require": {
+        "types": "./dist/testing/conformance.d.cts",
+        "default": "./dist/testing/conformance.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -164,6 +206,8 @@
     "nest",
     "better-auth",
     "authentication",
+    "websockets",
+    "socket.io",
     "microservices",
     "rpc",
     "grpc",
@@ -176,12 +220,20 @@
   "peerDependenciesMeta": {
     "@nestjs/microservices": {
       "optional": true
+    },
+    "@nestjs/testing": {
+      "optional": true
+    },
+    "@nestjs/websockets": {
+      "optional": true
     }
   },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
     "@nestjs/microservices": "^12.0.3",
+    "@nestjs/testing": "^12.0.3",
+    "@nestjs/websockets": "^12.0.3",
     "better-auth": ">=1.7.5 <2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -200,19 +252,27 @@
     "@nestjs/microservices": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/platform-fastify": "12.0.3",
+    "@nestjs/platform-socket.io": "12.0.3",
+    "@nestjs/platform-ws": "12.0.3",
     "@nestjs/testing": "12.0.3",
+    "@nestjs/websockets": "12.0.3",
     "@types/express": "5.0.6",
     "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1",
     "amqp-connection-manager": "5.0.0",
     "amqplib": "2.0.1",
     "better-auth": "1.7.5",
     "express": "5.2.1",
     "ioredis": "6.0.0",
+    "jose": "6.2.12",
     "kafkajs": "2.2.4",
     "mqtt": "5.16.0",
     "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "socket.io": "4.8.3",
+    "socket.io-client": "4.8.3",
+    "ws": "8.21.3"
   }
 }

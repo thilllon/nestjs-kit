@@ -1,10 +1,16 @@
-import type { INestApplication, Provider, Type } from "@nestjs/common";
+import type {
+  INestApplication,
+  ModuleMetadata,
+  Provider,
+  Type,
+} from "@nestjs/common";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { getAuthTables } from "better-auth/db";
 import type {
+  AuthTransport,
   BetterAuthRuntimeOptions,
   ExtensionRef,
   HttpPlatform,
@@ -81,6 +87,8 @@ export async function startHttpFixture(options: {
   adapter: AbstractHttpAdapter;
   platform: ExtensionRef<HttpPlatform>;
   controllers: readonly Type[];
+  imports?: ModuleMetadata["imports"];
+  transports?: readonly ExtensionRef<AuthTransport>[];
   providers?: readonly Provider[];
   moduleOptions?: Partial<BetterAuthRuntimeOptions<AuthLike>>;
   configure?: (app: INestApplication) => void | Promise<void>;
@@ -91,7 +99,9 @@ export async function startHttpFixture(options: {
         ...options.moduleOptions,
         auth: options.auth,
         platforms: [options.platform],
+        transports: options.transports,
       }),
+      ...(options.imports ?? []),
     ],
     controllers: [...options.controllers],
     providers: [...(options.providers ?? [])],

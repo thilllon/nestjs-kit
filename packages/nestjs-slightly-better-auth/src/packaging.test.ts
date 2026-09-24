@@ -165,7 +165,97 @@ void invalidKind;
   }
 }
 
+// Built entry points, derived from the package exports so new entries join the artifact checks.
+const entryPoints = Object.entries(manifest.exports).flatMap(
+  ([subpath, target]) =>
+    typeof target === "string"
+      ? []
+      : [
+          {
+            name: subpath === "." ? "index" : subpath.slice("./".length),
+            esm: target.import.default,
+            cjs: target.require.default,
+          },
+        ],
+);
+
+// The entry points that import each optional peer. The key type requires one mapping per
+// optional peer, and every other entry point must load without that peer.
+const optionalPeerEntries: Record<
+  keyof typeof manifest.peerDependenciesMeta,
+  readonly string[]
+> = {
+  "@nestjs/microservices": ["microservices"],
+  // ./testing imports only @nestjs/testing types; the caller passes in the TestingModuleBuilder.
+  "@nestjs/testing": ["testing/conformance"],
+  "@nestjs/websockets": ["websockets"],
+};
+
 describe("built authentication package", () => {
+  it.each(["mts", "cts"] as const)(
+    "preserves WebSocket adapter and connection-auth types in a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule } from "nestjs-slightly-better-auth";
+import { socketIoTransport, wsTransport, withUpgradeRequest, recordUpgradeRequest, WS_CONNECTION_AUTH, WsConnectionAuth, wsCloseCodeFor } from "nestjs-slightly-better-auth/websockets";
+import type { AuthLike } from "nestjs-slightly-better-auth";
+declare const auth: AuthLike;
+BetterAuthModule.forRoot({ auth, transports: [socketIoTransport({ credentials: client => ({ authorization: String(client.handshake.auth?.token ?? "") }) }), wsTransport()], http: { mount: false } });
+class Adapter {
+  bindClientConnect(_server: unknown, _callback: (...args: any[]) => void): void {}
+  nativeMethod(): string { return "preserved"; }
+}
+const Wrapped = withUpgradeRequest(Adapter);
+const method: string = new Wrapped().nativeMethod();
+recordUpgradeRequest({}, { headers: { cookie: "example" }, url: "/socket" });
+declare const connections: WsConnectionAuth;
+connections.authenticate({}, { instance: "named" });
+connections.socketIoMiddleware({ required: false });
+const token: symbol = WS_CONNECTION_AUTH;
+const code: 4401 | 4403 | 4429 = wsCloseCodeFor({ status: 401, code: "UNAUTHENTICATED", message: "Unauthorized" });
+// @ts-expect-error An unsupported TTL policy is not accepted.
+wsTransport({ principalTtlMs: "forever" });
+void method; void token; void code;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "injects connection authentication from the actual %s WebSocket entry",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const sockets = await load("./dist/websockets.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [kit.BetterAuthModule.forRoot({ auth, transports: [sockets.socketIoTransport(), sockets.wsTransport()], http: { mount: false }, logSummary: false })] }).compile();
+         try {
+           await moduleRef.init();
+           const byToken = moduleRef.get(sockets.WS_CONNECTION_AUTH);
+           console.log(JSON.stringify({ sameProvider: byToken === moduleRef.get(sockets.WsConnectionAuth), authenticate: typeof byToken.authenticate, middleware: typeof byToken.socketIoMiddleware, originalInstance: moduleRef.get(kit.BetterAuthService).instance === auth }));
+         } finally { await moduleRef.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        sameProvider: true,
+        authenticate: "function",
+        middleware: "function",
+        originalInstance: true,
+      });
+    },
+  );
+
   it.each(["mts", "cts"] as const)(
     "preserves RPC carrier declarations for a .%s consumer",
     async (extension) => {
@@ -682,36 +772,52 @@ void organization;
     });
   });
 
-  it.each(["esm", "cjs"] as const)(
-    "runs every other %s entry point without the optional @nestjs/microservices peer",
-    (format) => {
-      const extension = format === "esm" ? "mjs" : "cjs";
+  it.each(
+    Object.entries(optionalPeerEntries).flatMap(([peer, owners]) =>
+      (["esm", "cjs"] as const).map((format) => ({ format, peer, owners })),
+    ),
+  )(
+    "runs every other $format entry point without the optional $peer peer",
+    ({ format, peer, owners }) => {
+      const entries = entryPoints.map((entry) => ({
+        name: entry.name,
+        path: entry[format],
+      }));
       const result = node(
         `import { createRequire, registerHooks } from "node:module";
          import { pathToFileURL } from "node:url";
          process.env.NODE_ENV = "test";
          const require = createRequire(import.meta.url);
          const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const peer = ${JSON.stringify(peer)};
          const dist = pathToFileURL(process.cwd() + "/dist/").href;
-         const requests = [];
+         let distRequests = 0;
          // Resolve the optional peer as an absent package, as Node does when it is not installed.
          const hooks = registerHooks({
            resolve(specifier, context, nextResolve) {
-             if (specifier === "@nestjs/microservices" || specifier.startsWith("@nestjs/microservices/")) {
-               requests.push(context.parentURL?.startsWith(dist) ? "dist" : "external");
+             if (specifier === peer || specifier.startsWith(peer + "/")) {
+               if (context.parentURL?.startsWith(dist)) {
+                 distRequests += 1;
+               }
                throw Object.assign(new Error("Cannot find package '" + specifier + "'"), { code: "ERR_MODULE_NOT_FOUND" });
              }
              return nextResolve(specifier, context);
            },
          });
-         const observed = {};
+         const observed = { entries: {} };
          try {
-           const entries = ["index", "plugin", "platform", "express", "fastify", "admin", "organization", "api-key"];
            const modules = {};
-           for (const entry of entries) {
-             modules[entry] = await load("./dist/" + entry + ".${extension}");
+           for (const entry of ${JSON.stringify(entries)}) {
+             const before = distRequests;
+             observed.entries[entry.name] = await Promise.resolve().then(() => load(entry.path)).then(
+               (loaded) => {
+                 modules[entry.name] = loaded;
+                 return distRequests === before ? "loaded" : "loaded after requesting the peer";
+               },
+               (error) => (distRequests > before ? "requested the peer: " : "") + error.code + " " + String(error.message).includes(peer),
+             );
            }
-           const { Test } = await import("@nestjs/testing");
+           const { NestFactory } = await import("@nestjs/core");
            const { Logger } = await import("@nestjs/common");
            const { ExpressAdapter } = await import("@nestjs/platform-express");
            const { betterAuth } = await import("better-auth");
@@ -724,27 +830,22 @@ void organization;
              logger: { disabled: true },
              plugins: [modules.plugin.nestjs()],
            });
-           const moduleRef = await Test.createTestingModule({
-             imports: [modules.index.BetterAuthModule.forRoot({
+           // NestFactory, not @nestjs/testing, which is itself one of the optional peers.
+           const app = await NestFactory.create(
+             modules.index.BetterAuthModule.forRoot({
                auth,
                platforms: [modules.express.expressPlatform()],
                logSummary: false,
-             })],
-           }).compile();
-           const app = moduleRef.createNestApplication(new ExpressAdapter(), { logger: false });
+             }),
+             new ExpressAdapter(),
+             { logger: false },
+           );
            try {
              await app.init();
              observed.initialized = app.get(modules.index.BetterAuthService).instance === auth;
            } finally {
              await app.close();
            }
-           observed.loaded = Object.keys(modules);
-           observed.distRequests = requests.filter((source) => source === "dist").length;
-           observed.microservices = await Promise.resolve().then(() => load("./dist/microservices.${extension}")).then(
-             () => "loaded",
-             (error) => error.code + " " + String(error.message).includes("@nestjs/microservices"),
-           );
-           observed.microservicesDistRequests = requests.filter((source) => source === "dist").length;
          } finally {
            hooks.deregister();
          }
@@ -752,20 +853,15 @@ void organization;
         "--input-type=module",
       );
       expect(JSON.parse(result)).toEqual({
+        entries: Object.fromEntries(
+          entries.map(({ name }) => [
+            name,
+            owners.includes(name)
+              ? "requested the peer: ERR_MODULE_NOT_FOUND true"
+              : "loaded",
+          ]),
+        ),
         initialized: true,
-        loaded: [
-          "index",
-          "plugin",
-          "platform",
-          "express",
-          "fastify",
-          "admin",
-          "organization",
-          "api-key",
-        ],
-        distRequests: 0,
-        microservices: "ERR_MODULE_NOT_FOUND true",
-        microservicesDistRequests: 1,
       });
     },
   );
@@ -773,4 +869,333 @@ void organization;
   it("carries public registry augmentation through both built declaration formats", async () => {
     await Promise.all([compileConsumer("mts"), compileConsumer("cts")]);
   });
+
+  it.each(["esm", "cjs"] as const)(
+    "loads the root %s entry without testing peers or test runners",
+    (format) => {
+      const result = node(
+        `import { createRequire, registerHooks } from "node:module";
+         const require = createRequire(import.meta.url);
+         const forbidden = ["@nestjs/testing", "vitest", "jest", "@jest/globals", "node:test", "node:assert", "node:assert/strict", "better-auth/plugins"];
+         const hooks = registerHooks({
+           resolve(specifier, context, nextResolve) {
+             if (forbidden.includes(specifier)) {
+               throw new Error("The root entry loaded " + specifier);
+             }
+             return nextResolve(specifier, context);
+           },
+         });
+         try {
+           const kit = ${format === "esm" ? 'await import("./dist/index.mjs")' : 'require("./dist/index.cjs")'};
+           console.log(JSON.stringify({ module: typeof kit.BetterAuthModule }));
+         } finally {
+           hooks.deregister();
+         }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({ module: "function" });
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "loads ./testing and ./testing/conformance from the actual %s artifacts without a test runner",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         import { createRequire, registerHooks } from "node:module";
+         const require = createRequire(import.meta.url);
+         const runners = ["vitest", "jest", "@jest/globals", "node:test"];
+         const hooks = registerHooks({
+           resolve(specifier, context, nextResolve) {
+             if (runners.includes(specifier)) {
+               throw new Error("A testing entry loaded " + specifier);
+             }
+             return nextResolve(specifier, context);
+           },
+         });
+         const extension = ${JSON.stringify(format === "esm" ? "mjs" : "cjs")};
+         const load = ${format === "esm" ? "(path) => import(path)" : "(path) => require(path)"};
+         try {
+           const kit = await load("./dist/index." + extension);
+           const testing = await load("./dist/testing." + extension);
+           const conformance = await load("./dist/testing/conformance." + extension);
+           const { Test } = await import("@nestjs/testing");
+           const { Logger } = await import("@nestjs/common");
+           const { betterAuth } = await import("better-auth");
+           const { memoryAdapter } = await import("better-auth/adapters/memory");
+           const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+           Logger.overrideLogger(false);
+           const instance = (cookiePrefix) => betterAuth({
+             baseURL: "http://localhost:3000",
+             secret: crypto.randomUUID().repeat(2),
+             database: memoryAdapter({}),
+             logger: { disabled: true },
+             advanced: { cookiePrefix },
+             plugins: [nestjs()],
+           });
+           const modules = () => [
+             kit.BetterAuthModule.forRoot({ auth: instance("first"), http: { mount: false }, logSummary: false }),
+             kit.BetterAuthModule.forRoot({ name: "named", auth: instance("named"), http: { mount: false }, logSummary: false }),
+           ];
+           const fixed = (userId) => ({ kind: "session", source: "better-auth:session", userId, session: {} });
+           const guarded = Test.createTestingModule({ imports: modules() });
+           testing.overrideAuthGuard(guarded, { principal: null });
+           const guardRef = await guarded.compile();
+           await guardRef.init();
+           const allowed = await guardRef.get(kit.BetterAuthGuard).canActivate({
+             getArgs: () => [{}, {}],
+             getClass: () => Object,
+             getHandler: () => function handler() {},
+             getType: () => "http",
+           });
+           await guardRef.close();
+           const builder = Test.createTestingModule({ imports: modules() });
+           testing.overridePrincipal(builder, fixed("default-user"));
+           testing.overridePrincipal(builder, fixed("named-user"), { instance: "named" });
+           const moduleRef = await builder.compile();
+           await moduleRef.init();
+           const resolver = moduleRef.get(kit.PRINCIPAL_RESOLVER);
+           const call = { key: {}, invocation: {}, headers: () => new Headers(), clientIp: null, cookies: null, param: () => undefined };
+           const principals = [];
+           for (const name of [undefined, "named"]) {
+             const result = await resolver.resolve(call, {
+               auth: moduleRef.get(kit.getBetterAuthHandleToken(name)),
+               freshness: "default",
+               accepts: new Set(["session"]),
+               sourceSet: "0",
+             });
+             principals.push(result.principal?.userId ?? result.outcome);
+           }
+           await moduleRef.close();
+           // One real kit from the artifact: the inlined plugin handshake, decorated harness classes and Nest boots.
+           const auth = conformance.createConformanceAuth();
+           const credential = async () => {
+             const email = crypto.randomUUID() + "@artifact.example";
+             const { user } = await auth.api.signUpEmail({ body: { email, password: crypto.randomUUID(), name: "Artifact" } });
+             return testing.authHeadersFor(auth, user.id);
+           };
+           const outcomes = [];
+           for (const item of conformance.principalSourceConformance({
+             source: kit.sessionPrincipal(),
+             auth,
+             credentials: {
+               valid: credential,
+               invalid: () => new Headers({ cookie: "better-auth.session_token=invalid.value" }),
+             },
+           })) {
+             outcomes.push(item.skip === undefined ? ((await item.run())?.skipped ? "skipped" : "passed") : "skipped");
+           }
+           const registered = [];
+           conformance.runConformance(
+             [
+               { id: "C-run", title: "runs", run: async () => {} },
+               { id: "C-skip", title: "skips", skip: "not supported", run: async () => { throw new Error("ran"); } },
+             ],
+             {
+               describe: (name, fn) => { registered.push("describe " + name); fn(); },
+               it: (name) => registered.push("it " + name),
+             },
+           );
+           console.log(JSON.stringify({
+             testing: Object.keys(testing).sort(),
+             conformance: Object.keys(conformance).sort(),
+             allowed,
+             principals,
+             outcomes: [...new Set(outcomes)].sort(),
+             registered,
+             probe: conformance.conformanceProbePlugin().id,
+           }));
+         } finally {
+           hooks.deregister();
+         }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        testing: [
+          "authHeadersFor",
+          "initTestApp",
+          "overrideAuthGuard",
+          "overrideDecisions",
+          "overridePrincipal",
+          "stampPrincipal",
+          "testPrincipal",
+        ],
+        conformance: [
+          "PROBE_TRUSTED_ORIGIN",
+          "conformanceProbePlugin",
+          "createConformanceAuth",
+          "httpPlatformConformance",
+          "policyConformance",
+          "principalSourceConformance",
+          "runConformance",
+          "transportConformance",
+        ],
+        allowed: true,
+        principals: ["default-user", "named-user"],
+        outcomes: ["passed", "skipped"],
+        registered: [
+          "describe C-run",
+          "it runs",
+          "describe C-skip",
+          "it skips (skipped: not supported)",
+        ],
+        probe: "nestjs-slightly-better-auth-conformance-probe",
+      });
+    },
+  );
+
+  it("keeps the testing entries to their Better Auth specifiers in both formats", () => {
+    const result = node(
+      `import { createRequire, registerHooks } from "node:module";
+       import { pathToFileURL } from "node:url";
+       const require = createRequire(import.meta.url);
+       const dist = pathToFileURL(process.cwd() + "/dist/").href;
+       const seen = { testing: new Set(), conformance: new Set() };
+       let current = "testing";
+       const hooks = registerHooks({
+         resolve(specifier, context, nextResolve) {
+           if (context.parentURL?.startsWith(dist) && specifier.startsWith("better-auth")) {
+             seen[current].add(specifier);
+           }
+           return nextResolve(specifier, context);
+         },
+       });
+       try {
+         await import("./dist/testing.mjs");
+         require("./dist/testing.cjs");
+         current = "conformance";
+         await import("./dist/testing/conformance.mjs");
+         require("./dist/testing/conformance.cjs");
+       } finally {
+         hooks.deregister();
+       }
+       console.log(JSON.stringify({
+         testing: [...seen.testing].sort(),
+         conformance: [...seen.conformance].sort(),
+       }));`,
+      "--input-type=module",
+    );
+    const seen = JSON.parse(result) as {
+      testing: string[];
+      conformance: string[];
+    };
+    // ./testing is a Nest-facing entry (better-auth/api); ./testing/conformance adds its own row and bundles ./plugin.
+    expect(
+      seen.testing.filter(
+        (specifier) => !["better-auth", "better-auth/api"].includes(specifier),
+      ),
+    ).toEqual([]);
+    expect(
+      seen.conformance.filter(
+        (specifier) =>
+          ![
+            "better-auth",
+            "better-auth/api",
+            "better-auth/plugins",
+            "better-auth/adapters/memory",
+            "better-auth/cookies",
+          ].includes(specifier),
+      ),
+    ).toEqual([]);
+    expect(seen.conformance).toContain("better-auth/adapters/memory");
+  });
+
+  it("composes testing overrides from the ESM and CommonJS copies on one builder", () => {
+    const result = node(
+      `import { createRequire } from "node:module";
+       const require = createRequire(import.meta.url);
+       const esm = await import("./dist/testing.mjs");
+       const cjs = require("./dist/testing.cjs");
+       const kit = await import("./dist/index.mjs");
+       const { Test } = await import("@nestjs/testing");
+       const { Logger } = await import("@nestjs/common");
+       const { betterAuth } = await import("better-auth");
+       const { memoryAdapter } = await import("better-auth/adapters/memory");
+       const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+       Logger.overrideLogger(false);
+       const instance = (cookiePrefix) => betterAuth({
+         baseURL: "http://localhost:3000",
+         secret: crypto.randomUUID().repeat(2),
+         database: memoryAdapter({}),
+         logger: { disabled: true },
+         advanced: { cookiePrefix },
+         plugins: [nestjs()],
+       });
+       const builder = Test.createTestingModule({
+         imports: [
+           kit.BetterAuthModule.forRoot({ auth: instance("first"), http: { mount: false }, logSummary: false }),
+           kit.BetterAuthModule.forRoot({ name: "named", auth: instance("named"), http: { mount: false }, logSummary: false }),
+         ],
+       });
+       const fixed = (userId) => ({ kind: "session", source: "better-auth:session", userId, session: {} });
+       cjs.overridePrincipal(builder, fixed("from-cjs"));
+       esm.overridePrincipal(builder, fixed("from-esm"), { instance: "named" });
+       const seen = [];
+       cjs.overrideDecisions(builder, (id) => { seen.push("cjs:" + id); return id === "cjs" ? { effect: "allow" } : undefined; });
+       esm.overrideDecisions(builder, (id) => { seen.push("esm:" + id); return { effect: "deny", reason: "ESM" }; });
+       const moduleRef = await builder.compile();
+       await moduleRef.init();
+       const resolver = moduleRef.get(kit.PRINCIPAL_RESOLVER);
+       const call = { key: {}, invocation: {}, headers: () => new Headers(), clientIp: null, cookies: null, param: () => undefined };
+       const principals = [];
+       for (const name of [undefined, "named"]) {
+         const result = await resolver.resolve(call, {
+           auth: moduleRef.get(kit.getBetterAuthHandleToken(name)),
+           freshness: "default",
+           accepts: new Set(["session"]),
+           sourceSet: "0",
+         });
+         principals.push(result.principal?.userId ?? result.outcome);
+       }
+       const invoker = moduleRef.get(kit.POLICY_INVOKER);
+       const policy = (id) => ({ id, evaluate: () => ({ effect: "deny", reason: "REAL" }) });
+       const decisions = [
+         await invoker.invoke(policy("cjs"), {}, { principal: fixed("u1") }),
+         await invoker.invoke(policy("other"), {}, { principal: fixed("u1") }),
+       ];
+       await moduleRef.close();
+       console.log(JSON.stringify({ principals, decisions, seen }));`,
+      "--input-type=module",
+    );
+    expect(JSON.parse(result)).toEqual({
+      principals: ["from-cjs", "from-esm"],
+      decisions: [{ effect: "allow" }, { effect: "deny", reason: "ESM" }],
+      seen: ["cjs:cjs", "cjs:other", "esm:other"],
+    });
+  });
+
+  it.each(["mts", "cts"] as const)(
+    "types the testing entries for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { overrideAuthGuard, stampPrincipal, testPrincipal } from "nestjs-slightly-better-auth/testing";
+import {
+  runConformance,
+  transportConformance,
+  type ConformanceCase,
+  type ConformanceRunner,
+  type TransportConformanceOptions,
+  type PolicyConformanceOptions,
+} from "nestjs-slightly-better-auth/testing/conformance";
+declare const options: TransportConformanceOptions;
+declare const runner: ConformanceRunner;
+const cases: ConformanceCase[] = transportConformance(options);
+runConformance(cases, runner);
+const skipped: string | undefined = cases[0]?.skip;
+type Requirement = PolicyConformanceOptions["requirement"];
+const source = testPrincipal({ kind: "session", source: "test", userId: "u1", session: {} as never });
+const kinds: readonly string[] = source.kinds;
+// @ts-expect-error A conformance case needs an id.
+const invalid: ConformanceCase = { title: "missing id", run: async () => {} };
+void overrideAuthGuard;
+void stampPrincipal;
+void skipped;
+void kinds;
+void invalid;
+export type { Requirement };
+`,
+      );
+    },
+  );
 });
