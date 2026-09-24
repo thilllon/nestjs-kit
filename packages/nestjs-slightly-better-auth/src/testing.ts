@@ -45,6 +45,8 @@ import type { RoutePlanner } from "./route-planner.js";
 import type { TransportRegistry } from "./transport-registry.js";
 
 const TEST_APP = Symbol.for("nestjs-slightly-better-auth:test-app");
+const TEST_APP_CLOSE = Symbol.for("nestjs-slightly-better-auth:test-app-close");
+const TEST_OVERRIDES = Symbol.for("nestjs-slightly-better-auth:test-overrides");
 const PLUGIN_ID = "nestjs-slightly-better-auth";
 const TEST_PRINCIPAL_SOURCE = "nestjs-slightly-better-auth:test-principal";
 
@@ -61,12 +63,44 @@ type Decide = (
   | undefined
   | Promise<AuthorizationDecision | undefined>;
 
-// TestingModuleBuilder keys overrides by token, so repeated helper calls share one provider.
-const fixedPrincipals = new WeakMap<
-  TestingModuleBuilder,
-  Map<string, FixedPrincipal>
->();
-const deciders = new WeakMap<TestingModuleBuilder, Decide[]>();
+interface TestOverrides {
+  readonly principals: Map<string, FixedPrincipal>;
+  readonly deciders: Decide[];
+}
+
+/**
+ * TestingModuleBuilder keys overrides by token, so repeated helper calls share one provider and its configuration.
+ * The configuration lives on the builder under a global symbol, so the ESM and CommonJS copies of this entry compose.
+ */
+function overridesOf(builder: TestingModuleBuilder): TestOverrides {
+  let overrides = Reflect.get(builder, TEST_OVERRIDES) as
+    | TestOverrides
+    | undefined;
+  if (!overrides) {
+    overrides = { principals: new Map(), deciders: [] };
+    Object.defineProperty(builder, TEST_OVERRIDES, { value: overrides });
+  }
+  return overrides;
+}
+
+/** Make app.close() run Nest's shutdown once, whoever calls it: initTestApp, a registered hook or the test. */
+function closeOnce(app: INestApplication): () => Promise<void> {
+  const existing = Reflect.get(app, TEST_APP_CLOSE) as
+    | (() => Promise<void>)
+    | undefined;
+  if (existing) {
+    return existing;
+  }
+  const close = app.close.bind(app);
+  let pending: Promise<void> | undefined;
+  const once = () => {
+    pending ??= close();
+    return pending;
+  };
+  Object.defineProperty(app, TEST_APP_CLOSE, { value: once });
+  app.close = once;
+  return once;
+}
 
 async function bridgeOf(auth: AuthLike): Promise<BridgeHandle | undefined> {
   const context = (await auth.$context) as {
@@ -88,14 +122,17 @@ function registryOf(app: INestApplication): InstanceRegistry | undefined {
 
 /**
  * init() plus Fastify ready() when the adapter exposes it. Before init, closes the previous application that
- * initTestApp initialized for the same Better Auth instance and that is still bound to it. Registers app.close()
- * with `closeWith`, else with a global afterAll when one exists. On Express, compile one TestingModule per
- * application: a second application of one container fails init() with APP_ADAPTER_CHANGED.
+ * initTestApp initialized for the same Better Auth instance and that is still bound to it: an instance binds
+ * exclusively to one application (B06). A failed init() leaves its binding for the next application, which takes it
+ * over with W_INSTANCE_TAKEN_OVER. app.close() becomes idempotent, and `closeWith` (for example afterEach) receives it;
+ * without `closeWith`, close the last application yourself. On Express, compile one TestingModule per application: a
+ * second application of one container fails init() with APP_ADAPTER_CHANGED.
  */
 export async function initTestApp<T extends INestApplication>(
   app: T,
   options: { closeWith?: (close: () => Promise<void>) => void } = {},
 ): Promise<T> {
+  const close = closeOnce(app);
   const bridges: BridgeHandle[] = [];
   for (const registration of registryOf(app)?.registrations() ?? []) {
     const bridge = registration.instance
@@ -108,8 +145,14 @@ export async function initTestApp<T extends INestApplication>(
       | INestApplication
       | undefined;
     if (previous && previous !== app && bridge.state === "bound") {
+      // initTestApp made previous.close() idempotent, so a registered close of the same app does nothing later.
       await previous.close();
     }
+    Object.defineProperty(bridge, TEST_APP, {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
     bridges.push(bridge);
   }
   await app.init();
@@ -126,15 +169,7 @@ export async function initTestApp<T extends INestApplication>(
       writable: true,
     });
   }
-  const close = () => app.close();
-  const afterAll = Reflect.get(globalThis, "afterAll") as
-    | ((fn: () => Promise<void>) => void)
-    | undefined;
-  if (options.closeWith) {
-    options.closeWith(close);
-  } else if (typeof afterAll === "function") {
-    afterAll(close);
-  }
+  options.closeWith?.(close);
   return app;
 }
 
@@ -166,13 +201,8 @@ export function overridePrincipal(
   principal: FixedPrincipal,
   options: { instance?: string } = {},
 ): TestingModuleBuilder {
-  let principals = fixedPrincipals.get(builder);
-  if (!principals) {
-    principals = new Map();
-    fixedPrincipals.set(builder, principals);
-  }
-  principals.set(options.instance || "default", principal);
-  const configured = principals;
+  const configured = overridesOf(builder).principals;
+  configured.set(options.instance || "default", principal);
   builder.overrideProvider(PRINCIPAL_RESOLVER).useFactory({
     inject: [INSTANCE_REGISTRY, REQUEST_SCOPE, TRANSPORT_REGISTRY],
     factory: (
@@ -207,13 +237,8 @@ export function overrideDecisions(
   builder: TestingModuleBuilder,
   decide: Decide,
 ): TestingModuleBuilder {
-  let list = deciders.get(builder);
-  if (!list) {
-    list = [];
-    deciders.set(builder, list);
-  }
-  list.push(decide);
-  const configured = list;
+  const configured = overridesOf(builder).deciders;
+  configured.push(decide);
   const invoker: PolicyInvoker = {
     async invoke(policy, params, context) {
       for (const decider of configured) {
@@ -258,8 +283,10 @@ export function testPrincipal(
 
 /**
  * Publish a principal for this invocation from a hand-written guard. The stamp lives on ctx.getArgs() and its
- * object elements and is accepted only by readers whose args have the same elements, so concurrent invocations
- * never see each other's stamps. Pass `instance` for handlers of a named instance.
+ * object elements. Readers accept it from the same args array (WS, RPC and GraphQL share it between guards and
+ * interceptors) or from another array with the same elements when at least two elements are objects (an HTTP request
+ * and its response); a lone shared element such as a socket never identifies an invocation. Pass `instance` for
+ * handlers of a named instance.
  */
 export function stampPrincipal(
   context: ExecutionContext,
@@ -296,7 +323,8 @@ function planInstance(planner: RoutePlanner, context: ExecutionContext) {
  * alias and every @UseBetterAuth()/@UseGuards(BetterAuthGuard) site delegate to the same collaborator, which
  * overrideProvider(BetterAuthGuard) plus overrideGuard(BetterAuthGuard) cannot achieve. With `{ principal }` the
  * stand-in stamps the principal (for the handler's instance) and allows; with a CanActivate, that guard runs as the
- * whole guard body and may call stampPrincipal(). The stand-in interceptor opens the same transport-described scope
+ * whole guard body and may call stampPrincipal(); an object with a canActivate method is always treated as a guard,
+ * even when it also has a `principal` property. The stand-in interceptor opens the same transport-described scope
  * as the real one, reading the test stamp first, so readers and BetterAuthService perform no Better Auth I/O.
  */
 export function overrideAuthGuard(
@@ -314,20 +342,25 @@ export function overrideAuthGuard(
     inject: [ROUTE_PLANNER],
     factory: (planner: RoutePlanner) => ({
       async canActivate(context: ExecutionContext): Promise<boolean> {
-        if ("principal" in impl) {
-          const value =
-            typeof impl.principal === "function"
-              ? impl.principal(context)
-              : impl.principal;
-          stampResult(
-            context.getArgs(),
-            planInstance(planner, context),
-            value ? authenticated(value) : absent(),
-          );
-          return true;
+        // A CanActivate may hold its own `principal` field; its canActivate always runs.
+        if (typeof (impl as Partial<CanActivate>).canActivate === "function") {
+          const result = (impl as CanActivate).canActivate(context);
+          return isObservable(result) ? lastValueFrom(result) : result;
         }
-        const result = impl.canActivate(context);
-        return isObservable(result) ? lastValueFrom(result) : result;
+        const { principal } = impl as {
+          principal:
+            | AuthPrincipal
+            | null
+            | ((ctx: ExecutionContext) => AuthPrincipal | null);
+        };
+        const value =
+          typeof principal === "function" ? principal(context) : principal;
+        stampResult(
+          context.getArgs(),
+          planInstance(planner, context),
+          value ? authenticated(value) : absent(),
+        );
+        return true;
       },
     }),
   });

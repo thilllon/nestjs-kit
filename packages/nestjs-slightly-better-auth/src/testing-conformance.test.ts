@@ -9,7 +9,12 @@ import {
 } from "@nestjs/common";
 import { ROUTE_ARGS_METADATA } from "@nestjs/common/constants.js";
 import { IntrinsicException } from "@nestjs/common/exceptions/intrinsic.exception.js";
-import { ExternalContextCreator, MetadataScanner } from "@nestjs/core";
+import {
+  APP_GUARD,
+  APP_INTERCEPTOR,
+  ExternalContextCreator,
+  MetadataScanner,
+} from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { APIError } from "better-auth/api";
 import { admin, organization } from "better-auth/plugins";
@@ -21,14 +26,19 @@ import type {
   AuthorizationPolicy,
   AuthTransport,
   ConformanceCase,
+  ExtensionRef,
   PrincipalSource,
   TransportCall,
   TransportValidationContext,
 } from "./auth-contracts.js";
-import type { AuthFailure } from "./auth-errors.js";
+import { type AuthFailure, AuthFailures } from "./auth-errors.js";
+import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
+import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
+import { defineExtension } from "./auth-module-definition.js";
 import { BetterAuthService } from "./auth-service.js";
 import type { AuthLike, AuthPrincipal } from "./auth-types.js";
+import { allow } from "./authorization-evaluator.js";
 import {
   createConformanceAuth,
   kitIdentity,
@@ -44,6 +54,7 @@ import {
   transportConformance,
 } from "./conformance-transport.js";
 import { orgMember, organizationRef, orgPermission } from "./organization.js";
+import { authenticated, rejected } from "./principal-resolver.js";
 import { freshSession, sessionPrincipal } from "./session-principal.js";
 
 const REFERENCE = "nestjs-slightly-better-auth:reference";
@@ -66,12 +77,18 @@ class ReferenceDenial extends IntrinsicException {
 
 /**
  * An in-process transport with a custom context type: one operation (the logical request) carries one or more
- * invocations, like aliased fields. `sharedInvocation` reproduces the defect of reusing the operation as the invocation.
+ * invocations, like aliased fields. `sharedInvocation` reproduces the defect of reusing the operation as the invocation;
+ * `readsWithoutBrowserLeg` the defect of describing no browser leg for safe operations.
  */
 class ReferenceTransport implements AuthTransport {
   readonly id = "reference";
 
-  constructor(private readonly sharedInvocation = false) {}
+  constructor(
+    private readonly defects: {
+      sharedInvocation?: boolean;
+      readsWithoutBrowserLeg?: boolean;
+    } = {},
+  ) {}
 
   handles(context: ExecutionContext): boolean {
     return context.getType<string>() === REFERENCE;
@@ -83,9 +100,10 @@ class ReferenceTransport implements AuthTransport {
       ReferenceOperation,
     ];
     const url = "http://localhost:3000/reference";
+    const readsWithoutBrowserLeg = this.defects.readsWithoutBrowserLeg;
     return {
       key: operation,
-      invocation: this.sharedInvocation ? operation : message,
+      invocation: this.defects.sharedInvocation ? operation : message,
       headers: () => new Headers(operation.headers),
       clientIp: null,
       get cookies() {
@@ -104,6 +122,9 @@ class ReferenceTransport implements AuthTransport {
       },
       param: (name) => message.input[name],
       get browser() {
+        if (readsWithoutBrowserLeg && message.operation === "read") {
+          return undefined;
+        }
         return {
           enforce: message.operation === "unsafe",
           headers: () => new Headers(operation.headers),
@@ -170,7 +191,7 @@ function flatten(fixtures: TransportFixtures): Map<string, FixtureHandler> {
   return handlers;
 }
 
-function handlerClass(fixtures: TransportFixtures) {
+function handlerClass(fixtures: TransportFixtures, federation = false) {
   @Injectable()
   class ReferenceHandlers {
     static readonly [REFERENCE_HANDLERS] = true;
@@ -179,7 +200,11 @@ function handlerClass(fixtures: TransportFixtures) {
       @Inject(BetterAuthService) readonly service: BetterAuthService,
     ) {}
   }
-  for (const [name, fixture] of flatten(fixtures)) {
+  const handlers = flatten(fixtures);
+  if (federation && fixtures.graph.reference) {
+    handlers.set("reference", fixtures.graph.reference);
+  }
+  for (const [name, fixture] of handlers) {
     const method = async function (
       this: ReferenceHandlers,
       ...args: unknown[]
@@ -214,11 +239,21 @@ function handlerClass(fixtures: TransportFixtures) {
 
 const dispatchers = new WeakMap<
   object,
-  { handlers: object; creator: ExternalContextCreator }
+  {
+    handlers: object;
+    creator: ExternalContextCreator;
+    fixtures: Map<string, FixtureHandler>;
+  }
 >();
 
+/** App enhancers registered by the harness (T-coverage-claims with globalGuard: false). */
+const appEnhancers = [
+  { provide: APP_GUARD, useClass: BetterAuthGuard },
+  { provide: APP_INTERCEPTOR, useClass: BetterAuthScopeInterceptor },
+];
+
 function referenceHarness(
-  transport: ReferenceTransport,
+  transport: ExtensionRef<AuthTransport>,
 ): TransportConformanceOptions {
   const call = async (
     app: INestApplication,
@@ -276,7 +311,7 @@ function referenceHarness(
     expectBrowserLeg: true,
     invocationShapes: ["aliases"],
     async createApp(fixtures, auth, options) {
-      const Handlers = handlerClass(fixtures);
+      const Handlers = handlerClass(fixtures, options.federation);
       @Module({
         imports: [
           BetterAuthModule.forRoot({
@@ -286,12 +321,15 @@ function referenceHarness(
             ...(options.defaultRequirements
               ? { defaultRequirements: options.defaultRequirements }
               : {}),
+            ...(options.globalScope === undefined
+              ? {}
+              : { globalScope: options.globalScope }),
             transports: [transport],
             http: { mount: false },
             logSummary: false,
           } as never),
         ],
-        providers: [Handlers],
+        providers: [Handlers, ...(options.appEnhancers ? appEnhancers : [])],
       })
       class ReferenceModule {}
       let builder = Test.createTestingModule({ imports: [ReferenceModule] });
@@ -299,7 +337,7 @@ function referenceHarness(
         builder = options.override(builder);
       }
       const moduleRef = await builder.compile();
-      moduleRef.useLogger(false);
+      moduleRef.useLogger(options.logger ?? false);
       try {
         await moduleRef.init();
       } catch (error) {
@@ -309,6 +347,7 @@ function referenceHarness(
       dispatchers.set(moduleRef, {
         handlers: moduleRef.get(Handlers),
         creator: moduleRef.get(ExternalContextCreator),
+        fixtures: flatten(fixtures),
       });
       return moduleRef as unknown as INestApplication;
     },
@@ -317,21 +356,14 @@ function referenceHarness(
         headers: new Headers(headers),
         setCookies: [],
       };
+      const { fixtures } = dispatchers.get(app)!;
       const results = await Promise.all(
         names(handler).map((name) =>
           settle(
             call(
               app,
               name,
-              {
-                input,
-                operation:
-                  name === "unsafe" ||
-                  name.startsWith("login") ||
-                  name === "publicService"
-                    ? "unsafe"
-                    : "read",
-              },
+              { input, operation: fixtures.get(name)!.operation },
               operation,
             ),
           ),
@@ -376,11 +408,81 @@ describe("transport kit on the in-process reference transport", () => {
 describe("transport kit mutations", () => {
   it("fails T-invocation-decisions when aliases share one invocation object", async () => {
     const cases = transportConformance(
-      referenceHarness(new ReferenceTransport(true)),
+      referenceHarness(new ReferenceTransport({ sharedInvocation: true })),
     );
     await expect(
       caseById(cases, "T-invocation-decisions").run(),
     ).rejects.toThrow(/was not decided independently/);
+  });
+
+  it("fails the safe forwarding rows for a transport without a browser leg on reads", async () => {
+    const cases = transportConformance(
+      referenceHarness(
+        new ReferenceTransport({ readsWithoutBrowserLeg: true }),
+      ),
+    );
+    await expect(caseById(cases, "T-csrf-login-proxy").run()).rejects.toThrow(
+      /expected a 403 denial/,
+    );
+    await expect(caseById(cases, "T-csrf-safe-methods").run()).rejects.toThrow(
+      /expected a 403 denial/,
+    );
+  });
+
+  it("decides required capabilities from the transport a definition resolves, not from the helpers", async () => {
+    class NestingTransport extends ReferenceTransport {
+      // Instance fields: invisible on the prototype.
+      readonly lineage = (): undefined => undefined;
+
+      readonly defaultAccessFor = (): undefined => undefined;
+
+      override validate(context: TransportValidationContext): void {
+        super.validate(context);
+        for (const wrapper of context.discovery.getProviders()) {
+          const target = wrapper.metatype as { prototype?: object } | undefined;
+          if (
+            target?.prototype &&
+            Reflect.get(target, REFERENCE_HANDLERS) &&
+            typeof Reflect.get(target.prototype, "reference") === "function"
+          ) {
+            context.claim(target as never, "reference", "global", {
+              code: "REFERENCE_RESOLVER_UNGUARDED",
+              hint: "Serve federation with field resolver guards.",
+              everyHandler: true,
+            });
+          }
+        }
+      }
+    }
+    const cases = transportConformance({
+      ...referenceHarness(
+        defineExtension({ use: { useFactory: () => new NestingTransport() } }),
+      ),
+      invokeTwice: undefined,
+      invocationShapes: undefined,
+    });
+    await expect(
+      caseById(cases, "T-invocation-decisions").run(),
+    ).rejects.toThrow(/has a lineage, so invokeTwice/);
+    await expect(
+      caseById(cases, "T-internal-error-logged-once").run(),
+    ).rejects.toThrow(/has a lineage, so invokeTwice/);
+    await expect(caseById(cases, "T-inherit-no-lookup").run()).rejects.toThrow(
+      /nests handlers \(defaultAccessFor\), so invokeGraph/,
+    );
+    await expect(caseById(cases, "T-stamp-per-plan").run()).rejects.toThrow(
+      /so invokeGraph is required/,
+    );
+    await expect(caseById(cases, "T-reference-resolver").run()).rejects.toThrow(
+      /claims the federation reference resolver/,
+    );
+    for (const id of [
+      "T-invocation-decisions",
+      "T-inherit-no-lookup",
+      "T-reference-resolver",
+    ]) {
+      expect(caseById(cases, id).skip).toBeUndefined();
+    }
   });
 });
 
@@ -435,7 +537,9 @@ describe("principal source kit on the built-in API-key source", async () => {
   const keys = await apiKeyAuth();
   runConformance(
     principalSourceConformance({
-      source: apiKeyPrincipal(),
+      // One source per case: the source shares one outage probe per second (S-apikey-outage), so an earlier case's
+      // healthy probe would otherwise answer S-infra-throws.
+      source: defineExtension({ use: { useFactory: () => apiKeyPrincipal() } }),
       auth: keys.auth,
       credentials: {
         valid: async () => new Headers({ "x-api-key": await keys.key() }),
@@ -475,6 +579,144 @@ describe("principal source kit mutations", () => {
     await expect(
       caseById(cases, "S-rejected-not-thrown").run(),
     ).rejects.toThrow(/resolve threw for an invalid credential/);
+  });
+
+  it("fails S-cookie-forwarded for a source that drops the refresh cookie it forwards by hand", async () => {
+    const auth = createConformanceAuth();
+    const real = sessionPrincipal();
+    const dropping: PrincipalSource = {
+      ...(real as unknown as PrincipalSource),
+      resolve: (request) =>
+        real.resolve({
+          ...request,
+          cookies: request.cookies ? { append: () => true } : null,
+        }) as never,
+    };
+    const cases = principalSourceConformance({
+      source: dropping,
+      auth,
+      credentials: {
+        valid: async () =>
+          new Headers({ cookie: (await kitIdentity(auth)).cookie }),
+        invalid: () =>
+          new Headers({ cookie: "better-auth.session_token=invalid.value" }),
+      },
+    });
+    await expect(caseById(cases, "S-cookie-forwarded").run()).rejects.toThrow(
+      /the sink received 0/,
+    );
+  });
+
+  it("fails S-infra-throws for sources that turn a storage outage into a 401", async () => {
+    const keys = await apiKeyAuth();
+    const naive: PrincipalSource = {
+      id: "conformance:naive-api-key",
+      kinds: ["api-key" as never],
+      acceptance: "explicit",
+      delegates: true,
+      credentialHeaders: ["x-api-key"],
+      appliesTo: (request) => request.headers.has("x-api-key"),
+      async resolve(request) {
+        const key = request.headers.get("x-api-key")!;
+        const result = (await (
+          request.auth.api as unknown as {
+            verifyApiKey(input: { body: { key: string } }): Promise<{
+              valid: boolean;
+              key: { userId: string } | null;
+            }>;
+          }
+        ).verifyApiKey({ body: { key } })) as {
+          valid: boolean;
+          key: { userId: string } | null;
+        };
+        return result.valid
+          ? authenticated({
+              kind: "api-key",
+              source: "conformance:naive-api-key",
+              userId: result.key?.userId ?? null,
+              delegation: { description: "naive", allows: () => false },
+            } as never)
+          : rejected(
+              AuthFailures.rejected({ status: 401, reason: "INVALID_API_KEY" }),
+            );
+      },
+    };
+    const direct: PrincipalSource = {
+      id: "conformance:direct-session-read",
+      kinds: ["session"],
+      acceptance: "default",
+      credentialHeaders: ["x-session-token"],
+      appliesTo: (request) => request.headers.has("x-session-token"),
+      async resolve(request) {
+        const context = (await request.auth.context()) as unknown as {
+          internalAdapter: {
+            findSession(
+              token: string,
+            ): Promise<{ user: { id: string } } | null>;
+          };
+        };
+        try {
+          const found = await context.internalAdapter.findSession(
+            request.headers.get("x-session-token")!,
+          );
+          return found
+            ? authenticated({
+                kind: "session",
+                source: "conformance:direct-session-read",
+                userId: found.user.id,
+                session: found,
+              } as never)
+            : rejected(AuthFailures.rejected({ status: 401 }));
+        } catch {
+          return rejected(AuthFailures.rejected({ status: 401 }));
+        }
+      },
+    };
+    const naiveCases = principalSourceConformance({
+      source: naive,
+      auth: keys.auth,
+      credentials: {
+        valid: async () => new Headers({ "x-api-key": await keys.key() }),
+        invalid: () => new Headers({ "x-api-key": "conformance-unknown" }),
+      },
+    });
+    await expect(caseById(naiveCases, "S-infra-throws").run()).rejects.toThrow(
+      /a storage outage resolved/,
+    );
+    const directCases = principalSourceConformance({
+      source: direct,
+      auth: keys.auth,
+      credentials: {
+        valid: async () =>
+          new Headers({
+            "x-session-token": (await kitIdentity(keys.auth)).token,
+          }),
+        invalid: () => new Headers({ "x-session-token": "unknown" }),
+      },
+    });
+    await expect(caseById(directCases, "S-infra-throws").run()).rejects.toThrow(
+      /a storage outage resolved/,
+    );
+  });
+
+  it("rejects an instance without session.updateAge 0", async () => {
+    const auth = createConformanceAuth();
+    const context = (await auth.$context) as {
+      options: { session: { updateAge?: number } };
+    };
+    context.options.session.updateAge = 86_400;
+    const cases = principalSourceConformance({
+      source: sessionPrincipal(),
+      auth,
+      credentials: {
+        valid: async () =>
+          new Headers({ cookie: (await kitIdentity(auth)).cookie }),
+        invalid: () => new Headers(),
+      },
+    });
+    await expect(caseById(cases, "S-cookie-forwarded").run()).rejects.toThrow(
+      expect.objectContaining({ code: "CONFORMANCE_SESSION_REFRESH" }),
+    );
   });
 });
 
@@ -664,6 +906,29 @@ describe("policy kit mutations", () => {
     });
     await expect(caseById(cases, "Z-delegation-scope").run()).rejects.toThrow(
       /widened a delegated principal/,
+    );
+  });
+
+  it("rejects a requirement whose policy is a class reference", async () => {
+    const fixture = await adminFixture();
+    class ClassPolicy {
+      readonly id = "conformance:class-policy";
+
+      evaluate() {
+        return allow();
+      }
+    }
+    expect(() =>
+      policyConformance({
+        requirement: { policy: ClassPolicy as never, params: {} },
+        auth: fixture.auth,
+        allowingPrincipal: async () =>
+          sessionPrincipalOf({ id: fixture.administrator.userId }),
+        denyingPrincipal: async () =>
+          sessionPrincipalOf({ id: fixture.member.userId }),
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: "CONFORMANCE_POLICY_OBJECT_REQUIRED" }),
     );
   });
 });

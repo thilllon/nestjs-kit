@@ -1,6 +1,8 @@
 export type {
   ConformanceCase,
+  ConformanceOutcome,
   ConformanceRunner,
+  ConformanceSkip,
 } from "./auth-contracts.js";
 export {
   conformanceProbePlugin,

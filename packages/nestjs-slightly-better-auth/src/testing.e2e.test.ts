@@ -9,8 +9,9 @@ import {
 } from "@nestjs/common";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import { Test, type TestingModuleBuilder } from "@nestjs/testing";
-import { organization } from "better-auth/plugins";
+import { admin, organization } from "better-auth/plugins";
 import { afterEach, describe, expect, it } from "vitest";
+import { RequirePermission } from "./admin.js";
 import {
   CurrentPrincipal,
   UseAuthInstance,
@@ -331,5 +332,64 @@ describe("overridePrincipal and overrideDecisions on real routes", () => {
     });
     expect((await get(`${url}/global`)).status).toBe(401);
     expect(sessionReads(f.secondProbe)).toBe(0);
+  });
+});
+
+describe("overrideDecisions falling back to the real admin policy", () => {
+  it("answers USER_NOT_FOUND without a stored user and the stored role's verdict otherwise", async () => {
+    const auth = createConformanceAuth({ plugins: [admin()] });
+    const administrator = await kitIdentity(auth, { role: "admin" });
+    const member = await kitIdentity(auth, { role: "user" });
+
+    @Controller("users")
+    class UsersController {
+      @RequirePermission({ user: ["list"] })
+      @Get()
+      list() {
+        return { allowed: true };
+      }
+    }
+
+    @Module({
+      imports: [
+        BetterAuthModule.forRoot({
+          auth,
+          platforms: [expressPlatform()],
+          logSummary: false,
+        } as never),
+      ],
+      controllers: [UsersController],
+    })
+    class AdminModule {}
+
+    const cases = [
+      // The fixed session claims the opposite role: the policy judges the stored user row.
+      [
+        "missing-user",
+        "admin",
+        { status: 401, body: { reason: "USER_NOT_FOUND" } },
+      ],
+      [administrator.userId, "user", { status: 200, body: { allowed: true } }],
+      [
+        member.userId,
+        "admin",
+        { status: 403, body: { reason: "MISSING_PERMISSION" } },
+      ],
+    ] as const;
+    for (const [userId, role, expected] of cases) {
+      const builder = Test.createTestingModule({ imports: [AdminModule] });
+      overridePrincipal(builder, {
+        kind: "session",
+        source: "better-auth:session",
+        userId,
+        session: {
+          user: { id: userId, role },
+          session: { id: `session-${userId}` },
+        },
+      } as unknown as AuthPrincipal);
+      overrideDecisions(builder, () => undefined);
+      const url = await start(builder);
+      expect(await get(`${url}/users`)).toMatchObject(expected);
+    }
   });
 });

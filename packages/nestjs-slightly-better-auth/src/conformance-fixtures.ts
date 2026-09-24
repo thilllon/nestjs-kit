@@ -18,14 +18,23 @@ import {
   getIP,
   getShouldSkipSessionRefresh,
 } from "better-auth/api";
-import { getAuthTables } from "better-auth/db";
 import { bearer, testUtils } from "better-auth/plugins";
-import type { ConformanceCase, ConformanceRunner } from "./auth-contracts.js";
+import type {
+  ConformanceCase,
+  ConformanceOutcome,
+  ConformanceRunner,
+  ConformanceSkip,
+} from "./auth-contracts.js";
 import { BetterAuthConfigurationError } from "./auth-errors.js";
 import type { AuthLike } from "./auth-types.js";
 import { nestjs } from "./plugin.js";
 
-export type { ConformanceCase, ConformanceRunner } from "./auth-contracts.js";
+export type {
+  ConformanceCase,
+  ConformanceOutcome,
+  ConformanceRunner,
+  ConformanceSkip,
+} from "./auth-contracts.js";
 
 export const PROBE_PLUGIN_ID = "nestjs-slightly-better-auth-conformance-probe";
 /** The trusted origin the probe plugin contributes through init(), so origin cases see the post-init set. */
@@ -34,18 +43,41 @@ export const KIT_BASE_URL = "http://localhost:3000";
 export const UNTRUSTED_ORIGIN = "https://evil.example";
 const PROBE_STATE = Symbol.for("nestjs-slightly-better-auth:conformance-probe");
 
+/** One database adapter operation the probe observed. */
+export interface StorageCall {
+  readonly method: string;
+  readonly model: string | undefined;
+}
+
+/** The Set-Cookie lines one dispatched endpoint produced, with the request headers of that call. */
+export interface ProducedCookies {
+  readonly path: string;
+  readonly setCookies: readonly string[];
+  readonly headers: Headers | undefined;
+  /** The instance's session cookie name, to compare the call's credential with a request's. */
+  readonly sessionCookie: string;
+}
+
 /** Observations and fault injection of one conformanceProbePlugin() object. */
 export interface ProbeState {
   /** Every endpoint path Better Auth dispatched (router and auth.api), in order. */
   readonly calls: string[];
   /** Database writes as `<model>.<create|update|delete>`. */
   readonly writes: string[];
+  /** Every database adapter operation as `<method>:<model>`, reads included, transactions included. */
+  readonly storage: string[];
+  /** Endpoint dispatches that produced Set-Cookie lines, seen by an after hook. */
+  readonly produced: ProducedCookies[];
   /** getShouldSkipSessionRefresh() observed by an after hook, per dispatched path. */
   readonly refresh: { readonly path: string; readonly skip: boolean }[];
   /** 'middleware' and 'auth' markers for ordering cases. */
   readonly order: string[];
   /** Returns a value to throw from the before hook for a path; undefined dispatches normally. */
   fault: ((path: string) => unknown) | undefined;
+  /** Returns a value to throw from a database adapter operation (a storage outage); undefined runs it. */
+  storageFault: ((call: StorageCall) => unknown) | undefined;
+  /** Milliseconds the before hook waits for a path, so that concurrent sources settle in a chosen order. */
+  delay: ((path: string) => number | undefined) | undefined;
   streamCancelled: boolean;
 }
 
@@ -53,11 +85,79 @@ export function createProbeState(): ProbeState {
   return {
     calls: [],
     writes: [],
+    storage: [],
+    produced: [],
     refresh: [],
     order: [],
     fault: undefined,
+    storageFault: undefined,
+    delay: undefined,
     streamCancelled: false,
   };
+}
+
+/** A case result: the case does not apply to this unit, for the given reason. */
+export function conformanceSkip(reason: string): ConformanceSkip {
+  return { skipped: reason };
+}
+
+const STORAGE_METHODS = [
+  "create",
+  "update",
+  "updateMany",
+  "findOne",
+  "findMany",
+  "delete",
+  "deleteMany",
+  "consumeOne",
+  "count",
+] as const;
+const INSTRUMENTED = Symbol("nestjs-slightly-better-auth:conformance-storage");
+
+/** Counts and faults every data operation of a database adapter in place, including the adapters of its transactions. */
+function instrumentStorage(adapter: unknown, state: ProbeState): void {
+  if (
+    !adapter ||
+    typeof adapter !== "object" ||
+    Reflect.get(adapter, INSTRUMENTED)
+  ) {
+    return;
+  }
+  const target = adapter as Record<string, unknown>;
+  Object.defineProperty(target, INSTRUMENTED, { value: true });
+  for (const method of STORAGE_METHODS) {
+    const original = target[method];
+    if (typeof original !== "function") {
+      continue;
+    }
+    target[method] = async (...args: unknown[]) => {
+      const model = (args[0] as { model?: unknown } | undefined)?.model;
+      const call = {
+        method,
+        model: typeof model === "string" ? model : undefined,
+      };
+      state.storage.push(`${method}:${call.model ?? ""}`);
+      const fault = state.storageFault?.(call);
+      if (fault !== undefined) {
+        throw fault;
+      }
+      return (original as (...values: unknown[]) => unknown).apply(
+        target,
+        args,
+      );
+    };
+  }
+  const transaction = target.transaction;
+  if (typeof transaction === "function") {
+    target.transaction = (callback: (adapter: unknown) => unknown) =>
+      (transaction as (fn: (adapter: unknown) => unknown) => unknown).call(
+        target,
+        (inner: unknown) => {
+          instrumentStorage(inner, state);
+          return callback(inner);
+        },
+      );
+  }
 }
 
 function base64(bytes: Uint8Array): string {
@@ -83,14 +183,29 @@ function writes(state: ProbeState) {
 /**
  * The conformance kits' Better Auth probe: byte-exact echo, multi-cookie, redirect, stream, HTML, method, URL
  * and IP endpoints under /probe, a before hook that counts dispatches and injects faults, an after hook that
- * records refresh suppression, database write counters, and https://probe-plugin.example as a trusted origin
- * contributed through init(). Put it before nestjs() in the plugin list.
+ * records refresh suppression and the Set-Cookie lines each call produced, database write counters, a storage
+ * instrument that counts and faults every database adapter operation, and https://probe-plugin.example as a trusted
+ * origin contributed through init(). Put it before nestjs() in the plugin list.
  */
 export function conformanceProbePlugin(): BetterAuthPlugin {
+  return probePlugin();
+}
+
+function probePlugin(
+  options: { memoryTables?: Record<string, unknown[]> } = {},
+): BetterAuthPlugin {
   const state = createProbeState();
   const plugin = {
     id: PROBE_PLUGIN_ID,
-    init() {
+    init(context: { adapter: unknown; tables?: object }) {
+      if (options.memoryTables) {
+        for (const table of Object.values(context.tables ?? {}) as {
+          modelName: string;
+        }[]) {
+          options.memoryTables[table.modelName] ??= [];
+        }
+      }
+      instrumentStorage(context.adapter, state);
       return {
         options: {
           trustedOrigins: [PROBE_TRUSTED_ORIGIN],
@@ -231,6 +346,10 @@ export function conformanceProbePlugin(): BetterAuthPlugin {
           matcher: () => true,
           handler: createAuthMiddleware(async (ctx) => {
             state.calls.push(ctx.path);
+            const wait = state.delay?.(ctx.path);
+            if (wait) {
+              await new Promise((resolve) => setTimeout(resolve, wait));
+            }
             const fault = state.fault?.(ctx.path);
             if (fault !== undefined) {
               throw fault;
@@ -246,6 +365,16 @@ export function conformanceProbePlugin(): BetterAuthPlugin {
               path: ctx.path,
               skip: (await getShouldSkipSessionRefresh()) === true,
             });
+            const setCookies =
+              ctx.context.responseHeaders?.getSetCookie() ?? [];
+            if (setCookies.length) {
+              state.produced.push({
+                path: ctx.path,
+                setCookies,
+                headers: ctx.headers ? new Headers(ctx.headers) : undefined,
+                sessionCookie: ctx.context.authCookies.sessionToken.name,
+              });
+            }
           }),
         },
       ],
@@ -276,37 +405,33 @@ export async function probeOf(auth: AuthLike): Promise<ProbeState> {
 /**
  * A memory-adapter Better Auth instance with the settings the kits assume: origin checks explicitly on
  * (advanced.disableOriginCheck: false, which vitest's TEST=true would otherwise switch off), session.updateAge 0 so
- * every session read refreshes, testUtils(), bearer(), conformanceProbePlugin() and nestjs() last.
+ * every session read refreshes, testUtils(), bearer(), conformanceProbePlugin() and nestjs() last. The kit settings
+ * win over the same options in `options`.
  */
 export function createConformanceAuth(
   options: Omit<BetterAuthOptions, "database"> = {},
 ): AuthLike {
+  // The probe creates a table for every model of the resolved schema when Better Auth initializes it.
+  const tables: Record<string, unknown[]> = {};
   const resolved = {
     secret: globalThis.crypto.randomUUID() + globalThis.crypto.randomUUID(),
     baseURL: KIT_BASE_URL,
     emailAndPassword: { enabled: true },
     logger: { disabled: true },
     ...options,
-    session: { updateAge: 0, ...options.session },
+    session: { ...options.session, updateAge: 0 },
     advanced: { ...options.advanced, disableOriginCheck: false },
     plugins: [
       testUtils(),
       bearer(),
-      conformanceProbePlugin(),
+      probePlugin({ memoryTables: tables }),
       ...(options.plugins ?? []),
       nestjs(),
     ],
   } satisfies BetterAuthOptions;
   return betterAuth<BetterAuthOptions>({
     ...resolved,
-    database: memoryAdapter(
-      Object.fromEntries(
-        Object.values(getAuthTables(resolved)).map((table) => [
-          table.modelName,
-          [],
-        ]),
-      ),
-    ),
+    database: memoryAdapter(tables),
   }) as unknown as AuthLike;
 }
 
@@ -388,7 +513,7 @@ export async function kitIdentity(
 export function conformanceCase(
   id: string,
   title: string,
-  run: () => Promise<void>,
+  run: () => Promise<ConformanceOutcome>,
   skip?: string,
 ): ConformanceCase {
   return skip === undefined ? { id, title, run } : { id, title, skip, run };
@@ -396,7 +521,9 @@ export function conformanceCase(
 
 /**
  * Register cases with a runner that has describe/it (vitest, jest, node:test). Cases are grouped by id. A case with
- * `skip` registers a passing test whose name states the reason, so every unsupported capability stays visible.
+ * `skip` registers a passing test whose name states the reason, so every unsupported capability stays visible. A case
+ * that skips at run time calls the runner's context.skip(reason) when the runner passes a context (Vitest, node:test);
+ * under Jest it passes.
  */
 export function runConformance(
   cases: readonly ConformanceCase[],
@@ -412,7 +539,17 @@ export function runConformance(
         if (item.skip !== undefined) {
           runner.it(`${item.title} (skipped: ${item.skip})`, async () => {});
         } else {
-          runner.it(item.title, () => item.run());
+          // No declared parameters: Jest would treat one as a done callback, and Vitest parses it for fixtures.
+          runner.it(item.title, async function () {
+            // biome-ignore lint/complexity/noArguments: see above; the runner's test context is the first argument.
+            const context = arguments[0] as
+              | { skip?: (note?: string) => void }
+              | undefined;
+            const result = await item.run();
+            if (result && typeof result.skipped === "string") {
+              context?.skip?.(result.skipped);
+            }
+          });
         }
       }
     });

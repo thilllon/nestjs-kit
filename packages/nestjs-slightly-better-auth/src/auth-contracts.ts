@@ -531,13 +531,31 @@ export interface ApiKeyPrincipalOptions {
 export interface ConformanceCase {
   readonly id: string;
   readonly title: string;
+  /** Why the case does not apply, when that is known before it runs. */
   readonly skip?: string;
-  run(): Promise<void>;
+  /**
+   * Runs the case. It resolves with a ConformanceSkip when the case finds at run time that it does not apply, for
+   * example because a unit registered through defineExtension() lacks an optional capability.
+   */
+  run(): Promise<ConformanceOutcome>;
 }
+
+/** A case that found at run time that it does not apply. */
+export interface ConformanceSkip {
+  readonly skipped: string;
+}
+
+/** What a case's run() resolves with: nothing when it passed, a ConformanceSkip when it does not apply. */
+// biome-ignore lint/suspicious/noConfusingVoidType: cases written as `async () => {}` resolve to void.
+export type ConformanceOutcome = void | ConformanceSkip;
 
 export interface ConformanceRunner {
   describe(name: string, fn: () => void): void;
-  it(name: string, fn: () => Promise<void>): void;
+  /**
+   * Registers a test. runConformance passes a function without declared parameters; when the runner hands it a test
+   * context with skip(note) (Vitest, node:test), a case that skips at run time is reported as skipped.
+   */
+  it(name: string, fn: (context?: unknown) => Promise<void>): void;
 }
 
 export interface BootAdvice {

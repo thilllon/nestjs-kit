@@ -8,13 +8,15 @@ import type {
   PrincipalResult,
   PrincipalSource,
 } from "./auth-contracts.js";
-import { isAuthFailure } from "./auth-errors.js";
+import { BetterAuthConfigurationError, isAuthFailure } from "./auth-errors.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { getBetterAuthHandleToken, getExtensionToken } from "./auth-tokens.js";
 import type { AuthLike } from "./auth-types.js";
 import {
   type ConformanceCase,
   conformanceCase,
+  conformanceSkip,
+  type ConformanceOutcome,
   probeOf,
   type ProbeState,
   settle,
@@ -24,7 +26,8 @@ export interface PrincipalSourceConformanceOptions {
   source: ExtensionRef<PrincipalSource>;
   /**
    * The Better Auth instance the credentials belong to. It must include conformanceProbePlugin(), testUtils() and
-   * nestjs(), with session.updateAge 0 and advanced.disableOriginCheck false: createConformanceAuth({ plugins }) builds one.
+   * nestjs(), with session.updateAge 0 and session refresh enabled, so every session read produces a refresh
+   * Set-Cookie: createConformanceAuth({ plugins }) builds one. The kit fails with CONFORMANCE_SESSION_REFRESH otherwise.
    */
   auth: AuthLike;
   credentials: {
@@ -58,6 +61,20 @@ async function harness(
   options: PrincipalSourceConformanceOptions,
 ): Promise<Harness> {
   const probe = await probeOf(options.auth);
+  const session = (
+    (await options.auth.$context) as {
+      options: {
+        session?: { updateAge?: number; disableSessionRefresh?: boolean };
+      };
+    }
+  ).options.session;
+  if (session?.updateAge !== 0 || session.disableSessionRefresh) {
+    throw new BetterAuthConfigurationError(
+      "CONFORMANCE_SESSION_REFRESH",
+      "The principal-source kit needs session.updateAge 0 with session refresh enabled, so that every session read produces a refresh Set-Cookie.",
+      "Create the instance with createConformanceAuth() or set session: { updateAge: 0 }.",
+    );
+  }
   const moduleRef: TestingModule = await Test.createTestingModule({
     imports: [
       BetterAuthModule.forRoot({
@@ -116,13 +133,14 @@ async function harness(
 
 async function withHarness(
   options: PrincipalSourceConformanceOptions,
-  fn: (harness: Harness) => Promise<void>,
-): Promise<void> {
+  fn: (harness: Harness) => Promise<ConformanceOutcome>,
+): Promise<ConformanceOutcome> {
   const value = await harness(options);
   try {
-    await fn(value);
+    return await fn(value);
   } finally {
     value.probe.fault = undefined;
+    value.probe.storageFault = undefined;
     await value.close();
   }
 }
@@ -131,10 +149,54 @@ function names(cookies: readonly string[]): string[] {
   return cookies.map((line) => line.split("=", 1)[0]!);
 }
 
+function cookieValue(header: string | null | undefined, name: string): string {
+  for (const part of (header ?? "").split(";")) {
+    const index = part.indexOf("=");
+    if (index > 0 && part.slice(0, index).trim() === name) {
+      return part.slice(index + 1).trim();
+    }
+  }
+  return "";
+}
+
+/** The request's credential as the cookie bridge compares it: session cookie, Authorization and declared headers. */
+function credentialOf(
+  headers: Headers | undefined,
+  sessionCookie: string,
+  extra: readonly string[],
+): string {
+  return [
+    cookieValue(headers?.get("cookie"), sessionCookie),
+    headers?.get("authorization") ?? "",
+    ...extra.map((name) => headers?.get(name) ?? ""),
+  ].join("\u0000");
+}
+
+/** Set-Cookie lines that calls with the request's own credential, or with none, produced since `from`. */
+function ownCookies(
+  probe: ProbeState,
+  from: number,
+  request: Headers,
+  extra: readonly string[],
+): string[] {
+  return probe.produced.slice(from).flatMap((entry) => {
+    const call = credentialOf(entry.headers, entry.sessionCookie, extra);
+    return call === credentialOf(request, entry.sessionCookie, extra) ||
+      call === credentialOf(undefined, entry.sessionCookie, extra)
+      ? entry.setCookies
+      : [];
+  });
+}
+
+function occurrences(lines: readonly string[], line: string): number {
+  return lines.filter((value) => value === line).length;
+}
+
 /**
  * The principal-source kit (invariants P1–P7). It resolves the source directly inside the resolver's chain scope,
  * so a source that throws for invalid credentials fails S-rejected-not-thrown although core would normalize the
- * throw at runtime. Storage faults are injected through the probe plugin's before hook.
+ * throw at runtime. Storage faults are injected into the instance's database adapter, below every endpoint and
+ * every direct adapter read, so endpoints that swallow storage errors are exercised too.
  */
 export function principalSourceConformance(
   options: PrincipalSourceConformanceOptions,
@@ -142,7 +204,7 @@ export function principalSourceConformance(
   const add = (
     id: string,
     title: string,
-    run: (harness: Harness) => Promise<void>,
+    run: (harness: Harness) => Promise<ConformanceOutcome>,
     skip?: string,
   ) => conformanceCase(id, title, () => withHarness(options, run), skip);
   return [
@@ -175,36 +237,59 @@ export function principalSourceConformance(
     ),
     add(
       "S-infra-throws",
-      "a storage failure makes resolve throw instead of denying",
+      "a storage outage makes resolve throw instead of denying",
       async ({ resolve, probe }) => {
         const headers = await options.credentials.valid();
         const calls = probe.calls.length;
-        probe.fault = () => new Error("conformance storage outage");
+        const storage = probe.storage.length;
+        probe.storageFault = () => new Error("conformance storage outage");
         const result = await settle(() =>
           resolve(headers, new RecordingSink()),
         );
-        if (probe.calls.length === calls) {
-          return;
+        probe.storageFault = undefined;
+        if (probe.calls.length === calls && probe.storage.length === storage) {
+          return conformanceSkip(
+            "the source read no storage and called no Better Auth endpoint for a valid credential",
+          );
         }
         assert.equal(
           result.ok,
           false,
-          `a storage failure resolved ${JSON.stringify(result.ok && result.value)}`,
+          `a storage outage resolved ${JSON.stringify(result.ok && result.value)}`,
+        );
+        assert.ok(
+          !isAuthFailure(!result.ok && result.error),
+          `a storage outage was thrown as a denial: ${String(!result.ok && result.error)}`,
         );
       },
     ),
     add(
       "S-cookie-forwarded",
-      "cookies of the source's own-credential calls reach the sink exactly once",
-      async ({ resolve }) => {
+      "Set-Cookie lines of the source's own-credential calls reach the sink exactly once",
+      async ({ resolve, probe, source }) => {
         const sink = new RecordingSink();
-        const result = await resolve(await options.credentials.valid(), sink);
+        const headers = await options.credentials.valid();
+        const from = probe.produced.length;
+        const result = await resolve(new Headers(headers), sink);
         assert.equal(result.outcome, "authenticated");
+        const produced = ownCookies(
+          probe,
+          from,
+          headers,
+          source.credentialHeaders ?? [],
+        );
+        for (const line of new Set(produced)) {
+          assert.equal(
+            occurrences(sink.values, line),
+            occurrences(produced, line),
+            `the source's Better Auth calls produced ${occurrences(produced, line)} × ${names([line])[0]}, the sink received ${occurrences(sink.values, line)} (sink: ${names(sink.values).join(", ") || "nothing"})`,
+          );
+        }
         const seen = names(sink.values);
         assert.deepEqual(
           seen,
           [...new Set(seen)],
-          `a cookie was delivered twice: ${sink.values.join(" | ")}`,
+          `a cookie was delivered twice: ${seen.join(", ")}`,
         );
       },
     ),

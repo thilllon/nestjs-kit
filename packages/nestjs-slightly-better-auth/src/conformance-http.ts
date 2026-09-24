@@ -7,6 +7,7 @@ import {
   Catch,
   Controller,
   Get,
+  Injectable,
   Module,
   Post,
   Req,
@@ -43,11 +44,16 @@ import type {
   HttpPlatform,
   HttpRequestAccessor,
 } from "./auth-contracts.js";
-import { CurrentPrincipal, Public } from "./auth-decorators.js";
+import {
+  BeforeAuth,
+  CurrentPrincipal,
+  Public,
+  RequireAuth,
+} from "./auth-decorators.js";
 import { isInfrastructureError } from "./auth-errors.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { MOUNT_COORDINATOR } from "./auth-tokens.js";
-import type { AuthLike, AuthPrincipal } from "./auth-types.js";
+import type { AuthHookContext, AuthLike, AuthPrincipal } from "./auth-types.js";
 import {
   BRIDGE_HANDLE,
   type BridgeHandle,
@@ -58,6 +64,8 @@ import {
   CapturingLogger,
   type ConformanceCase,
   conformanceCase,
+  conformanceSkip,
+  type ConformanceOutcome,
   createConformanceAuth,
   KIT_BASE_URL,
   kitIdentity,
@@ -144,9 +152,13 @@ function resolvedPlatform(app: INestApplication): HttpPlatform {
   return platform;
 }
 
+/**
+ * The capabilities a platform reference declares, when that is known without booting: a platform object without
+ * `capabilities` declares none. Undefined means unknown (a class whose instances may set it, or a definition).
+ */
 function declaredCapabilities(
   ref: ExtensionRef<HttpPlatform>,
-): HttpPlatform["capabilities"] {
+): HttpPlatform["capabilities"] | undefined {
   if (typeof ref === "function") {
     try {
       return (ref as unknown as { prototype: HttpPlatform }).prototype
@@ -155,7 +167,10 @@ function declaredCapabilities(
       return undefined;
     }
   }
-  return (ref as Partial<HttpPlatform>).capabilities;
+  if (ref && typeof ref === "object" && !(EXTENSION_DEFINITION in ref)) {
+    return (ref as Partial<HttpPlatform>).capabilities ?? {};
+  }
+  return undefined;
 }
 
 /** true/false when a platform member is statically known, undefined for definitions. */
@@ -200,6 +215,8 @@ function kitModule(
     accessor: AccessorObservation;
     requests(): HttpRequestAccessor;
     adapter(): AbstractHttpAdapter;
+    /** Paths the kit's @BeforeAuth() hook provider saw. */
+    hooks?: string[];
   },
 ): Type {
   const record: AuthHandlerInterceptor = async (call, next) => {
@@ -319,6 +336,12 @@ function kitModule(
       return { userId: principal?.userId ?? null };
     }
 
+    @RequireAuth({ authoritative: true })
+    @Get("app/authoritative")
+    authoritative(@CurrentPrincipal() principal: AuthPrincipal | null) {
+      return { userId: principal?.userId ?? null };
+    }
+
     @Public()
     @UseGuards(guard)
     @UseInterceptors(interceptor)
@@ -352,6 +375,14 @@ function kitModule(
     }
   }
 
+  @Injectable()
+  class ConformanceHookProvider {
+    @BeforeAuth("/probe/html")
+    record(_context: AuthHookContext<"/probe/html">): void {
+      state.hooks?.push("/probe/html");
+    }
+  }
+
   @Catch()
   class ConformanceRecordingFilter extends BaseExceptionFilter {
     override catch(exception: unknown, host: ArgumentsHost): void {
@@ -363,7 +394,10 @@ function kitModule(
   @Module({
     imports,
     controllers: [ConformanceAppController],
-    providers: [{ provide: APP_FILTER, useClass: ConformanceRecordingFilter }],
+    providers: [
+      ConformanceHookProvider,
+      { provide: APP_FILTER, useClass: ConformanceRecordingFilter },
+    ],
   })
   class ConformanceHttpModule implements NestModule {
     configure(consumer: MiddlewareConsumer): void {
@@ -463,11 +497,11 @@ async function withBoot(
   options: HttpConformanceOptions,
   bootstrap: Bootstrap,
   config: BootConfig,
-  fn: (boot: HttpBoot) => Promise<void>,
-): Promise<void> {
+  fn: (boot: HttpBoot) => Promise<ConformanceOutcome>,
+): Promise<ConformanceOutcome> {
   const boot = await bootHttp(options, bootstrap, config);
   try {
-    await fn(boot);
+    return await fn(boot);
   } finally {
     await boot.close();
   }
@@ -601,13 +635,14 @@ const multipartBody = [
 type PerBootstrap = (
   options: HttpConformanceOptions,
   bootstrap: Bootstrap,
-) => Promise<void>;
+) => Promise<ConformanceOutcome>;
 
 /**
  * The HTTP platform kit (invariants H1–H14). Each case boots a real Nest application per bootstrap with a real Better
- * Auth instance that includes conformanceProbePlugin(), an app controller, a recording global filter and an `around`
- * recorder. HTTP/2 is required when the platform declares capabilities.http2; proxy-trust cases are skipped with a
- * reason when the platform or the options do not provide the optional capability.
+ * Auth instance that includes conformanceProbePlugin(), an app controller, a @BeforeAuth() hook provider, a recording
+ * global filter and an `around` recorder. HTTP/2 is required when the platform declares capabilities.http2; a platform
+ * without the capability, or without the optional proxyTrust() or trustOneProxy, gets a skip with the reason: before
+ * the run for platform objects, at run time for classes and definitions.
  */
 export function httpPlatformConformance(
   options: HttpConformanceOptions,
@@ -998,7 +1033,9 @@ export function httpPlatformConformance(
       withBoot(o, b, {}, async (boot) => {
         const platform = resolvedPlatform(boot.app);
         if (typeof platform.proxyTrust !== "function") {
-          return;
+          return conformanceSkip(
+            "the platform does not implement the optional proxyTrust()",
+          );
         }
         const adapter = boot.app.getHttpAdapter() as AbstractHttpAdapter;
         const before = platform.proxyTrust(adapter);
@@ -1026,37 +1063,41 @@ export function httpPlatformConformance(
           ? undefined
           : "no trustOneProxy option was given",
   );
+  const forwarded = {
+    "x-forwarded-proto": "https",
+    "x-forwarded-host": "proxy.example",
+  };
+  const derivedBaseUrl: BootConfig = {
+    auth: { baseURL: undefined },
+    module: { http: { allowRequestDerivedBaseURL: true } },
+  };
+  const probedUrl = async (boot: HttpBoot) =>
+    new URL(
+      String(
+        json(
+          await sendRaw(`${boot.url}${AUTH}/probe/url`, {
+            headers: forwarded,
+          }),
+        ).url,
+      ),
+    );
   add(
     "H-url-trust-proxy",
-    "the request URL honors the platform's proxy trust",
-    async (o, b) => {
-      const headers = {
-        "x-forwarded-proto": "https",
-        "x-forwarded-host": "proxy.example",
-      };
-      const config: BootConfig = {
-        auth: { baseURL: undefined },
-        module: { http: { allowRequestDerivedBaseURL: true } },
-      };
-      await withBoot(o, b, config, async (boot) => {
-        const url = new URL(
-          String(
-            json(await sendRaw(`${boot.url}${AUTH}/probe/url`, { headers }))
-              .url,
-          ),
-        );
+    "untrusted forwarding headers leave the request URL unchanged",
+    (o, b) =>
+      withBoot(o, b, derivedBaseUrl, async (boot) => {
+        const url = await probedUrl(boot);
         assert.notEqual(url.host, "proxy.example", "untrusted forwarding");
-      });
-      await withBoot(o, b, { ...config, trustProxy: true }, async (boot) => {
-        const url = new URL(
-          String(
-            json(await sendRaw(`${boot.url}${AUTH}/probe/url`, { headers }))
-              .url,
-          ),
-        );
-        assert.equal(url.origin, "https://proxy.example");
-      });
-    },
+        assert.notEqual(url.protocol, "https:", "untrusted forwarding");
+      }),
+  );
+  add(
+    "H-url-trust-proxy",
+    "a trusted forwarding hop sets the request URL's protocol and host",
+    (o, b) =>
+      withBoot(o, b, { ...derivedBaseUrl, trustProxy: true }, async (boot) => {
+        assert.equal((await probedUrl(boot)).origin, "https://proxy.example");
+      }),
     () =>
       options.trustOneProxy ? undefined : "no trustOneProxy option was given",
   );
@@ -1066,7 +1107,7 @@ export function httpPlatformConformance(
     async (o, b) => {
       const capabilities = await capabilitiesOf(o);
       if (!capabilities?.http2) {
-        return;
+        return conformanceSkip("the platform declares no http2 capability");
       }
       assert.ok(
         o.http2,
@@ -1492,6 +1533,7 @@ export function httpPlatformConformance(
       const capabilities = await capabilitiesOf(o);
       const auth = createConformanceAuth();
       const around: string[] = [];
+      const hooks: string[] = [];
       let current: INestApplication | undefined;
       const module = kitModule(
         o,
@@ -1504,6 +1546,7 @@ export function httpPlatformConformance(
           accessor: {},
           requests: () => resolvedPlatform(current!).requests,
           adapter: () => current!.getHttpAdapter() as AbstractHttpAdapter,
+          hooks,
         },
       );
       const moduleRef = await Test.createTestingModule({
@@ -1536,10 +1579,26 @@ export function httpPlatformConformance(
         );
         await second.listen(0, "127.0.0.1");
         const url = (await second.getUrl()).replace("[::1]", "127.0.0.1");
+        const before = hooks.length;
         const response = await sendRaw(`${url}${AUTH}/probe/html`);
         assert.equal(response.status, 200);
+        assert.equal(
+          hooks.length - before,
+          1,
+          "the second application did not run the @BeforeAuth() hook once",
+        );
         const ping = await sendRaw(`${url}/app/ping`);
         assert.equal(ping.status, 200);
+        const identity = await kitIdentity(auth);
+        const authoritative = await sendRaw(`${url}/app/authoritative`, {
+          headers: { cookie: identity.cookie },
+        });
+        assert.equal(
+          authoritative.status,
+          200,
+          `the second application denied an authoritative route: ${authoritative.body.toString("utf8")}`,
+        );
+        assert.equal(json(authoritative).userId, identity.userId);
       } finally {
         await second.close().catch(() => undefined);
       }

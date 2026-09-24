@@ -1,4 +1,11 @@
-import type { ExecutionContext } from "@nestjs/common";
+import {
+  type CanActivate,
+  Controller,
+  Get,
+  type ExecutionContext,
+  Injectable,
+  type OnModuleDestroy,
+} from "@nestjs/common";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import { FastifyAdapter } from "@nestjs/platform-fastify";
 import { Test } from "@nestjs/testing";
@@ -13,8 +20,10 @@ import type {
   PrincipalResolver,
   TransportCall,
 } from "./auth-contracts.js";
+import { Require, requirement } from "./auth-decorators.js";
 import { BetterAuthModule } from "./auth-module.js";
 import {
+  GUARD_CORE,
   getBetterAuthHandleToken,
   POLICY_INVOKER,
   PRINCIPAL_RESOLVER,
@@ -23,6 +32,7 @@ import type { AuthPrincipal } from "./auth-types.js";
 import { allow, deny } from "./authorization-evaluator.js";
 import { BRIDGE_HANDLE, type BridgeHandle } from "./bridge-protocol.js";
 import {
+  CapturingLogger,
   createConformanceAuth,
   kitIdentity,
   probeOf,
@@ -35,6 +45,7 @@ import { RequestScope } from "./request-scope.js";
 import {
   authHeadersFor,
   initTestApp,
+  overrideAuthGuard,
   overrideDecisions,
   overridePrincipal,
   stampPrincipal,
@@ -131,6 +142,59 @@ describe("stampPrincipal", () => {
       outcome: "absent",
       instance: "default",
     });
+  });
+});
+
+describe("stamp matching for shared connection objects", () => {
+  it("never matches another invocation through a lone shared element", () => {
+    const readings = new PrincipalReadings(new RequestScope());
+    const socket = {};
+    // A WS message with a primitive payload and no ack: [client, data, ack, pattern].
+    const first = [socket, "ping", undefined, "whoami"];
+    stampPrincipal(context(first), principal("alice"));
+    expect(readings.read({ args: first })).toMatchObject({
+      principal: { userId: "alice" },
+    });
+    const second = [socket, "ping", undefined, "whoami"];
+    expect(() => readings.read({ args: second })).toThrow(
+      expect.objectContaining({ code: "NO_AUTH_RESULT" }),
+    );
+    stampPrincipal(context(second), principal("bob"));
+    expect(readings.read({ args: first })).toMatchObject({
+      principal: { userId: "alice" },
+    });
+    expect(readings.read({ args: second })).toMatchObject({
+      principal: { userId: "bob" },
+    });
+  });
+});
+
+describe("overrideAuthGuard", () => {
+  it("runs a CanActivate that stores its own principal field", async () => {
+    class DenyingGuard implements CanActivate {
+      principal: AuthPrincipal | null = null;
+      calls = 0;
+
+      canActivate(): boolean {
+        this.calls++;
+        return this.principal !== null;
+      }
+    }
+    const guard = new DenyingGuard();
+    const builder = Test.createTestingModule({
+      imports: [
+        BetterAuthModule.forRoot({
+          auth: createConformanceAuth(),
+          http: { mount: false },
+          logSummary: false,
+        } as never),
+      ],
+    });
+    overrideAuthGuard(builder, guard);
+    const moduleRef = await compiled(builder);
+    const core = moduleRef.get<CanActivate>(GUARD_CORE);
+    await expect(core.canActivate(context([{}, {}]))).resolves.toBe(false);
+    expect(guard.calls).toBe(1);
   });
 });
 
@@ -394,6 +458,94 @@ describe("initTestApp", () => {
     expect(registered).toHaveLength(2);
     await second.close();
     expect(bridge.state).toBe("closed");
+  });
+
+  it("runs an app's shutdown once when a registered close follows the helper's close", async () => {
+    const auth = createConformanceAuth();
+    const destroyed: string[] = [];
+    const appNamed = async (name: string) => {
+      @Injectable()
+      class Resource implements OnModuleDestroy {
+        onModuleDestroy(): void {
+          destroyed.push(name);
+        }
+      }
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          BetterAuthModule.forRoot({
+            auth,
+            platforms: [expressPlatform()],
+            logSummary: false,
+          } as never),
+        ],
+        providers: [Resource],
+      }).compile();
+      return moduleRef.createNestApplication(new ExpressAdapter(), {
+        logger: false,
+      });
+    };
+    const registered: (() => Promise<void>)[] = [];
+    const closeWith = (close: () => Promise<void>) => {
+      registered.push(close);
+    };
+    await initTestApp(await appNamed("first"), { closeWith });
+    await initTestApp(await appNamed("second"), { closeWith });
+    expect(destroyed).toEqual(["first"]);
+    for (const close of registered) {
+      await close();
+    }
+    expect(destroyed).toEqual(["first", "second"]);
+  });
+
+  it("lets the next app take over the binding of a failed init with W_INSTANCE_TAKEN_OVER", async () => {
+    const auth = createConformanceAuth();
+    const bridge = await bridgeOf(auth);
+    const logger = new CapturingLogger();
+    const good = async () => {
+      const moduleRef = await Test.createTestingModule({
+        imports: [
+          BetterAuthModule.forRoot({
+            auth,
+            platforms: [expressPlatform()],
+            logSummary: false,
+          } as never),
+        ],
+      }).compile();
+      return moduleRef.createNestApplication(new ExpressAdapter(), { logger });
+    };
+    class UnregisteredPolicy {}
+    @Controller("failing")
+    class FailingController {
+      @Require(requirement(UnregisteredPolicy as never, {}))
+      @Get()
+      handle(): void {}
+    }
+    const failingModule = await Test.createTestingModule({
+      imports: [
+        BetterAuthModule.forRoot({
+          auth,
+          platforms: [expressPlatform()],
+          logSummary: false,
+        } as never),
+      ],
+      controllers: [FailingController],
+    }).compile();
+    const failing = failingModule.createNestApplication(new ExpressAdapter(), {
+      logger,
+    });
+    const first = await initTestApp(await good(), {
+      closeWith: (close) => closes.push(close),
+    });
+    const firstClose = vi.spyOn(first, "close");
+    await expect(initTestApp(failing)).rejects.toThrow(/UNRESOLVED_POLICY/);
+    closes.push(() => failing.close());
+    expect(firstClose).toHaveBeenCalledOnce();
+    await initTestApp(await good(), {
+      closeWith: (close) => closes.push(close),
+    });
+    expect(firstClose).toHaveBeenCalledOnce();
+    expect(bridge.state).toBe("bound");
+    expect(logger.text()).toMatch(/W_INSTANCE_TAKEN_OVER/);
   });
 
   it("rejects a second bound app without the helper and readies Fastify with it", async () => {

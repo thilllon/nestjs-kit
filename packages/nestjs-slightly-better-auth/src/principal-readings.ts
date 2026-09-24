@@ -47,17 +47,31 @@ function records(target: object, create = false): Records | undefined {
   }
   return value;
 }
+function sameElements(stamp: TestStamp, args: readonly unknown[]): boolean {
+  return (
+    stamp.elements.length === args.length &&
+    stamp.elements.every((value, index) => value === args[index])
+  );
+}
+
+/**
+ * The stamp of this invocation: the one on the args array itself (WS, RPC and GraphQL guards and interceptors share
+ * that array), or one on its elements when the elements identify the invocation. That takes at least two object
+ * elements (an HTTP request and its response): a lone object, such as a WS socket beside a primitive payload, is shared
+ * by every message on its connection, so a stamp found only through it may belong to another invocation.
+ */
 function matchingStamp(args: readonly unknown[]): TestStamp | undefined {
-  for (const target of [args, ...args]) {
-    if (!object(target)) {
-      continue;
-    }
+  const own = Reflect.get(args, TEST_STAMP) as TestStamp | undefined;
+  if (own && sameElements(own, args)) {
+    return own;
+  }
+  const objects = args.filter(object);
+  if (objects.length < 2) {
+    return undefined;
+  }
+  for (const target of objects) {
     const stamp = Reflect.get(target, TEST_STAMP) as TestStamp | undefined;
-    if (
-      stamp &&
-      stamp.elements.length === args.length &&
-      stamp.elements.every((value, index) => value === args[index])
-    ) {
+    if (stamp && sameElements(stamp, args)) {
       return stamp;
     }
   }
@@ -278,7 +292,7 @@ export class PrincipalReadings {
   }
 }
 
-/** Test stamps are verified by element identity, so a stamp never leaks into another invocation. */
+/** Test stamps are verified by array or element identity (see matchingStamp), so a stamp never leaks into another invocation. */
 export function stampResult(
   args: readonly unknown[],
   instance: string,

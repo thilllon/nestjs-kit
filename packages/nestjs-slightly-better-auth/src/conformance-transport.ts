@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
-import type { ExecutionContext, INestApplication } from "@nestjs/common";
+import {
+  type ExecutionContext,
+  type INestApplication,
+  type LoggerService,
+  SetMetadata,
+  type Type,
+  UseGuards,
+} from "@nestjs/common";
+import { DiscoveryService, ModuleRef, Reflector } from "@nestjs/core";
 import type { TestingModuleBuilder } from "@nestjs/testing";
 import type {
   AuthorizationPolicy,
   AuthPrincipalBase,
   AuthTransport,
+  ClaimOptions,
   ExtensionRef,
+  GuardReach,
   PrincipalSource,
   RequirementExpr,
+  RoutePlan,
   TransportCall,
 } from "./auth-contracts.js";
 import {
@@ -17,6 +28,7 @@ import {
   OptionalAuth,
   Public,
   Require,
+  RequireAuth,
   requirement,
   SkipDefaultRequirements,
   UseBetterAuth,
@@ -24,7 +36,11 @@ import {
 import { AuthFailures, BetterAuthConfigurationError } from "./auth-errors.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import type { BetterAuthService } from "./auth-service.js";
-import { TRANSPORT_REGISTRY } from "./auth-tokens.js";
+import {
+  MOUNT_COORDINATOR,
+  ROUTE_PLANNER,
+  TRANSPORT_REGISTRY,
+} from "./auth-tokens.js";
 import type { AuthLike, AuthPrincipal, PrincipalKind } from "./auth-types.js";
 import { allow, deny } from "./authorization-evaluator.js";
 import { EXTENSION_DEFINITION } from "./bridge-protocol.js";
@@ -33,6 +49,9 @@ import {
   CapturingLogger,
   type ConformanceCase,
   conformanceCase,
+  conformanceSkip,
+  type ConformanceOutcome,
+  type ConformanceSkip,
   createConformanceAuth,
   kitIdentity,
   type KitIdentity,
@@ -49,6 +68,8 @@ import {
 } from "./organization.js";
 import { absent, authenticated, rejected } from "./principal-resolver.js";
 import { CurrentSession } from "./session-principal.js";
+import type { MountCoordinator } from "./mount-coordinator.js";
+import type { RoutePlanner } from "./route-planner.js";
 import { overrideAuthGuard } from "./testing.js";
 import type { TransportRegistry } from "./transport-registry.js";
 
@@ -122,8 +143,12 @@ export interface TransportFixtures {
     FixtureHandler,
   ];
   readonly readsSession: FixtureHandler;
+  /** @AcceptPrincipals('session', 'api-key'), returns service.getSession() (T-reads-session). */
+  readonly readsSessionService: FixtureHandler;
   readonly unsafe: FixtureHandler;
   readonly loginProxy: FixtureHandler;
+  /** @Public() @ForwardAuthCookies(), operation 'read' (HTTP GET), calls service.api.signInEmail (T-csrf-login-proxy, T-csrf-safe-methods). */
+  readonly loginProxyRead: FixtureHandler;
   readonly loginProxyService: FixtureHandler;
   readonly publicService: FixtureHandler;
   readonly acceptsApiKey: FixtureHandler;
@@ -147,6 +172,7 @@ export interface TransportInvocationResult {
 }
 
 export interface GraphResult {
+  /** The operation's data, keyed like the selection: data[root][field]. */
   data: unknown;
   errors: readonly {
     path: readonly (string | number)[];
@@ -160,9 +186,10 @@ export interface TransportConformanceOptions {
   transport: ExtensionRef<AuthTransport>;
   /**
    * Boots an app exposing the kit's fixture handlers in the transport's shape, with BetterAuthModule's globalGuard as
-   * given. Pass `principals` to BetterAuthModule (the kit's API-key source) and `defaultRequirements` when set. With
-   * `override`, boot through Test.createTestingModule() and pass the builder through it before compile(). The app is
-   * closed by the kit; the kit replaces its logger to capture log output.
+   * given. Pass `principals` to BetterAuthModule (the kit's API-key source), and `defaultRequirements` and
+   * `globalScope` when set. With `override`, boot through Test.createTestingModule() and pass the builder through it
+   * before compile(). Apply every fixture decorator the kit supplies, including its SetMetadata() marker. The app is
+   * closed by the kit.
    */
   createApp(
     fixtures: TransportFixtures,
@@ -171,10 +198,18 @@ export interface TransportConformanceOptions {
       globalGuard: boolean;
       override?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
       defaultRequirements?: readonly RequirementExpr[];
+      /** GraphQL shapes: the fieldResolverEnhancers to serve 'graph' with; the kit boots GraphQL cases with [] and ['guards', 'interceptors']. */
       fieldResolverEnhancers?: readonly ("guards" | "interceptors")[];
+      /** GraphQL shapes: serve 'graph' from a federation subgraph (FixtureNode an entity keyed by id, with GraphFixtures.reference when given). */
       federation?: boolean;
       /** Principal sources for BetterAuthModule's `principals`: the kit's API-key source. */
       principals?: readonly ExtensionRef<PrincipalSource>[];
+      /** BetterAuthModule's globalScope; unset keeps the module default (T-coverage-claims). */
+      globalScope?: boolean;
+      /** Register BetterAuthGuard as APP_GUARD and BetterAuthScopeInterceptor as APP_INTERCEPTOR yourself (with globalGuard: false; T-coverage-claims). */
+      appEnhancers?: boolean;
+      /** The logger the app uses from boot on (e.g. createNestApplication(adapter, { logger }) or moduleRef.useLogger(logger)): cases assert boot warnings. */
+      logger?: LoggerService;
     },
   ): Promise<INestApplication>;
   /** Invokes a fixture handler with given credentials and browser headers; returns the transport-native outcome. */
@@ -184,7 +219,11 @@ export interface TransportConformanceOptions {
     headers: HeadersInit,
     input?: Record<string, unknown>,
   ): Promise<TransportInvocationResult>;
-  /** Two invocations of the 'org' fixture in ONE logical request or connection, with different inputs. */
+  /**
+   * Two invocations of the 'org' fixture in ONE logical request or connection, with different inputs. Required when
+   * the transport has a lineage: the multiple-invocation cases then fail without it, and are skipped with a reason
+   * for other transports.
+   */
   invokeTwice?(
     app: INestApplication,
     shape: InvocationShape,
@@ -198,7 +237,12 @@ export interface TransportConformanceOptions {
   >;
   /** Shapes invokeTwice can produce; required with it. */
   invocationShapes?: readonly InvocationShape[];
-  /** GraphQL shapes: one operation over HTTP selecting the given root fields of fixtures.graph. */
+  /**
+   * GraphQL shapes: one operation over HTTP selecting the given root fields of fixtures.graph, each with the given
+   * FixtureNode fields. `delays` states the order in which the kit's session and API-key sources settle; the kit
+   * applies it to its own sources, so a harness may ignore it. Required when the transport nests handlers
+   * (defaultAccessFor): the GraphQL cases then fail without it, and are skipped with a reason for other transports.
+   */
   invokeGraph?(
     app: INestApplication,
     selection: readonly GraphSelection[],
@@ -207,7 +251,11 @@ export interface TransportConformanceOptions {
       delays?: { readonly session: number; readonly apiKey: number };
     },
   ): Promise<GraphResult>;
-  /** Federation shapes only: one `_entities` query for the given representations of FixtureNode. */
+  /**
+   * Federation shapes only: one `_entities` query for the given representations of FixtureNode. Required when the
+   * transport claims the kit's reference resolver in a federation boot: T-reference-resolver then fails without it,
+   * and is skipped with a reason for other transports.
+   */
   invokeEntities?(
     app: INestApplication,
     representations: readonly Record<string, unknown>[],
@@ -228,12 +276,13 @@ interface KitKeys {
   readonly valid: string;
   readonly limited: string;
   verifications: number;
+  /** The user the valid key acts for. */
+  owner: string;
+  /** Milliseconds the source waits before answering (T-stamp-per-plan settle order). */
+  delayMs: number;
 }
 
-function keySource(
-  keys: KitKeys,
-  owner: () => string,
-): PrincipalSource<AuthPrincipalBase> {
+function keySource(keys: KitKeys): PrincipalSource<AuthPrincipalBase> {
   return {
     id: KEY_SOURCE_ID,
     kinds: [API_KEY_KIND],
@@ -247,6 +296,9 @@ function keySource(
         return absent();
       }
       keys.verifications++;
+      if (keys.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, keys.delayMs));
+      }
       if (value === keys.limited) {
         return rejected(
           AuthFailures.rejected({
@@ -264,7 +316,7 @@ function keySource(
       return authenticated({
         kind: API_KEY_KIND,
         source: KEY_SOURCE_ID,
-        userId: owner(),
+        userId: keys.owner,
         delegation: {
           description: "conformance key grant",
           allows: () => false,
@@ -278,6 +330,8 @@ const denyPolicy: AuthorizationPolicy<Record<string, never>> = {
   id: "nestjs-slightly-better-auth:conformance/deny",
   evaluate: () => deny({ reason: "CONFORMANCE_DENIED" }),
 };
+// The kit's own organization policy, not orgPermission(): it decides from the invocation's orgId input alone, so
+// every transport can run T-invocation-decisions without the organization plugin and its data.
 const orgPolicy: AuthorizationPolicy<Record<string, never>> = {
   id: "nestjs-slightly-better-auth:conformance/organization",
   requires: { principals: [SESSION_KIND] },
@@ -355,17 +409,36 @@ function principalHandler(
   );
 }
 
-/** The kit's fixture handlers; `extra` appends decorators to named handlers for boot variants. */
+/** Marks each fixture handler with its fixture name, so the kit can map claims and boot reports to fixtures. */
+const FIXTURE_METADATA = "nestjs-slightly-better-auth:conformance-fixture";
+
+type FixtureName = Exclude<keyof TransportFixtures, "graph">;
+
+interface GraphBoot {
+  /** Include `guarded` and `nestedReader` (the ['guards', 'interceptors'] boots only). */
+  readonly guarded?: boolean;
+  /** Include the federation `reference` fixture. */
+  readonly reference?: boolean;
+}
+
+/**
+ * The kit's fixture handlers; `extra` appends decorators to named handlers and `everyHandler` to all of them for boot
+ * variants. `graph` selects the GraphQL fixtures a boot may serve: `guarded` fails a [] boot (FIELD_RESOLVER_UNGUARDED)
+ * and `reference` belongs to federation boots, so both are left out unless asked for.
+ */
 function kitFixtures(
-  extra: Partial<Record<keyof TransportFixtures, MethodDecorator[]>> = {},
+  extra: Partial<Record<FixtureName, MethodDecorator[]>> = {},
   everyHandler: MethodDecorator[] = [],
+  graph: GraphBoot = {},
 ): TransportFixtures {
   const withExtra = (
-    name: keyof TransportFixtures,
+    name: FixtureName,
     fixture: FixtureHandler,
+    marker: string = name,
   ): FixtureHandler => ({
     ...fixture,
     decorators: [
+      SetMetadata(FIXTURE_METADATA, marker),
       ...fixture.decorators,
       ...(extra[name] ?? []),
       ...everyHandler,
@@ -375,6 +448,16 @@ function kitFixtures(
   const reader = handler([], [CurrentPrincipal()], "read", ([principal]) => ({
     principal: view(principal),
   }));
+  const loginProxy = (operation: "read" | "unsafe") =>
+    handler(
+      [Public(), ForwardAuthCookies()],
+      [],
+      operation,
+      async (_params, input, { service }) => {
+        await signIn(service, input);
+        return { signedIn: true };
+      },
+    );
   return {
     required: withExtra("required", principalHandler()),
     optional: withExtra("optional", principalHandler([OptionalAuth()])),
@@ -389,12 +472,12 @@ function kitFixtures(
       })),
     ),
     triple: [
-      withExtra("triple", plain()),
-      withExtra("triple", plain()),
-      withExtra("triple", plain()),
+      withExtra("triple", plain(), "triple0"),
+      withExtra("triple", plain(), "triple1"),
+      withExtra("triple", plain(), "triple2"),
     ],
     tripleMixed: [
-      withExtra("tripleMixed", plain()),
+      withExtra("tripleMixed", plain(), "tripleMixed0"),
       withExtra(
         "tripleMixed",
         handler(
@@ -405,8 +488,9 @@ function kitFixtures(
             ok: true,
           }),
         ),
+        "tripleMixed1",
       ),
-      withExtra("tripleMixed", plain()),
+      withExtra("tripleMixed", plain(), "tripleMixed2"),
     ],
     readsSession: withExtra(
       "readsSession",
@@ -421,19 +505,25 @@ function kitFixtures(
         }),
       ),
     ),
-    unsafe: withExtra("unsafe", principalHandler([], "unsafe")),
-    loginProxy: withExtra(
-      "loginProxy",
+    readsSessionService: withExtra(
+      "readsSessionService",
       handler(
-        [Public(), ForwardAuthCookies()],
+        [AcceptPrincipals(SESSION_KIND, API_KEY_KIND)],
         [],
-        "unsafe",
-        async (_params, input, { service }) => {
-          await signIn(service, input);
-          return { signedIn: true };
-        },
+        "read",
+        async (_params, _input, { service }) => ({
+          userId:
+            (
+              (await service.getSession()) as {
+                user?: { id?: string };
+              } | null
+            )?.user?.id ?? null,
+        }),
       ),
     ),
+    unsafe: withExtra("unsafe", principalHandler([], "unsafe")),
+    loginProxy: withExtra("loginProxy", loginProxy("unsafe")),
+    loginProxyRead: withExtra("loginProxyRead", loginProxy("read")),
     loginProxyService: withExtra(
       "loginProxyService",
       handler([Public()], [], "unsafe", async (_params, input, { service }) => {
@@ -499,11 +589,17 @@ function kitFixtures(
           id: "nested",
         })),
         reader,
-        guarded: handler([], [CurrentPrincipal()], "read", ([p]) => ({
-          id: "guarded",
-          principal: view(p),
-        })),
-        nestedReader: reader,
+        ...(graph.guarded
+          ? {
+              guarded: handler(
+                [RequireAuth()],
+                [CurrentPrincipal()],
+                "read",
+                ([p]) => ({ id: "guarded", principal: view(p) }),
+              ),
+              nestedReader: reader,
+            }
+          : {}),
         sessionReader: handler(
           [],
           [CurrentSession()],
@@ -512,12 +608,19 @@ function kitFixtures(
             (session as { user?: { id?: string } } | null)?.user?.id ?? null,
         ),
       },
-      reference: handler(
-        [Require(requirement(orgPolicy, {}))],
-        [],
-        "read",
-        (_params, input) => ({ id: input.id, orgId: input.orgId }),
-      ),
+      ...(graph.reference
+        ? {
+            reference: handler(
+              [
+                SetMetadata(FIXTURE_METADATA, "reference"),
+                Require(requirement(orgPolicy, {})),
+              ],
+              [],
+              "read",
+              (_params, input) => ({ id: input.id, orgId: input.orgId }),
+            ),
+          }
+        : {}),
     },
   };
 }
@@ -585,36 +688,36 @@ function resolvedTransport(
   const list = app
     .get<TransportRegistry>(TRANSPORT_REGISTRY, { strict: false })
     .list();
+  const id =
+    ref && typeof ref === "object" && !(EXTENSION_DEFINITION in ref)
+      ? (ref as AuthTransport).id
+      : undefined;
+  // Harnesses register the transport first; core appends the HTTP transport.
   const found =
     list.find((transport) => transport === ref) ??
     (typeof ref === "function"
       ? list.find((transport) => transport instanceof ref)
       : undefined) ??
+    (id === undefined
+      ? undefined
+      : list.find((transport) => transport.id === id)) ??
     list[0];
   assert.ok(found, "no transport is registered");
   return found;
 }
 
-function staticLineage(ref: ExtensionRef<AuthTransport>): boolean | undefined {
-  if (typeof ref === "function") {
-    return typeof Reflect.get(ref.prototype as object, "lineage") === "function"
-      ? true
-      : typeof Reflect.get(ref.prototype as object, "handles") === "function"
-        ? false
-        : undefined;
-  }
-  if (ref && typeof ref === "object" && !(EXTENSION_DEFINITION in ref)) {
-    return typeof Reflect.get(ref, "lineage") === "function";
-  }
-  return undefined;
-}
-
+/**
+ * Whether a transport member is known without booting: a transport object answers for itself, a class only when its
+ * prototype defines the member (instance fields are unknown), and a definition never. Undefined means unknown.
+ */
 function staticMember(
   ref: ExtensionRef<AuthTransport>,
   name: keyof AuthTransport,
 ): boolean | undefined {
   if (typeof ref === "function") {
-    return typeof Reflect.get(ref.prototype as object, name) === "function";
+    return typeof Reflect.get(ref.prototype as object, name) === "function"
+      ? true
+      : undefined;
   }
   if (ref && typeof ref === "object" && !(EXTENSION_DEFINITION in ref)) {
     return typeof Reflect.get(ref, name) === "function";
@@ -639,13 +742,15 @@ async function environment(): Promise<KitEnv> {
     valid: `key-${globalThis.crypto.randomUUID()}`,
     limited: `limited-${globalThis.crypto.randomUUID()}`,
     verifications: 0,
+    owner: identity.userId,
+    delayMs: 0,
   };
   return {
     auth,
     probe,
     keys,
     identity,
-    source: keySource(keys, () => identity.userId),
+    source: keySource(keys),
     async sessionCookieName() {
       const context = (await auth.$context) as {
         authCookies: { sessionToken: { name: string } };
@@ -657,20 +762,30 @@ async function environment(): Promise<KitEnv> {
 
 interface Booted {
   readonly app: INestApplication;
+  /** Everything the app logged, from boot on when the harness applies the `logger` option. */
   readonly logger: CapturingLogger;
   readonly instrumentation: Instrumentation;
+}
+
+type GraphEnhancers = readonly ("guards" | "interceptors")[];
+
+interface BootOptions {
+  fixtures?: TransportFixtures;
+  globalGuard?: boolean;
+  override?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
+  defaultRequirements?: readonly RequirementExpr[];
+  fieldResolverEnhancers?: GraphEnhancers;
+  federation?: boolean;
+  globalScope?: boolean;
+  appEnhancers?: boolean;
 }
 
 async function withApp(
   options: TransportConformanceOptions,
   env: KitEnv,
   fn: (booted: Booted) => Promise<void>,
-  boot: {
-    fixtures?: TransportFixtures;
-    globalGuard?: boolean;
-    override?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
-    defaultRequirements?: readonly RequirementExpr[];
-  } = {},
+  boot: BootOptions = {},
+  logger = new CapturingLogger(),
 ): Promise<void> {
   const app = await options.createApp(
     boot.fixtures ?? kitFixtures(),
@@ -678,13 +793,21 @@ async function withApp(
     {
       globalGuard: boot.globalGuard ?? true,
       principals: [env.source as unknown as PrincipalSource],
+      logger,
       ...(boot.override ? { override: boot.override } : {}),
       ...(boot.defaultRequirements
         ? { defaultRequirements: boot.defaultRequirements }
         : {}),
+      ...(boot.fieldResolverEnhancers
+        ? { fieldResolverEnhancers: boot.fieldResolverEnhancers }
+        : {}),
+      ...(boot.federation ? { federation: true } : {}),
+      ...(boot.globalScope === undefined
+        ? {}
+        : { globalScope: boot.globalScope }),
+      ...(boot.appEnhancers ? { appEnhancers: true } : {}),
     },
   );
-  const logger = new CapturingLogger();
   app.useLogger(logger);
   try {
     await fn({ app, logger, instrumentation: instrument(app) });
@@ -693,21 +816,108 @@ async function withApp(
   }
 }
 
-async function expectBootFailure(
+async function bootFailure(
   options: TransportConformanceOptions,
   env: KitEnv,
-  boot: Parameters<typeof withApp>[3],
-  code: string,
-): Promise<void> {
+  boot: BootOptions,
+): Promise<unknown> {
   const result = await settle(() =>
     withApp(options, env, async () => undefined, boot),
   );
-  assert.equal(result.ok, false, `the boot variant did not fail with ${code}`);
-  const codes = bootIssueCodes(!result.ok && result.error);
+  assert.equal(result.ok, false, "the boot variant booted");
+  return !result.ok && result.error;
+}
+
+async function expectBootFailure(
+  options: TransportConformanceOptions,
+  env: KitEnv,
+  boot: BootOptions,
+  code: string | readonly string[],
+): Promise<void> {
+  const expected = typeof code === "string" ? [code] : code;
+  const error = await bootFailure(options, env, boot);
+  const codes = bootIssueCodes(error);
   assert.ok(
-    codes.includes(code) || String(!result.ok && result.error).includes(code),
-    `expected ${code}, got ${codes.join(", ")}: ${String(!result.ok && result.error)}`,
+    expected.some(
+      (value) => codes.includes(value) || String(error).includes(value),
+    ),
+    `expected ${expected.join(" or ")}, got ${codes.join(", ")}: ${String(error)}`,
   );
+}
+
+/** Stable codes of the WARN entries a logger captured (`CODE: message`). */
+function warningCodes(logger: CapturingLogger): Set<string> {
+  return new Set(
+    logger.entries
+      .filter((entry) => entry.level === "warn")
+      .map((entry) => /^([A-Z][A-Z0-9_]+):/.exec(entry.text)?.[1])
+      .filter((code): code is string => code !== undefined),
+  );
+}
+
+interface RecordedClaim {
+  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  readonly target: Function;
+  readonly method: string | undefined;
+  readonly reach: GuardReach;
+  readonly options: ClaimOptions;
+  /** The kit fixture the claimed handler serves, from its SetMetadata() marker. */
+  readonly fixture: string | undefined;
+}
+
+/** The claims the transport makes for a booted app, recorded by running its validate() once more. */
+async function recordClaims(
+  app: INestApplication,
+  ref: ExtensionRef<AuthTransport>,
+): Promise<RecordedClaim[]> {
+  const transport = resolvedTransport(app, ref);
+  const claims: RecordedClaim[] = [];
+  const planner = app.get<RoutePlanner>(ROUTE_PLANNER, { strict: false });
+  await transport.validate?.({
+    discovery: app.get(DiscoveryService, { strict: false }),
+    reflector: app.get(Reflector, { strict: false }),
+    moduleRef: app.get(ModuleRef, { strict: false }),
+    hasHttpAdapter:
+      app.get<MountCoordinator>(MOUNT_COORDINATOR, { strict: false })
+        .adapter !== null,
+    planOf: (target, method) => planner.plan(target as Type, method),
+    claim: (target, method, reach, options) => {
+      const handler: unknown =
+        method === undefined
+          ? undefined
+          : Reflect.get(target.prototype as object, method);
+      const fixture =
+        typeof handler === "function"
+          ? (Reflect.getMetadata(FIXTURE_METADATA, handler) as
+              | string
+              | undefined)
+          : undefined;
+      claims.push({ target, method, reach, options, fixture });
+    },
+    logger: new CapturingLogger(),
+  });
+  return claims;
+}
+
+/**
+ * Whether the transport has a member, resolved through one boot when a class or definition leaves it unknown. The
+ * kit's multiple-invocation and GraphQL cases apply to transports with `lineage` and `defaultAccessFor`.
+ */
+async function transportHas(
+  options: TransportConformanceOptions,
+  env: KitEnv,
+  member: "lineage" | "defaultAccessFor",
+): Promise<boolean> {
+  const known = staticMember(options.transport, member);
+  if (known !== undefined) {
+    return known;
+  }
+  let found = false;
+  await withApp(options, env, async ({ app }) => {
+    found =
+      typeof resolvedTransport(app, options.transport)[member] === "function";
+  });
+  return found;
 }
 
 function sessionReads(probe: ProbeState, from: number): number {
@@ -779,8 +989,10 @@ const foreignContext = {
 /**
  * The transport kit (invariants T1–T11 and the core behavior every transport exposes). The kit owns the Better Auth
  * instance, a kit API-key source (passed as `principals`), kit policies and the fixture handlers; the harness exposes
- * the fixtures in its transport's shape. GraphQL- and federation-only cases require invokeGraph/invokeEntities when
- * the transport nests handlers, and multiple-invocation cases require invokeTwice when the transport has a lineage.
+ * the fixtures in its transport's shape. Applicability comes from the transport, not from the helpers a harness
+ * passes: a transport with a lineage needs invokeTwice, one that nests handlers (defaultAccessFor) needs invokeGraph,
+ * and one that claims the kit's federation reference resolver needs invokeEntities. The kit reads those members from
+ * a transport object directly and boots once for a class or a definition.
  */
 export function transportConformance(
   options: TransportConformanceOptions,
@@ -789,7 +1001,7 @@ export function transportConformance(
   const add = (
     id: string,
     title: string,
-    run: (env: KitEnv) => Promise<void>,
+    run: (env: KitEnv) => Promise<ConformanceOutcome>,
     skip?: string,
   ) =>
     cases.push(
@@ -798,16 +1010,53 @@ export function transportConformance(
   const noBrowser = options.expectBrowserLeg
     ? undefined
     : "the transport declares no browser leg";
-  const lineage = staticLineage(options.transport);
+  const noLineage = "the transport has no lineage and gives no invokeTwice";
+  const noNesting = "the transport nests no handlers and gives no invokeGraph";
   const twiceSkip =
-    options.invokeTwice || lineage === true
-      ? undefined
-      : "the transport serves one invocation per logical request and gives no invokeTwice";
-  const nests = staticMember(options.transport, "defaultAccessFor");
+    !options.invokeTwice && staticMember(options.transport, "lineage") === false
+      ? noLineage
+      : undefined;
   const graphSkip =
-    options.invokeGraph || nests === true
-      ? undefined
-      : "the transport nests no handlers and gives no invokeGraph";
+    !options.invokeGraph &&
+    staticMember(options.transport, "defaultAccessFor") === false
+      ? noNesting
+      : undefined;
+  /** Undefined when invokeTwice is given; fails when the transport has a lineage without it. */
+  const twiceReady = async (
+    env: KitEnv,
+  ): Promise<ConformanceSkip | undefined> => {
+    if (options.invokeTwice) {
+      assert.ok(
+        options.invocationShapes?.length,
+        "invokeTwice requires invocationShapes",
+      );
+      return undefined;
+    }
+    assert.equal(
+      await transportHas(options, env, "lineage"),
+      false,
+      "the transport has a lineage, so invokeTwice and invocationShapes are required",
+    );
+    return conformanceSkip(noLineage);
+  };
+  /** Undefined when invokeGraph is given; fails when the transport nests handlers without it. */
+  const graphReady = async (
+    env: KitEnv,
+  ): Promise<ConformanceSkip | undefined> => {
+    if (options.invokeGraph) {
+      return undefined;
+    }
+    assert.equal(
+      await transportHas(options, env, "defaultAccessFor"),
+      false,
+      "the transport nests handlers (defaultAccessFor), so invokeGraph is required",
+    );
+    return conformanceSkip(noNesting);
+  };
+  const enhancerBoots: readonly GraphEnhancers[] = [
+    [],
+    ["guards", "interceptors"],
+  ];
   const cookie = (env: KitEnv) => ({ cookie: env.identity.cookie });
 
   add(
@@ -906,14 +1155,11 @@ export function transportConformance(
   add(
     "T-invocation-decisions",
     "two invocations in one request or connection are decided and valued independently",
-    (env) =>
+    async (env) =>
+      (await twiceReady(env)) ??
       withApp(options, env, async ({ app }) => {
-        assert.ok(
-          options.invokeTwice && options.invocationShapes?.length,
-          "the transport has a lineage, so invokeTwice and invocationShapes are required",
-        );
-        for (const shape of options.invocationShapes) {
-          const [first, second] = await options.invokeTwice(
+        for (const shape of options.invocationShapes!) {
+          const [first, second] = await options.invokeTwice!(
             app,
             shape,
             [{ orgId: "org-a" }, { orgId: "org-b" }],
@@ -925,7 +1171,7 @@ export function transportConformance(
             "MISSING_PERMISSION",
             `${shape}: the second invocation was not decided independently (${JSON.stringify(second)})`,
           );
-          const [deniedFirst, allowedSecond] = await options.invokeTwice(
+          const [deniedFirst, allowedSecond] = await options.invokeTwice!(
             app,
             shape,
             [{ orgId: "org-b" }, { orgId: "org-a" }],
@@ -937,7 +1183,7 @@ export function transportConformance(
             true,
             `${shape}: the second invocation was not decided independently (${JSON.stringify(allowedSecond)})`,
           );
-          const values = await options.invokeTwice(
+          const values = await options.invokeTwice!(
             app,
             shape,
             [{ orgId: "org-a" }, { orgId: "org-a2" }],
@@ -1161,6 +1407,49 @@ export function transportConformance(
           "the trusted sign-in forwarded no session cookie",
         );
         succeeded(await options.invoke(app, "loginProxy", {}, credentials));
+        // A public forwarding proxy on a safe operation (HTTP GET) is in form mode too: cross-site input causes no
+        // Better Auth call, no session write and no cookie. [R7:SEC-r7-01]
+        signIns = env.probe.calls.filter(
+          (path) => path === "/sign-in/email",
+        ).length;
+        const writes = env.probe.writes.length;
+        const readNavigation = await options.invoke(
+          app,
+          "loginProxyRead",
+          {
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document",
+          },
+          credentials,
+        );
+        denied(readNavigation, 403, "CROSS_SITE_NAVIGATION_LOGIN_BLOCKED");
+        assert.deepEqual(readNavigation.setCookies, []);
+        assert.equal(
+          env.probe.calls.filter((path) => path === "/sign-in/email").length,
+          signIns,
+          "a cross-site navigation reached Better Auth through the safe forwarding proxy",
+        );
+        assert.deepEqual(
+          env.probe.writes.slice(writes),
+          [],
+          "a cross-site navigation wrote a session through the safe forwarding proxy",
+        );
+        const trustedRead = await options.invoke(
+          app,
+          "loginProxyRead",
+          { origin: KIT_BASE_URL },
+          credentials,
+        );
+        succeeded(trustedRead, "a trusted fetch of the safe forwarding proxy");
+        assert.ok(
+          trustedRead.setCookies.some((line) => line.startsWith(`${name}=`)),
+          "the trusted safe forwarding proxy forwarded no session cookie",
+        );
+        succeeded(
+          await options.invoke(app, "loginProxyRead", {}, credentials),
+          "a headerless non-browser call of the safe forwarding proxy",
+        );
         signIns = env.probe.calls.filter(
           (path) => path === "/sign-in/email",
         ).length;
@@ -1189,9 +1478,10 @@ export function transportConformance(
   );
   add(
     "T-csrf-safe-methods",
-    "safe cookie reads are not denied by origin validation",
-    (env) =>
-      withApp(options, env, async ({ app }) => {
+    "safe cookie reads are not denied by origin validation, while forwarding enforces form mode without cookies",
+    async (env) => {
+      const user = await kitIdentity(env.auth, { password: true });
+      await withApp(options, env, async ({ app }) => {
         for (const headers of [
           { ...cookie(env), origin: UNTRUSTED_ORIGIN },
           cookie(env),
@@ -1203,7 +1493,28 @@ export function transportConformance(
             env.identity.userId,
           );
         }
-      }),
+        const signIns = env.probe.calls.filter(
+          (path) => path === "/sign-in/email",
+        ).length;
+        const result = await options.invoke(
+          app,
+          "loginProxyRead",
+          {
+            origin: UNTRUSTED_ORIGIN,
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "cors",
+          },
+          { email: user.email, password: user.password },
+        );
+        denied(result, 403, "INVALID_ORIGIN");
+        assert.deepEqual(result.setCookies, []);
+        assert.equal(
+          env.probe.calls.filter((path) => path === "/sign-in/email").length,
+          signIns,
+          "a cross-site safe operation of a forwarding handler reached Better Auth",
+        );
+      });
+    },
     noBrowser,
   );
   add("T-error-shape", "401, 403 and 429 carry code and reason", (env) =>
@@ -1243,9 +1554,9 @@ export function transportConformance(
     "a failing session store answers 5xx on protected handlers",
     (env) =>
       withApp(options, env, async ({ app }) => {
-        env.probe.fault = (path) =>
-          path === "/get-session" ? new Error("conformance outage") : undefined;
+        env.probe.storageFault = () => new Error("conformance outage");
         const result = await options.invoke(app, "required", cookie(env));
+        env.probe.storageFault = undefined;
         internal(result);
         assert.notEqual(result.error?.statusCode, 401);
         assert.notEqual(result.error?.statusCode, 403);
@@ -1289,12 +1600,9 @@ export function transportConformance(
   add(
     "T-internal-error-logged-once",
     "one failing logical request logs one ERROR entry for all its invocations",
-    (env) =>
+    async (env) =>
+      (await twiceReady(env)) ??
       withApp(options, env, async ({ app, logger }) => {
-        assert.ok(
-          options.invokeTwice,
-          "the transport has a lineage, so invokeTwice is required",
-        );
         const shapes = (options.invocationShapes ?? []).filter(
           (shape) => shape === "aliases" || shape === "batched",
         );
@@ -1304,7 +1612,7 @@ export function transportConformance(
             path === "/get-session"
               ? new Error("conformance outage")
               : undefined;
-          const results = await options.invokeTwice(
+          const results = await options.invokeTwice!(
             app,
             shape,
             [{ orgId: "org-a" }, { orgId: "org-a2" }],
@@ -1323,7 +1631,7 @@ export function transportConformance(
         }
       }),
     twiceSkip &&
-      "the transport serves one invocation per logical request, so each error is logged once by construction",
+      "the transport has no lineage, so each error is logged once by construction",
   );
   add("T-public-no-lookup", "public handlers never read the session", (env) =>
     withApp(options, env, async ({ app }) => {
@@ -1334,15 +1642,35 @@ export function transportConformance(
   );
   add(
     "T-reads-session",
-    "readsSession returns the session, and mixed-kind boots fail PRINCIPAL_PARAM_CONFLICT",
+    "session readers return the session, mixed-kind service reads throw SESSION_REQUIRED, and mixed-kind boots fail PRINCIPAL_PARAM_CONFLICT",
     async (env) => {
-      await withApp(options, env, async ({ app }) => {
+      await withApp(options, env, async ({ app, logger }) => {
         const result = await options.invoke(app, "readsSession", cookie(env));
         succeeded(result);
         assert.equal(
           (result.body as { userId?: string }).userId,
           env.identity.userId,
         );
+        // Boot cannot see a service getSession() call in a mixed-kind handler: it warns, and the read throws.
+        assert.ok(
+          warningCodes(logger).has("W_MIXED_KIND_SESSION_READER"),
+          `boot did not warn W_MIXED_KIND_SESSION_READER: ${logger.text().slice(0, 500)}`,
+        );
+        const session = await options.invoke(
+          app,
+          "readsSessionService",
+          cookie(env),
+        );
+        succeeded(session, "a session caller of a mixed-kind getSession()");
+        assert.equal(
+          (session.body as { userId?: string }).userId,
+          env.identity.userId,
+        );
+        const key = await options.invoke(app, "readsSessionService", {
+          "x-api-key": env.keys.valid,
+        });
+        internal(key);
+        assert.match(logger.text(), /SESSION_REQUIRED/);
       });
       await expectBootFailure(
         options,
@@ -1377,18 +1705,105 @@ export function transportConformance(
   );
   add(
     "T-coverage-claims",
-    "unguarded boots fail, and explicit enhancers or an overridden global guard boot",
+    "unguarded boots report exactly the claimed fixtures, and explicit enhancers, app enhancers, global stand-ins and globalScope: false boot",
     async (env) => {
-      await expectBootFailure(
+      let claims: RecordedClaim[] = [];
+      const expected = new Map<string, string>();
+      const defaults = new CapturingLogger();
+      await withApp(
         options,
         env,
-        { globalGuard: false },
-        "AUTH_BOOT_FAILED",
+        async ({ app }) => {
+          claims = await recordClaims(app, options.transport);
+          const planner = app.get<RoutePlanner>(ROUTE_PLANNER, {
+            strict: false,
+          });
+          for (const claim of claims) {
+            if (
+              !claim.fixture ||
+              claim.method === undefined ||
+              (claim.options.coverage ?? "error") !== "error"
+            ) {
+              continue;
+            }
+            const plan: RoutePlan = planner.plan(
+              claim.target as Type,
+              claim.method,
+            );
+            const accessCovered =
+              (plan.access === "public" || plan.access === "inherit") &&
+              plan.originCheck !== "form";
+            if (
+              !accessCovered &&
+              (claim.options.everyHandler || plan.declares)
+            ) {
+              expected.set(claim.fixture, claim.options.code);
+            }
+          }
+        },
+        {},
+        defaults,
       );
+      assert.ok(
+        claims.some((claim) => claim.fixture),
+        "the transport claimed none of the kit's fixture handlers",
+      );
+      // Boot 3: the bare fixtures fail with exactly the handlers B16 reports, each with its claim's code.
+      const error = await bootFailure(options, env, { globalGuard: false });
+      const issues = ((error as { issues?: unknown }).issues ??
+        []) as readonly { code?: string; detail?: string }[];
+      const reported = new Map<string, string>();
+      for (const claim of claims) {
+        if (!claim.fixture || claim.method === undefined) {
+          continue;
+        }
+        const site = `${claim.target.name}.${claim.method} `;
+        const issue = issues.find((value) =>
+          String(value.detail ?? "").startsWith(site),
+        );
+        if (issue?.code) {
+          reported.set(claim.fixture, issue.code);
+        }
+      }
+      assert.deepEqual(
+        [...reported].sort(),
+        [...expected].sort(),
+        `B16 reported ${JSON.stringify([...reported])}, the claims call for ${JSON.stringify([...expected])}`,
+      );
+      if (claims.some((claim) => claim.fixture === "loginProxy")) {
+        assert.ok(
+          reported.has("loginProxy"),
+          "@Public() must not cover a form-mode forwarding handler",
+        );
+      }
+      for (const name of ["public", "publicService"]) {
+        assert.ok(!reported.has(name), `${name} was reported`);
+      }
+      if (claims.some((claim) => claim.fixture && claim.reach === "explicit")) {
+        await expectBootFailure(
+          options,
+          env,
+          {
+            globalGuard: false,
+            fixtures: kitFixtures({}, [UseGuards(BetterAuthGuard)]),
+          },
+          "AUTH_BOOT_FAILED",
+        );
+      }
       await withApp(options, env, async () => undefined, {
         globalGuard: false,
         fixtures: kitFixtures({}, [UseBetterAuth()]),
       });
+      const global = claims.some(
+        (claim) => claim.fixture && claim.reach === "global",
+      );
+      if (global) {
+        await withApp(options, env, async () => undefined, {
+          globalGuard: false,
+          appEnhancers: true,
+        });
+      }
+      // Boot 4: a replaced global guard is still the global guard.
       const standIn = { canActivate: async () => true };
       await withApp(options, env, async () => undefined, {
         override: (builder) =>
@@ -1403,6 +1818,24 @@ export function transportConformance(
         override: (builder) =>
           builder.overrideProvider(BetterAuthGuard).useClass(StandInGuard),
       });
+      if (global) {
+        const unscoped = new CapturingLogger();
+        await withApp(
+          options,
+          env,
+          async () => undefined,
+          { globalScope: false },
+          unscoped,
+        );
+        const added = [...warningCodes(unscoped)].filter(
+          (code) => !warningCodes(defaults).has(code),
+        );
+        assert.deepEqual(
+          added,
+          ["W_NO_GLOBAL_SCOPE"],
+          `globalScope: false must boot global claims with W_NO_GLOBAL_SCOPE only (pass the logger option to the app): ${unscoped.text().slice(0, 500)}`,
+        );
+      }
     },
   );
   add(
@@ -1498,74 +1931,231 @@ export function transportConformance(
       });
     },
   );
+  const graphOf = (result: GraphResult, root: string, field?: string) => {
+    const node = (result.data as Record<string, unknown> | null | undefined)?.[
+      root
+    ] as Record<string, unknown> | null | undefined;
+    return field === undefined ? node : node?.[field];
+  };
+  const userOf = (value: unknown) =>
+    (value as { principal?: { userId?: string } | null } | null | undefined)
+      ?.principal?.userId ?? null;
   add(
     "T-inherit-no-lookup",
-    "an anonymous public operation with an inheriting field reads no session",
-    (env) =>
-      withApp(options, env, async ({ app }) => {
-        assert.ok(
-          options.invokeGraph,
-          "the transport nests handlers (defaultAccessFor), so invokeGraph is required",
+    "an anonymous public operation with an inheriting field reads no session, and a guarded field is still enforced",
+    async (env) => {
+      const skip = await graphReady(env);
+      if (skip) {
+        return skip;
+      }
+      for (const enhancers of enhancerBoots) {
+        const guarded = enhancers.length > 0;
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            const from = env.probe.calls.length;
+            const result = await options.invokeGraph!(
+              app,
+              [{ root: "public", fields: ["plain"] }],
+              {},
+            );
+            assert.deepEqual(
+              result.errors,
+              [],
+              `[${enhancers.join(", ")}]: ${JSON.stringify(result.errors)}`,
+            );
+            assert.equal(
+              sessionReads(env.probe, from),
+              0,
+              `[${enhancers.join(", ")}]: an inheriting field read the session`,
+            );
+            if (guarded) {
+              const field = await options.invokeGraph!(
+                app,
+                [{ root: "public", fields: ["guarded"] }],
+                {},
+              );
+              assert.ok(
+                field.errors.length > 0 &&
+                  field.errors.every(
+                    (error) => error.code === "UNAUTHENTICATED",
+                  ),
+                `a guarded field under a public root was not denied: ${JSON.stringify(field.errors)}`,
+              );
+            }
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            fixtures: kitFixtures({}, [], { guarded }),
+          },
         );
-        const from = env.probe.calls.length;
-        const result = await options.invokeGraph(
-          app,
-          [{ root: "public", fields: ["plain"] }],
-          {},
-        );
-        assert.deepEqual(result.errors, []);
-        assert.equal(sessionReads(env.probe, from), 0);
-      }),
+      }
+    },
     graphSkip,
   );
   add(
     "T-stamp-per-plan",
-    "a nested reader reads its own enclosing root field's reading",
-    (env) =>
-      withApp(options, env, async ({ app }) => {
-        assert.ok(
-          options.invokeGraph,
-          "the transport nests handlers (defaultAccessFor), so invokeGraph is required",
+    "a nested reader reads its own enclosing root field's reading, whichever source settles first",
+    async (env) => {
+      const skip = await graphReady(env);
+      if (skip) {
+        return skip;
+      }
+      // User Y's cookie and user X's key in one operation.
+      env.keys.owner = (await kitIdentity(env.auth)).userId;
+      const headers = { ...cookie(env), "x-api-key": env.keys.valid };
+      for (const enhancers of enhancerBoots) {
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            for (const delays of [
+              { session: 0, apiKey: 30 },
+              { session: 30, apiKey: 0 },
+            ]) {
+              env.probe.delay = (path) =>
+                path === "/get-session" ? delays.session : undefined;
+              env.keys.delayMs = delays.apiKey;
+              const label = `[${enhancers.join(", ")}] session ${delays.session} ms, key ${delays.apiKey} ms`;
+              try {
+                const result = await options.invokeGraph!(
+                  app,
+                  [
+                    { root: "sessionOnly", fields: ["reader"] },
+                    { root: "mixed", fields: ["reader"] },
+                    { root: "public", fields: ["reader"] },
+                  ],
+                  headers,
+                  { delays },
+                );
+                assert.ok(
+                  result.errors.every(
+                    (error) => error.reason !== "NO_AUTH_RESULT",
+                  ),
+                  `${label}: ${JSON.stringify(result.errors)}`,
+                );
+                assert.deepEqual(
+                  result.errors,
+                  [],
+                  `${label}: ${JSON.stringify(result.errors)}`,
+                );
+                assert.equal(
+                  userOf(graphOf(result, "sessionOnly", "reader")),
+                  env.identity.userId,
+                  `${label}: reader under sessionOnly`,
+                );
+                assert.equal(
+                  userOf(graphOf(result, "mixed", "reader")),
+                  userOf(graphOf(result, "mixed")),
+                  `${label}: reader under mixed must read mixed's own principal`,
+                );
+                assert.equal(
+                  userOf(graphOf(result, "public", "reader")),
+                  null,
+                  `${label}: reader under public`,
+                );
+              } finally {
+                env.probe.delay = undefined;
+                env.keys.delayMs = 0;
+              }
+            }
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            fixtures: kitFixtures({}, [], { guarded: enhancers.length > 0 }),
+          },
         );
-        const result = await options.invokeGraph(
-          app,
-          [
-            { root: "sessionOnly", fields: ["reader"] },
-            { root: "public", fields: ["reader"] },
-          ],
-          cookie(env),
-        );
-        assert.ok(
-          result.errors.every((error) => error.reason !== "NO_AUTH_RESULT"),
-          JSON.stringify(result.errors),
-        );
-        assert.deepEqual(result.errors, []);
-      }),
+      }
+    },
     graphSkip,
   );
+  const federation: BootOptions = {
+    federation: true,
+    fieldResolverEnhancers: ["guards", "interceptors"],
+    fixtures: kitFixtures({}, [], { guarded: true, reference: true }),
+  };
   add(
     "T-reference-resolver",
-    "anonymous federation entities answer UNAUTHENTICATED per entity",
-    (env) =>
-      withApp(options, env, async ({ app }) => {
-        const result = await options.invokeEntities!(
-          app,
-          [
+    "federation reference resolvers need field guards and decide each entity",
+    async (env) => {
+      if (!options.invokeEntities) {
+        if (!(await transportHas(options, env, "defaultAccessFor"))) {
+          return conformanceSkip(
+            "the transport nests no handlers, so it serves no federation reference resolvers",
+          );
+        }
+        let claimed = false;
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            claimed = (await recordClaims(app, options.transport)).some(
+              (claim) => claim.fixture === "reference",
+            );
+          },
+          federation,
+        );
+        assert.equal(
+          claimed,
+          false,
+          "the transport claims the federation reference resolver, so invokeEntities is required",
+        );
+        return conformanceSkip(
+          "the transport claims no reference resolver and gives no invokeEntities",
+        );
+      }
+      await expectBootFailure(
+        options,
+        env,
+        { ...federation, fieldResolverEnhancers: undefined },
+        ["REFERENCE_RESOLVER_UNGUARDED", "FEDERATION_FIELD_GUARDS_REQUIRED"],
+      );
+      await withApp(
+        options,
+        env,
+        async ({ app }) => {
+          const representations = [
             { __typename: "FixtureNode", id: "1", orgId: "org-a" },
             { __typename: "FixtureNode", id: "2", orgId: "org-b" },
-          ],
-          ["plain"],
-          {},
-        );
-        assert.ok(result.errors.length >= 2, JSON.stringify(result.errors));
-        assert.ok(
-          result.errors.every((error) => error.code === "UNAUTHENTICATED"),
-          JSON.stringify(result.errors),
-        );
-      }),
-    options.invokeEntities
-      ? undefined
-      : "the transport gives no invokeEntities (federation only)",
+          ];
+          const anonymous = await options.invokeEntities!(
+            app,
+            representations,
+            ["plain"],
+            {},
+          );
+          assert.ok(
+            anonymous.errors.length >= 2 &&
+              anonymous.errors.every(
+                (error) => error.code === "UNAUTHENTICATED",
+              ),
+            JSON.stringify(anonymous.errors),
+          );
+          const decided = await options.invokeEntities!(
+            app,
+            representations,
+            ["plain"],
+            cookie(env),
+          );
+          assert.equal(
+            decided.errors.length,
+            1,
+            `two representations were not decided independently: ${JSON.stringify(decided.errors)}`,
+          );
+          assert.equal(decided.errors[0]!.reason, "MISSING_PERMISSION");
+          assert.ok(
+            decided.errors[0]!.path.includes(1),
+            JSON.stringify(decided.errors),
+          );
+        },
+        federation,
+      );
+    },
+    staticMember(options.transport, "defaultAccessFor") === false &&
+      !options.invokeEntities
+      ? "the transport nests no handlers, so it serves no federation reference resolvers"
+      : undefined,
   );
   return cases;
 }

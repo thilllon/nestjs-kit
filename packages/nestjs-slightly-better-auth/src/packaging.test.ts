@@ -687,28 +687,66 @@ void organization;
            const { memoryAdapter } = await import("better-auth/adapters/memory");
            const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
            Logger.overrideLogger(false);
-           const auth = betterAuth({
+           const instance = (cookiePrefix) => betterAuth({
              baseURL: "http://localhost:3000",
              secret: crypto.randomUUID().repeat(2),
              database: memoryAdapter({}),
              logger: { disabled: true },
+             advanced: { cookiePrefix },
              plugins: [nestjs()],
            });
-           const builder = Test.createTestingModule({
-             imports: [kit.BetterAuthModule.forRoot({ auth, http: { mount: false }, logSummary: false })],
-           });
-           testing.overrideAuthGuard(builder, { principal: null });
-           testing.overridePrincipal(builder, { kind: "session", source: "better-auth:session", userId: "u1", session: {} });
-           const moduleRef = await builder.compile();
-           await moduleRef.init();
-           const guard = moduleRef.get(kit.BetterAuthGuard);
-           const allowed = await guard.canActivate({
-             getArgs: () => [{}],
+           const modules = () => [
+             kit.BetterAuthModule.forRoot({ auth: instance("first"), http: { mount: false }, logSummary: false }),
+             kit.BetterAuthModule.forRoot({ name: "named", auth: instance("named"), http: { mount: false }, logSummary: false }),
+           ];
+           const fixed = (userId) => ({ kind: "session", source: "better-auth:session", userId, session: {} });
+           const guarded = Test.createTestingModule({ imports: modules() });
+           testing.overrideAuthGuard(guarded, { principal: null });
+           const guardRef = await guarded.compile();
+           await guardRef.init();
+           const allowed = await guardRef.get(kit.BetterAuthGuard).canActivate({
+             getArgs: () => [{}, {}],
              getClass: () => Object,
              getHandler: () => function handler() {},
              getType: () => "http",
            });
+           await guardRef.close();
+           const builder = Test.createTestingModule({ imports: modules() });
+           testing.overridePrincipal(builder, fixed("default-user"));
+           testing.overridePrincipal(builder, fixed("named-user"), { instance: "named" });
+           const moduleRef = await builder.compile();
+           await moduleRef.init();
+           const resolver = moduleRef.get(kit.PRINCIPAL_RESOLVER);
+           const call = { key: {}, invocation: {}, headers: () => new Headers(), clientIp: null, cookies: null, param: () => undefined };
+           const principals = [];
+           for (const name of [undefined, "named"]) {
+             const result = await resolver.resolve(call, {
+               auth: moduleRef.get(kit.getBetterAuthHandleToken(name)),
+               freshness: "default",
+               accepts: new Set(["session"]),
+               sourceSet: "0",
+             });
+             principals.push(result.principal?.userId ?? result.outcome);
+           }
            await moduleRef.close();
+           // One real kit from the artifact: the inlined plugin handshake, decorated harness classes and Nest boots.
+           const auth = conformance.createConformanceAuth();
+           const credential = async () => {
+             const email = crypto.randomUUID() + "@artifact.example";
+             const { user } = await auth.api.signUpEmail({ body: { email, password: crypto.randomUUID(), name: "Artifact" } });
+             return testing.authHeadersFor(auth, user.id);
+           };
+           const outcomes = [];
+           for (const item of conformance.principalSourceConformance({
+             source: kit.sessionPrincipal(),
+             auth,
+             credentials: {
+               valid: credential,
+               invalid: () => new Headers({ cookie: "better-auth.session_token=invalid.value" }),
+             },
+           })) {
+             outcomes.push(item.skip === undefined ? ((await item.run())?.skipped ? "skipped" : "passed") : "skipped");
+           }
            const registered = [];
            conformance.runConformance(
              [
@@ -724,6 +762,8 @@ void organization;
              testing: Object.keys(testing).sort(),
              conformance: Object.keys(conformance).sort(),
              allowed,
+             principals,
+             outcomes: [...new Set(outcomes)].sort(),
              registered,
              probe: conformance.conformanceProbePlugin().id,
            }));
@@ -753,6 +793,8 @@ void organization;
           "transportConformance",
         ],
         allowed: true,
+        principals: ["default-user", "named-user"],
+        outcomes: ["passed", "skipped"],
         registered: [
           "describe C-run",
           "it runs",
@@ -763,6 +805,126 @@ void organization;
       });
     },
   );
+
+  it("keeps the testing entries to their Better Auth specifiers in both formats", () => {
+    const result = node(
+      `import { createRequire, registerHooks } from "node:module";
+       import { pathToFileURL } from "node:url";
+       const require = createRequire(import.meta.url);
+       const dist = pathToFileURL(process.cwd() + "/dist/").href;
+       const seen = { testing: new Set(), conformance: new Set() };
+       let current = "testing";
+       const hooks = registerHooks({
+         resolve(specifier, context, nextResolve) {
+           if (context.parentURL?.startsWith(dist) && specifier.startsWith("better-auth")) {
+             seen[current].add(specifier);
+           }
+           return nextResolve(specifier, context);
+         },
+       });
+       try {
+         await import("./dist/testing.mjs");
+         require("./dist/testing.cjs");
+         current = "conformance";
+         await import("./dist/testing/conformance.mjs");
+         require("./dist/testing/conformance.cjs");
+       } finally {
+         hooks.deregister();
+       }
+       console.log(JSON.stringify({
+         testing: [...seen.testing].sort(),
+         conformance: [...seen.conformance].sort(),
+       }));`,
+      "--input-type=module",
+    );
+    const seen = JSON.parse(result) as {
+      testing: string[];
+      conformance: string[];
+    };
+    // ./testing is a Nest-facing entry (better-auth/api); ./testing/conformance adds its own row and bundles ./plugin.
+    expect(
+      seen.testing.filter(
+        (specifier) => !["better-auth", "better-auth/api"].includes(specifier),
+      ),
+    ).toEqual([]);
+    expect(
+      seen.conformance.filter(
+        (specifier) =>
+          ![
+            "better-auth",
+            "better-auth/api",
+            "better-auth/plugins",
+            "better-auth/adapters/memory",
+            "better-auth/cookies",
+          ].includes(specifier),
+      ),
+    ).toEqual([]);
+    expect(seen.conformance).toContain("better-auth/adapters/memory");
+  });
+
+  it("composes testing overrides from the ESM and CommonJS copies on one builder", () => {
+    const result = node(
+      `import { createRequire } from "node:module";
+       const require = createRequire(import.meta.url);
+       const esm = await import("./dist/testing.mjs");
+       const cjs = require("./dist/testing.cjs");
+       const kit = await import("./dist/index.mjs");
+       const { Test } = await import("@nestjs/testing");
+       const { Logger } = await import("@nestjs/common");
+       const { betterAuth } = await import("better-auth");
+       const { memoryAdapter } = await import("better-auth/adapters/memory");
+       const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+       Logger.overrideLogger(false);
+       const instance = (cookiePrefix) => betterAuth({
+         baseURL: "http://localhost:3000",
+         secret: crypto.randomUUID().repeat(2),
+         database: memoryAdapter({}),
+         logger: { disabled: true },
+         advanced: { cookiePrefix },
+         plugins: [nestjs()],
+       });
+       const builder = Test.createTestingModule({
+         imports: [
+           kit.BetterAuthModule.forRoot({ auth: instance("first"), http: { mount: false }, logSummary: false }),
+           kit.BetterAuthModule.forRoot({ name: "named", auth: instance("named"), http: { mount: false }, logSummary: false }),
+         ],
+       });
+       const fixed = (userId) => ({ kind: "session", source: "better-auth:session", userId, session: {} });
+       cjs.overridePrincipal(builder, fixed("from-cjs"));
+       esm.overridePrincipal(builder, fixed("from-esm"), { instance: "named" });
+       const seen = [];
+       cjs.overrideDecisions(builder, (id) => { seen.push("cjs:" + id); return id === "cjs" ? { effect: "allow" } : undefined; });
+       esm.overrideDecisions(builder, (id) => { seen.push("esm:" + id); return { effect: "deny", reason: "ESM" }; });
+       const moduleRef = await builder.compile();
+       await moduleRef.init();
+       const resolver = moduleRef.get(kit.PRINCIPAL_RESOLVER);
+       const call = { key: {}, invocation: {}, headers: () => new Headers(), clientIp: null, cookies: null, param: () => undefined };
+       const principals = [];
+       for (const name of [undefined, "named"]) {
+         const result = await resolver.resolve(call, {
+           auth: moduleRef.get(kit.getBetterAuthHandleToken(name)),
+           freshness: "default",
+           accepts: new Set(["session"]),
+           sourceSet: "0",
+         });
+         principals.push(result.principal?.userId ?? result.outcome);
+       }
+       const invoker = moduleRef.get(kit.POLICY_INVOKER);
+       const policy = (id) => ({ id, evaluate: () => ({ effect: "deny", reason: "REAL" }) });
+       const decisions = [
+         await invoker.invoke(policy("cjs"), {}, { principal: fixed("u1") }),
+         await invoker.invoke(policy("other"), {}, { principal: fixed("u1") }),
+       ];
+       await moduleRef.close();
+       console.log(JSON.stringify({ principals, decisions, seen }));`,
+      "--input-type=module",
+    );
+    expect(JSON.parse(result)).toEqual({
+      principals: ["from-cjs", "from-esm"],
+      decisions: [{ effect: "allow" }, { effect: "deny", reason: "ESM" }],
+      seen: ["cjs:cjs", "cjs:other", "esm:other"],
+    });
+  });
 
   it.each(["mts", "cts"] as const)(
     "types the testing entries for a .%s consumer",

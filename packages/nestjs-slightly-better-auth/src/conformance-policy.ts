@@ -15,6 +15,7 @@ import type {
 } from "./auth-contracts.js";
 import { Require } from "./auth-decorators.js";
 import {
+  BetterAuthConfigurationError,
   isAuthFailure,
   isConfigurationError,
   isInfrastructureError,
@@ -34,6 +35,8 @@ import {
   bootIssueCodes,
   type ConformanceCase,
   conformanceCase,
+  conformanceSkip,
+  type ConformanceOutcome,
   createConformanceAuth,
   probeOf,
   type ProbeState,
@@ -46,6 +49,10 @@ import type { RoutePlanner } from "./route-planner.js";
 import { authHeadersFor } from "./testing.js";
 
 export interface PolicyConformanceOptions {
+  /**
+   * The requirement to judge. Its policies must be policy objects: the kit boots no application providers, so a class
+   * or token reference cannot resolve. For a DI policy, pass an instance built with its dependencies (new MyPolicy(deps)).
+   */
   requirement: RequirementExpr;
   /**
    * The Better Auth instance the principals belong to. It must include conformanceProbePlugin(), testUtils(), the
@@ -66,17 +73,28 @@ function requirementsOf(expression: RequirementExpr): Requirement[] {
       : [expression];
 }
 
-/** The policy objects a requirement names directly; class or token references resolve only at boot. */
+function isPolicyObject(value: unknown): value is AuthorizationPolicy<unknown> {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as AuthorizationPolicy<unknown>).evaluate === "function"
+  );
+}
+
+/** The policy objects of a requirement; the kit rejects class and token references up front. */
 function staticPolicies(
   expression: RequirementExpr,
-): (AuthorizationPolicy<unknown> | undefined)[] {
-  return requirementsOf(expression).map((item) =>
-    item.policy &&
-    typeof item.policy === "object" &&
-    typeof (item.policy as AuthorizationPolicy<unknown>).evaluate === "function"
-      ? (item.policy as AuthorizationPolicy<unknown>)
-      : undefined,
-  );
+): AuthorizationPolicy<unknown>[] {
+  return requirementsOf(expression).map((item) => {
+    if (!isPolicyObject(item.policy)) {
+      throw new BetterAuthConfigurationError(
+        "CONFORMANCE_POLICY_OBJECT_REQUIRED",
+        `policyConformance received a requirement whose policy is a class or injection token (${String((item.policy as { name?: unknown })?.name ?? item.policy)}); the kit registers no application providers to resolve it.`,
+        "Pass the policy object, e.g. requirement(new MyPolicy(dependencies), params).",
+      );
+    }
+    return item.policy;
+  });
 }
 
 function controllerFor(expression: RequirementExpr) {
@@ -102,7 +120,12 @@ interface Harness {
   readonly policies: PolicyResolver;
   decide(
     principal: AuthPrincipal,
-    call?: { key?: object; invocation?: object },
+    call?: {
+      key?: object;
+      invocation?: object;
+      /** Runs after the principal's session headers exist, right before evaluation. */
+      beforeEvaluate?: () => void;
+    },
   ): Promise<AuthorizationDecision>;
   close(): Promise<void>;
 }
@@ -212,6 +235,7 @@ async function harness(options: PolicyConformanceOptions): Promise<Harness> {
         cookies: null,
         param: () => undefined,
       };
+      ids.beforeEvaluate?.();
       return evaluator.evaluate(
         plan,
         principal,
@@ -227,13 +251,14 @@ async function harness(options: PolicyConformanceOptions): Promise<Harness> {
 
 async function withHarness(
   options: PolicyConformanceOptions,
-  fn: (harness: Harness) => Promise<void>,
-): Promise<void> {
+  fn: (harness: Harness) => Promise<ConformanceOutcome>,
+): Promise<ConformanceOutcome> {
   const value = await harness(options);
   try {
-    await fn(value);
+    return await fn(value);
   } finally {
     value.probe.fault = undefined;
+    value.probe.storageFault = undefined;
     await value.close();
   }
 }
@@ -249,7 +274,10 @@ const noGrant = {
 
 /**
  * The authorization-policy kit (invariants Z1–Z6). Each principal is judged through the real AuthorizationEvaluator,
- * so the delegation gate, error normalization and the per-invocation decision memo apply exactly as in the guard.
+ * so the delegation gate, error normalization and the per-invocation decision memo apply exactly as in the guard; an
+ * infrastructure error thrown here is the guard's 5xx. Storage outages are injected into the instance's database
+ * adapter, so an endpoint that swallows a storage error into a 401 is exercised; APIError mapping uses the probe
+ * plugin's before hook. Requirements must name policy objects (see PolicyConformanceOptions.requirement).
  */
 export function policyConformance(
   options: PolicyConformanceOptions,
@@ -257,7 +285,7 @@ export function policyConformance(
   const add = (
     id: string,
     title: string,
-    run: (harness: Harness) => Promise<void>,
+    run: (harness: Harness) => Promise<ConformanceOutcome>,
     skip?: string,
   ) => conformanceCase(id, title, () => withHarness(options, run), skip);
   const known = staticPolicies(options.requirement);
@@ -267,7 +295,7 @@ export function policyConformance(
       known[index]?.requires?.principals !== undefined,
   );
   const plugins = [
-    ...new Set(known.flatMap((policy) => policy?.requires?.plugins ?? [])),
+    ...new Set(known.flatMap((policy) => policy.requires?.plugins ?? [])),
   ];
   return [
     add(
@@ -298,22 +326,34 @@ export function policyConformance(
     ),
     add(
       "Z-infra-throws",
-      "a storage failure after the session read is infrastructure, never a denial",
+      "a storage outage after the session read is infrastructure, never a denial",
       async ({ decide, probe }) => {
         const principal = await options.allowingPrincipal();
-        const from = probe.calls.length;
-        probe.fault = (path) =>
-          path === "/get-session"
-            ? undefined
-            : new Error("conformance storage outage");
-        const result = await settle(() => decide(principal));
-        if (betterAuthCalls(probe, from).length === 0) {
-          return;
+        let calls = probe.calls.length;
+        let storage = probe.storage.length;
+        const result = await settle(() =>
+          decide(principal, {
+            beforeEvaluate: () => {
+              calls = probe.calls.length;
+              storage = probe.storage.length;
+              probe.storageFault = () =>
+                new Error("conformance storage outage");
+            },
+          }),
+        );
+        probe.storageFault = undefined;
+        if (
+          betterAuthCalls(probe, calls).length === 0 &&
+          probe.storage.length === storage
+        ) {
+          return conformanceSkip(
+            "the policy read no storage and called no Better Auth endpoint for the allowing principal",
+          );
         }
         assert.equal(
           result.ok,
           false,
-          `a storage failure was decided: ${JSON.stringify(result.ok && result.value)}`,
+          `a storage outage was decided: ${JSON.stringify(result.ok && result.value)}`,
         );
         assert.ok(
           isInfrastructureError(!result.ok && result.error),
@@ -427,7 +467,9 @@ export function policyConformance(
           const result = await settle(() => decide(principal));
           probe.fault = undefined;
           if (betterAuthCalls(probe, from).length === 0) {
-            return;
+            return conformanceSkip(
+              "the policy calls no Better Auth endpoint for the allowing principal",
+            );
           }
           variant.expect(result);
         }

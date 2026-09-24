@@ -8,7 +8,11 @@ import {
   type ExecutionContext,
   type INestApplication,
 } from "@nestjs/common";
-import type { AbstractHttpAdapter } from "@nestjs/core";
+import {
+  type AbstractHttpAdapter,
+  APP_GUARD,
+  APP_INTERCEPTOR,
+} from "@nestjs/core";
 import {
   ExpressAdapter,
   type NestExpressApplication,
@@ -18,10 +22,14 @@ import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
 import type {
   AuthRouteBinding,
+  ConformanceCase,
   HttpPlatform,
   PlatformMountContext,
 } from "./auth-contracts.js";
+import { defineExtension } from "./auth-module-definition.js";
+import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
+import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { BetterAuthService } from "./auth-service.js";
 import {
   runConformance,
@@ -115,6 +123,41 @@ describe("platform kit mutations", () => {
     });
     const multicookie = cases.find((item) => item.id === "H-resp-multicookie");
     await expect(multicookie!.run()).rejects.toThrow(/Set-Cookie lines/);
+  });
+
+  it("decides capability cases of a definition platform from the resolved platform", async () => {
+    const byId = (cases: ConformanceCase[], id: string) =>
+      cases.find((item) => item.id === id)!;
+    const fastify = httpPlatformConformance({
+      platform: defineExtension<HttpPlatform>({
+        use: { useFactory: () => fastifyPlatform() as HttpPlatform },
+      }),
+      createHttpAdapter: () => new FastifyAdapter(),
+      bootstrap: ["testing"],
+      trustOneProxy: () => {
+        throw new Error("a platform without proxyTrust() needs no trust hook");
+      },
+    });
+    for (const id of ["H-proxy-trust", "H-h2-pseudo"]) {
+      expect(byId(fastify, id).skip).toBeUndefined();
+    }
+    await expect(byId(fastify, "H-proxy-trust").run()).resolves.toEqual({
+      skipped: "the platform does not implement the optional proxyTrust()",
+    });
+    // The resolved platform declares http2, so the kit requires the http2 option.
+    await expect(byId(fastify, "H-h2-pseudo").run()).rejects.toThrow(
+      /requires the http2 option/,
+    );
+    const express = httpPlatformConformance({
+      platform: defineExtension<HttpPlatform>({
+        use: { useFactory: () => expressPlatform() as unknown as HttpPlatform },
+      }),
+      createHttpAdapter: () => new ExpressAdapter(),
+      bootstrap: ["testing"],
+    });
+    await expect(byId(express, "H-h2-pseudo").run()).resolves.toEqual({
+      skipped: "the platform declares no http2 capability",
+    });
   });
 });
 
@@ -214,10 +257,22 @@ function httpHarness(
             ...(options.defaultRequirements
               ? { defaultRequirements: options.defaultRequirements }
               : {}),
+            ...(options.globalScope === undefined
+              ? {}
+              : { globalScope: options.globalScope }),
             logSummary: false,
           } as never),
         ],
         controllers: [fixtureController(handlers)],
+        providers: options.appEnhancers
+          ? [
+              { provide: APP_GUARD, useClass: BetterAuthGuard },
+              {
+                provide: APP_INTERCEPTOR,
+                useClass: BetterAuthScopeInterceptor,
+              },
+            ]
+          : [],
       })
       class HttpFixtureModule {}
       let builder = Test.createTestingModule({ imports: [HttpFixtureModule] });
@@ -226,7 +281,7 @@ function httpHarness(
       }
       const moduleRef = await builder.compile();
       const app = moduleRef.createNestApplication(adapter(), {
-        logger: false,
+        logger: options.logger ?? false,
       });
       try {
         await app.init();
