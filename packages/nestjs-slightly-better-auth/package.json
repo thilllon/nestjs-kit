@@ -153,7 +153,7 @@
     "typescript"
   ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsdown"
   },
   "peerDependencies": {
