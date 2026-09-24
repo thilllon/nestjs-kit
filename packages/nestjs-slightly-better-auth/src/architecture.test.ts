@@ -436,7 +436,8 @@ function parseModule(file: string): SourceModule {
         }
         break;
       case "ForOfStatement":
-        if (!insideFunction && node.await !== undefined) {
+        // SWC sets `await` to false for a plain for...of; its types declare an optional span.
+        if (!insideFunction && node.await) {
           syntax.add("top-level await");
         }
         break;
