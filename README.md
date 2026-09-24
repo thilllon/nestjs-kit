@@ -20,6 +20,7 @@ Each guide covers installation, registration options and complete examples.
 - [`nestjs-sendgrid`](packages/nestjs-sendgrid/README.md): Mail Send and Web API calls through isolated Twilio SendGrid accounts. [npm](https://www.npmjs.com/package/nestjs-sendgrid)
 - [`nestjs-pubnub`](packages/nestjs-pubnub/README.md): publishing and subscribing through an injectable PubNub client. [npm](https://www.npmjs.com/package/nestjs-pubnub)
 - [`nestjs-sendbird`](packages/nestjs-sendbird/README.md): Sendbird Platform API calls with per-application tokens. [npm](https://www.npmjs.com/package/nestjs-sendbird)
+- [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md): Better Auth sessions, guards and authorization for NestJS applications. [npm](https://www.npmjs.com/package/nestjs-slightly-better-auth)
 
 ## Shared approach
 
