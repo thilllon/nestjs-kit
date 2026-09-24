@@ -156,6 +156,36 @@ jobs:
         if: vars.NPM_PUBLISH_ENABLED == 'true'
         run: gh workflow run release.yml --ref main
 
+  cleanup:
+    needs: [prepare, merge]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      checks: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      # A PR that GITHUB_TOKEN opens or updates gets pull_request runs that wait for approval.
+      # The dispatched CI run validates the release head instead, and GitHub concludes the
+      # unapproved run as a failure without jobs when the version PR merges. Deleting the run
+      # deletes its check suite; an empty suite cannot hold the Checks API Validate report.
+      - name: Delete the unapproved pull_request CI run of the merged release head
+        run: |
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$RELEASE_SHA" --jq '
+            .workflow_runs[]
+            | select(.head_branch == "automation/releases" and .actor.login == "github-actions[bot]")
+            | select(.status == "completed" and (.conclusion == "action_required" or .conclusion == "failure"))
+            | "\(.id) \(.check_suite_id)"')
+          while read -r run suite; do
+            test -n "$run" || continue
+            test "$(gh api "repos/$GH_REPO/actions/runs/$run/jobs" --jq .total_count)" = 0 || continue
+            test "$(gh api "repos/$GH_REPO/check-suites/$suite" --jq .latest_check_runs_count)" = 0 || continue
+            gh api --method DELETE "repos/$GH_REPO/actions/runs/$run"
+            echo "Deleted unapproved pull_request run $run and its empty check suite $suite."
+          done <<< "$runs"
+
   publish:
     needs: [prepare, validate, merge]
     if: >-
