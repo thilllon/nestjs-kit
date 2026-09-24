@@ -23,6 +23,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
 - Order existing package.json scripts with `typecheck`, `build`, then `dev` first in the root and every package; do not add missing commands just for ordering.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
+- Spell out command-line flags in their long form in package scripts, workflows, hooks, Compose files and documented commands whenever the tool provides one, for example `tsc --project`, `docker compose up --detach` and `git commit --message`.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
 - Keep source and test files in the default package `tsconfig.json` project so editors apply the shared decorator settings to both. Use the test configuration for no-emit typechecking; production bundling stays limited to the package entry point.

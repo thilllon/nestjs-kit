@@ -60,4 +60,4 @@ jobs:
         if: always()
         run: pnpm docker:down
       - name: Scan tracked files for secrets
-        run: gitleaks git --redact --no-banner --log-opts='-1' .
+        run: gitleaks git --redact --no-banner --log-opts='--max-count=1' .

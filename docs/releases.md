@@ -62,7 +62,7 @@ To publish a held package:
      mise exec -- pnpm pkg set "version=$VERSION" &&
      mise exec -- pnpm build &&
      mise exec -- pnpm pack --out "/tmp/$PACKAGE.tgz" &&
-     tar -tzf "/tmp/$PACKAGE.tgz"
+     tar --list --gzip --file "/tmp/$PACKAGE.tgz"
    ```
 
    Inspect the listed files: only `dist`, `README.md`, `LICENSE` and `package.json` belong in the archive. Then publish it with the owner's npm authentication from the same directory and restore the version edit. `--no-git-checks` is needed only because of that edit:
