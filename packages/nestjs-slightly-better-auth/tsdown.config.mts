@@ -12,6 +12,8 @@ export default defineConfig([
       admin: "src/admin.ts",
       organization: "src/organization.ts",
       "api-key": "src/api-key.ts",
+      testing: "src/testing.ts",
+      "testing/conformance": "src/testing-conformance.ts",
     },
   },
   {

@@ -274,18 +274,35 @@ export class PrincipalReadings {
     instance: string,
     result: PrincipalResult,
   ): void {
-    const stamp = matchingStamp(args) ?? {
-      elements: [...args],
-      results: new Map(),
-    };
-    stamp.results.set(instance, result);
-    for (const target of [args, ...args]) {
-      if (object(target) && Object.isExtensible(target)) {
-        Object.defineProperty(target, TEST_STAMP, {
-          value: stamp,
-          configurable: true,
-        });
-      }
+    stampResult(args, instance, result);
+  }
+}
+
+/** Test stamps are verified by element identity, so a stamp never leaks into another invocation. */
+export function stampResult(
+  args: readonly unknown[],
+  instance: string,
+  result: PrincipalResult,
+): void {
+  const stamp = matchingStamp(args) ?? {
+    elements: [...args],
+    results: new Map(),
+  };
+  stamp.results.set(instance, result);
+  for (const target of [args, ...args]) {
+    if (object(target) && Object.isExtensible(target)) {
+      Object.defineProperty(target, TEST_STAMP, {
+        value: stamp,
+        configurable: true,
+      });
     }
   }
+}
+
+export function stampedReading(
+  args: readonly unknown[],
+  instance: string,
+): PrincipalReading | undefined {
+  const result = matchingStamp(args)?.results.get(instance);
+  return result ? { ...result, instance } : undefined;
 }

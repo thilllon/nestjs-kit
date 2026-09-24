@@ -121,6 +121,34 @@
         "default": "./dist/api-key.cjs"
       }
     },
+    "./testing": {
+      "module-sync": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "import": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "require": {
+        "types": "./dist/testing.d.cts",
+        "default": "./dist/testing.cjs"
+      }
+    },
+    "./testing/conformance": {
+      "module-sync": {
+        "types": "./dist/testing/conformance.d.mts",
+        "default": "./dist/testing/conformance.mjs"
+      },
+      "import": {
+        "types": "./dist/testing/conformance.d.mts",
+        "default": "./dist/testing/conformance.mjs"
+      },
+      "require": {
+        "types": "./dist/testing/conformance.d.cts",
+        "default": "./dist/testing/conformance.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -156,9 +184,15 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "build": "tsdown"
   },
+  "peerDependenciesMeta": {
+    "@nestjs/testing": {
+      "optional": true
+    }
+  },
   "peerDependencies": {
     "@nestjs/common": "^12.0.3",
     "@nestjs/core": "^12.0.3",
+    "@nestjs/testing": "^12.0.3",
     "better-auth": ">=1.7.5 <2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
