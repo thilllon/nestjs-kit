@@ -1,0 +1,11 @@
+syntax = "proto3";
+package auth;
+service AuthProbe {
+  rpc Private (Input) returns (Identity);
+  rpc Public (Input) returns (Identity);
+  rpc Forbidden (Input) returns (Identity);
+  rpc Limited (Input) returns (Identity);
+  rpc Outage (Input) returns (Identity);
+}
+message Input { string value = 1; }
+message Identity { string userId = 1; string value = 2; }
