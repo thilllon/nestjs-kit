@@ -31,7 +31,7 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the authentication library's ESM and CJS artifacts. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
+Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the built ESM and CJS artifacts of every package with a `src/packaging.test.ts`. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
 
 For integration tests against real databases and message brokers, install Docker with Compose and run:
 
@@ -52,7 +52,7 @@ Compose starts isolated services, binds their client ports to `127.0.0.1`, and w
 | MQTT 5     | 51883        | `MQTT_PORT`     |
 | Redis      | 56379        | `REDIS_PORT`    |
 
-Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery, HTTP authentication, WebSockets and native RPC credential carriers. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis persistence is disabled, and `docker:down` removes the fixture volumes.
+Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, and native RPC credential carriers over TCP, gRPC and each broker. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis persistence is disabled, and `docker:down` removes the fixture volumes.
 
 Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
 
@@ -67,7 +67,7 @@ Use a Conventional Commit title to describe the change:
 
 Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
-Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
+Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Packages awaiting their first npm release are held in Changesets `ignore` and are not offered there; write their Changesets by hand in a separate file that names only held packages (see [packages awaiting first publication](docs/releases.md#packages-awaiting-first-publication)). Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
 
 ## Repository layout
 
@@ -75,7 +75,9 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
-- `packages/nestjs-slightly-better-auth`: private authentication design workspace, research and historical adapter reference; not a working authentication library yet.
+- `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
+- `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
+- `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
