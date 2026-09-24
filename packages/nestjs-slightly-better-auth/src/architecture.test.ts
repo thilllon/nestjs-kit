@@ -54,13 +54,36 @@ const pluginFiles = [
   "hook-dispatcher.ts",
   "plugin.ts",
 ];
-const testSupport = ["test-fixtures.ts"];
+/** Unpublished fixtures that only tests import. */
+const testSupport = ["jwt-extension-fixture.ts", "test-fixtures.ts"];
+/**
+ * Published test utilities (design v7 §2.2.16, §14.1 and §14.8). The conformance kits boot real
+ * modules against their own Better Auth instance, so they reach the composition root, the plugin
+ * and built-in units, which core never may.
+ */
+const testingKit: Readonly<Record<string, readonly string[]>> = {
+  testing: ["testing.ts"],
+  conformance: [
+    "conformance-fixtures.ts",
+    "conformance-http.ts",
+    "conformance-policy.ts",
+    "conformance-principal.ts",
+    "conformance-transport.ts",
+    "testing-conformance.ts",
+  ],
+};
 /** Built-in extension units (design v7 §3.1 E1/E2), each with its own files. */
 const units: Readonly<Record<string, readonly string[]>> = {
   session: ["session-principal.ts"],
   http: ["http-transport.ts"],
   express: ["express-platform.ts", "express.ts"],
   fastify: ["fastify-platform.ts", "fastify.ts"],
+  websockets: [
+    "socket-io-transport.ts",
+    "websockets.ts",
+    "ws-connection-auth.ts",
+    "ws-transport.ts",
+  ],
   rpc: ["microservices.ts", "rpc-carriers.ts", "rpc-transport.ts"],
   admin: ["admin.ts"],
   organization: ["organization.ts"],
@@ -102,7 +125,7 @@ const kernelLiteralExceptions = [
   },
 ];
 
-/** Nest deep specifiers on main; #586 tracks their removal (design v7 §12.7). */
+/** Nest deep specifiers in package sources; #586 tracks their removal (design v7 §12.7). */
 const nestDeepImportExceptions = [
   {
     file: "boot-validator.ts",
@@ -116,6 +139,11 @@ const nestDeepImportExceptions = [
     file: "principal-readings.ts",
     specifier: "@nestjs/common/exceptions/intrinsic.exception.js",
   },
+  // ExecutionContextHost is exported only from the internal @nestjs/core/internal entry.
+  {
+    file: "ws-connection-auth.ts",
+    specifier: "@nestjs/core/helpers/execution-context-host.js",
+  },
 ];
 
 const requiredPeers = [
@@ -124,63 +152,95 @@ const requiredPeers = [
   "better-auth/api",
   "rxjs",
 ];
+interface EntryPolicy {
+  /** Runtime specifiers; a listed Nest deep import counts as its package. */
+  readonly specifiers: readonly string[];
+  readonly nodeBuiltins: boolean;
+  /** Groups besides contracts, shared helpers and kernel that the runtime graph may reach. */
+  readonly groups: readonly string[];
+}
 /** Runtime imports each published entry may reach (design v7 §2.1 and §12.7). */
-const entryPolicies: Readonly<
-  Record<
-    string,
-    {
-      readonly specifiers: readonly string[];
-      readonly nodeBuiltins: boolean;
-      readonly units: readonly string[];
-    }
-  >
-> = {
+const entryPolicies: Readonly<Record<string, EntryPolicy>> = {
   ".": {
     specifiers: requiredPeers,
     nodeBuiltins: true,
-    units: ["session", "http"],
+    groups: ["composition root", "unit:session", "unit:http"],
   },
   "./plugin": {
     specifiers: ["better-auth/api", "better-auth/cookies", "defu"],
     nodeBuiltins: false,
-    units: [],
+    groups: ["plugin"],
   },
-  "./platform": { specifiers: [], nodeBuiltins: true, units: [] },
+  "./platform": { specifiers: [], nodeBuiltins: true, groups: [] },
   "./express": {
     specifiers: [...requiredPeers, "path-to-regexp"],
     nodeBuiltins: true,
-    units: ["express"],
+    groups: ["unit:express"],
   },
   "./fastify": {
     specifiers: requiredPeers,
     nodeBuiltins: true,
-    units: ["fastify"],
+    groups: ["unit:fastify"],
+  },
+  "./websockets": {
+    specifiers: [...requiredPeers, "@nestjs/websockets"],
+    nodeBuiltins: true,
+    groups: ["unit:websockets"],
   },
   "./microservices": {
     specifiers: [...requiredPeers, "@nestjs/microservices"],
     nodeBuiltins: true,
-    units: ["rpc"],
+    groups: ["unit:rpc"],
   },
   "./admin": {
     specifiers: requiredPeers,
     nodeBuiltins: true,
-    units: ["admin"],
+    groups: ["unit:admin"],
   },
   "./organization": {
     specifiers: requiredPeers,
     nodeBuiltins: true,
-    units: ["organization"],
+    groups: ["unit:organization"],
   },
   "./api-key": {
     specifiers: [...requiredPeers, "better-auth/plugins/access"],
     nodeBuiltins: true,
-    units: ["api-key"],
+    groups: ["unit:api-key"],
+  },
+  // @nestjs/testing stays a type-only import of ./testing.
+  "./testing": {
+    specifiers: requiredPeers,
+    nodeBuiltins: true,
+    groups: ["kit:testing"],
+  },
+  // The kits build a memory-adapter instance with the nestjs() plugin and boot the root module.
+  "./testing/conformance": {
+    specifiers: [
+      ...requiredPeers,
+      "@nestjs/testing",
+      "better-auth",
+      "better-auth/adapters/memory",
+      "better-auth/cookies",
+      "better-auth/plugins",
+      "defu",
+    ],
+    nodeBuiltins: true,
+    groups: [
+      "composition root",
+      "plugin",
+      "unit:session",
+      "unit:http",
+      "unit:organization",
+      "kit:testing",
+      "kit:conformance",
+    ],
   },
 };
 const extensionNames = new Set([
   "express",
   "fastify",
   "graphql",
+  "socket.io",
   "ws",
   "rpc",
   "http",
@@ -418,6 +478,12 @@ function groupOf(file: string): string {
   if (testSupport.includes(file)) {
     return "test support";
   }
+  const kit = Object.entries(testingKit).find(([, files]) =>
+    files.includes(file),
+  );
+  if (kit) {
+    return `kit:${kit[0]}`;
+  }
   const unit = Object.entries(units).find(([, files]) => files.includes(file));
   return unit ? `unit:${unit[0]}` : "unclassified";
 }
@@ -461,9 +527,13 @@ const entries = Object.entries(manifest.exports).flatMap(
     if (typeof conditions === "string") {
       return [];
     }
+    // Nested outputs map to flat hyphenated sources: dist/testing/conformance → testing-conformance.ts.
     const outputs = new Set(
       Object.values(conditions).map(({ default: output }) =>
-        posix.basename(output).replace(/\.(mjs|cjs)$/, ""),
+        output
+          .replace(/^\.\/dist\//, "")
+          .replace(/\.(mjs|cjs)$/, "")
+          .replaceAll("/", "-"),
       ),
     );
     return [{ subpath, source: `${[...outputs].join("|")}.ts` }];
@@ -485,6 +555,7 @@ describe("authentication source architecture", () => {
       ...compositionRoot,
       ...pluginFiles,
       ...testSupport,
+      ...Object.values(testingKit).flat(),
       ...Object.values(units).flat(),
     ].sort();
     expect(
@@ -516,6 +587,16 @@ describe("authentication source architecture", () => {
       ),
     );
     expect(violations).toEqual([]);
+  });
+
+  it("keeps unpublished test support out of runtime and type edges of published files", () => {
+    expect(
+      publishedFiles.flatMap((file) =>
+        [...moduleOf(file).internal.keys()]
+          .filter((target) => groupOf(target) === "test support")
+          .map((target) => `${file} -> ${target}`),
+      ),
+    ).toEqual([]);
   });
 
   it("keeps plugin files inside better-auth, defu and the bridge protocol", () => {
@@ -589,9 +670,6 @@ describe("authentication source architecture", () => {
           packageOf(specifier),
         ]),
       );
-      const allowedUnitFiles = policy.units.flatMap(
-        (unit) => units[unit] ?? [],
-      );
       expect({
         external: graph.external.filter((specifier) => {
           const normalized = deepPackages.get(specifier) ?? specifier;
@@ -602,20 +680,13 @@ describe("authentication source architecture", () => {
         }),
         files: graph.files.filter((file) => {
           const group = groupOf(file);
-          if (group.startsWith("unit:")) {
-            return !allowedUnitFiles.includes(file);
-          }
-          return (
-            (group === "composition root" && subpath !== ".") ||
-            (group === "plugin" && subpath !== "./plugin") ||
-            group === "test support"
-          );
+          return group !== "core" && !policy.groups.includes(group);
         }),
       }).toEqual({ external: [], files: [] });
     },
   );
 
-  it("keeps the root runtime and declaration graph free of optional peers and subpath units", () => {
+  it("keeps the root runtime and declaration graph free of optional peers, subpath units and test code", () => {
     const graph = reach("index.ts", true);
     expect({
       packages: [...new Set(graph.external.map(packageOf))].filter(
@@ -625,16 +696,12 @@ describe("authentication source architecture", () => {
             name,
           ),
       ),
-      files: graph.files.filter((file) => {
-        const group = groupOf(file);
-        return (
-          group === "plugin" ||
-          group === "test support" ||
-          (group.startsWith("unit:") &&
-            group !== "unit:session" &&
-            group !== "unit:http")
-        );
-      }),
+      files: graph.files.filter(
+        (file) =>
+          !["core", "composition root", "unit:session", "unit:http"].includes(
+            groupOf(file),
+          ),
+      ),
     }).toEqual({ packages: [], files: [] });
   });
 
@@ -672,9 +739,13 @@ describe("authentication source architecture", () => {
         .map(({ file, specifier }) => `${file} -> ${specifier}`)
         .sort(),
     );
+    // Entry policies confine the conformance kit's instance-building imports to ./testing/conformance.
     const publicRuntime = [
+      "better-auth",
+      "better-auth/adapters/memory",
       "better-auth/api",
       "better-auth/cookies",
+      "better-auth/plugins",
       "better-auth/plugins/access",
     ];
     const publicTypes = ["better-auth", "better-auth/api"];

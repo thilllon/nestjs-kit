@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -12,7 +12,10 @@ const sourceDirectory = dirname(fileURLToPath(import.meta.url));
 const compiler = fileURLToPath(
   new URL("../bin/tsc", import.meta.resolve("typescript")),
 );
-/** Public specifiers mapped onto their source entries, so consumers compile without `dist`. */
+/**
+ * Public specifiers mapped onto their source entries, so consumers compile without `dist`. Nested
+ * outputs map to flat hyphenated sources: dist/testing/conformance.mjs → testing-conformance.ts.
+ */
 const publicPaths = Object.fromEntries(
   Object.entries(manifest.exports).flatMap(([subpath, conditions]) =>
     typeof conditions === "string"
@@ -23,7 +26,10 @@ const publicPaths = Object.fromEntries(
             [
               join(
                 sourceDirectory,
-                `${basename(conditions.import.default, ".mjs")}.ts`,
+                `${conditions.import.default
+                  .replace(/^\.\/dist\//, "")
+                  .replace(/\.mjs$/, "")
+                  .replaceAll("/", "-")}.ts`,
               ),
             ],
           ],
@@ -170,9 +176,10 @@ import { betterAuth } from "better-auth";
 import { BetterAuthModule } from "nestjs-slightly-better-auth";
 import { expressPlatform } from "nestjs-slightly-better-auth/express";
 import { rpcTransport } from "nestjs-slightly-better-auth/microservices";
+import { socketIoTransport, wsTransport } from "nestjs-slightly-better-auth/websockets";
 
 const auth = betterAuth({});
-BetterAuthModule.forRootAsync({ platforms: [expressPlatform()], transports: [rpcTransport()], principals: [], globalScope: true, useFactory: async () => ({ auth, http: { mount: false } }) });
+BetterAuthModule.forRootAsync({ platforms: [expressPlatform()], transports: [rpcTransport(), socketIoTransport(), wsTransport()], principals: [], globalScope: true, useFactory: async () => ({ auth, http: { mount: false } }) });
 BetterAuthModule.forRootAsync({ name: "worker", isGlobal: false, globalGuard: false, useFactory: () => ({ auth }) });
 // @ts-expect-error The registration alias is static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, name: "worker" }) });
@@ -200,6 +207,56 @@ BetterAuthModule.forRoot({ name: "worker", auth, transports: [rpcTransport()] })
     ).toContain(
       "required in type 'StaticOptionMustBePassedToForRootAsync<\"principals\">'",
     );
+  });
+
+  it("types WebSocket credential mappers per client and accepts custom RPC carriers", {
+    timeout: 30_000,
+  }, async () => {
+    expect(
+      await diagnostics(`
+import { WsAdapter } from "@nestjs/platform-ws";
+import { defaultCarriers, grpcCarrier, rpcTransport, type RpcCredentialCarrier } from "nestjs-slightly-better-auth/microservices";
+import {
+  socketIoTransport,
+  UPGRADE_REQUEST,
+  withUpgradeRequest,
+  wsTransport,
+  type SocketIoClientLike,
+  type WsClientLike,
+} from "nestjs-slightly-better-auth/websockets";
+
+socketIoTransport({
+  credentials: (client) => {
+    type Client = Assert<Equal<typeof client, SocketIoClientLike>>;
+    const token = client.handshake.auth?.token;
+    return typeof token === "string" ? { authorization: \`Bearer \${token}\` } : undefined;
+  },
+});
+wsTransport({
+  credentials: (client) => {
+    type Client = Assert<Equal<typeof client, WsClientLike>>;
+    return client[UPGRADE_REQUEST]?.headers;
+  },
+  principalTtlMs: 5_000,
+});
+// @ts-expect-error Raw ws clients carry no Socket.IO handshake.
+wsTransport({ credentials: (client) => client.handshake.headers });
+
+const UpgradeAwareWsAdapter = withUpgradeRequest(WsAdapter);
+type AdapterClass = Assert<Equal<typeof UpgradeAwareWsAdapter, typeof WsAdapter>>;
+// @ts-expect-error Only adapters that bind client connections can record the upgrade request.
+withUpgradeRequest(class {});
+
+const tenantCarrier: RpcCredentialCarrier = {
+  id: "tenant",
+  matches: (context) => context.getType() === "rpc",
+  headers: (context) => ({ authorization: String(context.switchToRpc().getData()) }),
+};
+rpcTransport({ carriers: [grpcCarrier({ metadata: ["authorization"] }), ...defaultCarriers, tenantCarrier] });
+// @ts-expect-error A carrier returns header values as strings.
+rpcTransport({ carriers: [{ id: "numeric", matches: () => true, headers: () => ({ authorization: 1 }) }] });
+`),
+    ).toBe("");
   });
 
   it("types registered default and named instances, their permissions and custom principal kinds", {
@@ -385,6 +442,110 @@ export class Hooks {
     void ctx.path;
   }
 }
+`),
+    ).toBe("");
+  });
+
+  it("limits ./testing overrides to registered principal kinds and policy decisions", {
+    timeout: 30_000,
+  }, async () => {
+    expect(
+      await diagnostics(`
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import { Test } from "@nestjs/testing";
+import { allow, type AuthPrincipalBase, type PrincipalSource } from "nestjs-slightly-better-auth";
+import {
+  initTestApp,
+  overrideAuthGuard,
+  overrideDecisions,
+  overridePrincipal,
+  stampPrincipal,
+  testPrincipal,
+} from "nestjs-slightly-better-auth/testing";
+
+interface ServicePrincipal extends AuthPrincipalBase {
+  readonly kind: "service";
+  readonly service: string;
+}
+
+declare module "nestjs-slightly-better-auth" {
+  interface PrincipalKinds {
+    service: ServicePrincipal;
+  }
+}
+
+const billing: ServicePrincipal = { kind: "service", source: "test", userId: null, service: "billing" };
+const builder = overrideDecisions(
+  overridePrincipal(Test.createTestingModule({}), (call) => (call.cookies === null ? billing : null), { instance: "tenant" }),
+  (policyId, _params, principal) => (principal.kind === "service" && policyId === "billing:owner" ? allow() : undefined),
+);
+void builder.compile();
+overrideAuthGuard(builder, { principal: (context) => (context.getType() === "http" ? billing : null) });
+const source: PrincipalSource = testPrincipal(billing, { acceptance: "explicit" });
+declare const app: NestExpressApplication;
+const initialized: Promise<NestExpressApplication> = initTestApp(app, { closeWith: (close) => void close });
+declare const context: Parameters<typeof stampPrincipal>[0];
+stampPrincipal(context, billing);
+void source;
+void initialized;
+
+// @ts-expect-error Fixed principals use a registered principal kind.
+overridePrincipal(Test.createTestingModule({}), { kind: "robot", source: "test", userId: null });
+// @ts-expect-error A fixed session principal carries its session.
+overridePrincipal(Test.createTestingModule({}), { kind: "session", source: "test", userId: "u1" });
+// @ts-expect-error Guard stand-ins publish registered principal kinds.
+overrideAuthGuard(Test.createTestingModule({}), { principal: { kind: "robot", source: "test", userId: null } });
+// @ts-expect-error Stamped principals use a registered principal kind.
+stampPrincipal(context, { kind: "robot", source: "test", userId: null });
+// @ts-expect-error Decision stubs return allow(), deny() or undefined.
+overrideDecisions(Test.createTestingModule({}), () => true);
+`),
+    ).toBe("");
+  });
+
+  it("runs conformance kits through node:test and rejects mismatched extension kinds", {
+    timeout: 30_000,
+  }, async () => {
+    expect(
+      await diagnostics(`
+import { describe, it } from "node:test";
+import { apiKey } from "@better-auth/api-key";
+import { ExpressAdapter } from "@nestjs/platform-express";
+import { admin } from "better-auth/plugins";
+import type { AuthPrincipal } from "nestjs-slightly-better-auth";
+import { permission } from "nestjs-slightly-better-auth/admin";
+import { apiKeyPrincipal } from "nestjs-slightly-better-auth/api-key";
+import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import { rpcTransport } from "nestjs-slightly-better-auth/microservices";
+import {
+  createConformanceAuth,
+  httpPlatformConformance,
+  policyConformance,
+  principalSourceConformance,
+  runConformance,
+  type ConformanceCase,
+} from "nestjs-slightly-better-auth/testing/conformance";
+
+const auth = createConformanceAuth({ plugins: [admin(), apiKey()] });
+const credentials = {
+  valid: async () => new Headers({ "x-api-key": "valid" }),
+  invalid: () => new Headers({ "x-api-key": "invalid" }),
+};
+declare const allowed: AuthPrincipal;
+declare const denied: AuthPrincipal;
+const cases: ConformanceCase[] = [
+  ...httpPlatformConformance({ platform: expressPlatform(), createHttpAdapter: () => new ExpressAdapter(), bootstrap: ["testing"] }),
+  ...principalSourceConformance({ source: apiKeyPrincipal(), auth, credentials }),
+  ...policyConformance({ requirement: permission({ user: ["ban"] }), auth, allowingPrincipal: async () => allowed, denyingPrincipal: async () => denied }),
+];
+runConformance(cases, { describe, it });
+
+// @ts-expect-error A transport is not a principal source.
+principalSourceConformance({ source: rpcTransport(), auth, credentials });
+// @ts-expect-error A principal source is not an HTTP platform.
+httpPlatformConformance({ platform: apiKeyPrincipal(), createHttpAdapter: () => new ExpressAdapter() });
+// @ts-expect-error The kit bootstraps through NestFactory or Test.createTestingModule().
+httpPlatformConformance({ platform: expressPlatform(), createHttpAdapter: () => new ExpressAdapter(), bootstrap: ["cli"] });
 `),
     ).toBe("");
   });
