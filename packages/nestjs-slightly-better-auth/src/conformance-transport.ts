@@ -1781,7 +1781,13 @@ export function transportConformance(
         [...expected].sort(),
         `B16 reported ${JSON.stringify([...reported])}, the claims call for ${JSON.stringify([...expected])}`,
       );
-      if (claims.some((claim) => claim.fixture === "loginProxy")) {
+      if (
+        claims.some(
+          (claim) =>
+            claim.fixture === "loginProxy" &&
+            (claim.options.coverage ?? "error") === "error",
+        )
+      ) {
         assert.ok(
           reported.has("loginProxy"),
           "@Public() must not cover a form-mode forwarding handler",
