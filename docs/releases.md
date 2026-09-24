@@ -47,7 +47,9 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-No package is held today. List one here while it waits, with its checked-in placeholder version, its intended first release and its tracking issue.
+| Package           | Checked-in placeholder | First release | Tracking                                                  |
+| ----------------- | ---------------------- | ------------- | --------------------------------------------------------- |
+| `nestjs-strategy` | `0.0.0`                | `1.0.0`       | [#572](https://github.com/thilllon/nestjs-kit/issues/572) |
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
@@ -102,7 +104,9 @@ Release automation uses `workflow_dispatch`, which [can start a workflow with `G
 
 GitHub documents that [job checks from dispatched workflows do not satisfy required PR checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated). A green dispatched run alone is therefore insufficient. After the real CI run succeeds, release validation rechecks its repository, CI workflow ID, unique run key, commit SHA and successful `Validate` job. Only then does it create a completed `Validate` check through the [Checks API](https://docs.github.com/en/rest/checks/runs#create-a-check-run), targeting that same SHA and linking to the actual run. Failed, skipped or mismatched validation cannot produce a success report.
 
-The release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. The merge job additionally receives `actions: write` only to dispatch the fresh publication run when the gate is enabled. No personal token, separate GitHub App or protection bypass is configured. The merge checks the validated PR head, original main base and resulting merged tree. Publication in the fresh run verifies its own event commit and validated tree.
+When `GITHUB_TOKEN` opens or updates the version PR, GitHub creates its `pull_request` CI run [in an approval-required state](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs). Release automation does not approve that run, because the dispatched run validates the same commit. When the version PR merges, GitHub concludes the unapproved run as a failure without jobs. The `cleanup` job then deletes that run, which also deletes its check suite, but only when the run has no jobs and its check suite holds no check runs. GitHub attaches a check run created with `GITHUB_TOKEN` to an existing GitHub Actions check suite on the commit, so the empty-suite condition keeps the `Validate` report.
+
+The release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. The merge job additionally receives `actions: write` only to dispatch the fresh publication run when the gate is enabled. The cleanup job receives `actions: write` to delete the unapproved run and `checks: read` to inspect its check suite. No personal token, separate GitHub App or protection bypass is configured. The merge checks the validated PR head, original main base and resulting merged tree. Publication in the fresh run verifies its own event commit and validated tree.
 
 ## Provenance source revision
 

@@ -2,7 +2,7 @@ import { apiKey } from "@better-auth/api-key";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import { Pool } from "pg";
+import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import { apiKeyPrincipal } from "./api-key.js";
 import type { AuthHandle, PrincipalRequest } from "./auth-contracts.js";
@@ -19,24 +19,47 @@ const connection = {
   connectionTimeoutMillis: 3000,
   statement_timeout: 3000,
 };
+
+interface OwnedPool {
+  readonly pool: Pool;
+  close(): Promise<void>;
+}
+
 /**
- * `DROP DATABASE ... WITH (FORCE)` terminates whatever backend is still attached, which can
- * reach a pooled client that is already closing. pg reports that as an idle-client error, and
- * without a listener it becomes an unhandled exception that fails the run although every test
- * passed. Only the teardown of the pools that use the dropped database suppresses it, so a
- * termination during the test body still fails the test.
+ * Creates a pool whose `close()` settles only after every backend it opened has exited.
+ * pg-pool resolves `end()` once it has asked each idle client to end, before their sockets
+ * close, and emits "remove" only after a client's socket has closed. PostgreSQL keeps a
+ * backend's socket open until that backend process exits, so a "remove" for every client
+ * reported by "connect" means none of the pool's backends is still attached to the database.
+ * The pool has no "error" listener, so a terminated idle backend raises an unhandled error.
  */
-function suppressTeardownTermination(
-  pool: Pool,
-  teardown: { started: boolean },
-): Pool {
-  pool.on("error", (error: Error & { code?: string }) => {
-    if (!teardown.started || error.code !== "57P01") {
-      throw error;
+function ownedPool(config: PoolConfig): OwnedPool {
+  const pool = new Pool(config);
+  const open = new Set<PoolClient>();
+  let drained: (() => void) | undefined;
+  pool.on("connect", (client) => {
+    open.add(client);
+  });
+  pool.on("remove", (client) => {
+    open.delete(client);
+    if (open.size === 0) {
+      drained?.();
     }
   });
-  return pool;
+  return {
+    pool,
+    async close() {
+      const allRemoved = new Promise<void>((resolve) => {
+        drained = resolve;
+      });
+      await pool.end();
+      if (open.size > 0) {
+        await allRemoved;
+      }
+    },
+  };
 }
+
 function request(auth: AuthHandle, key: string): PrincipalRequest {
   const memo = new Map<unknown, Promise<unknown>>();
   return {
@@ -59,22 +82,20 @@ describe("real PostgreSQL API-key outage classification", () => {
     async (mode) => {
       // The observer stays on the maintenance database, which is never dropped.
       const observer = new Pool({ ...connection, max: 1 });
-      const teardown = { started: false };
       const database = `auth_keys_${crypto.randomUUID().replaceAll("-", "")}`;
-      let pool: Pool | undefined;
+      let db: OwnedPool | undefined;
       let module: TestingModule | undefined;
-      let locker: Pool | undefined;
+      let locker: OwnedPool | undefined;
       try {
         await observer.query(`CREATE DATABASE "${database}"`);
-        pool = suppressTeardownTermination(
-          new Pool({
-            ...connection,
-            database,
-            max: 1,
-            options: "-c lock_timeout=300ms",
-          }),
-          teardown,
-        );
+        db = ownedPool({
+          ...connection,
+          database,
+          max: 1,
+          options: "-c lock_timeout=300ms",
+          application_name: "api-key-e2e-auth",
+        });
+        const { pool } = db;
         const auth = betterAuth({
           database: pool,
           secret: crypto.randomUUID() + crypto.randomUUID(),
@@ -143,14 +164,17 @@ describe("real PostgreSQL API-key outage classification", () => {
         expect(
           (await pool.query('SELECT * FROM "apikey" ORDER BY id')).rows,
         ).toEqual(before);
-        locker = suppressTeardownTermination(
-          new Pool({ ...connection, database, max: 1 }),
-          teardown,
+        locker = ownedPool({
+          ...connection,
+          database,
+          max: 1,
+          application_name: "api-key-e2e-locker",
+        });
+        await locker.pool.query("BEGIN");
+        await locker.pool.query(
+          'SELECT id FROM "apikey" WHERE id = $1 FOR UPDATE',
+          [created.id],
         );
-        await locker.query("BEGIN");
-        await locker.query('SELECT id FROM "apikey" WHERE id = $1 FOR UPDATE', [
-          created.id,
-        ]);
         const started = performance.now();
         await expect(
           apiKeyPrincipal({ outageProbe: { slowMs: 100 } }).resolve(
@@ -158,16 +182,23 @@ describe("real PostgreSQL API-key outage classification", () => {
           ),
         ).rejects.toMatchObject({ name: "BetterAuthInfrastructureError" });
         expect(performance.now() - started).toBeGreaterThanOrEqual(250);
-        await locker.query("ROLLBACK");
+        await locker.pool.query("ROLLBACK");
         expect(
           (await pool.query('SELECT * FROM "apikey" ORDER BY id')).rows,
         ).toEqual(before);
       } finally {
-        teardown.started = true;
-        await locker?.query("ROLLBACK").catch(() => {});
-        await locker?.end();
+        await locker?.pool.query("ROLLBACK").catch(() => {});
+        await locker?.close();
         await module?.close();
-        await pool?.end();
+        await db?.close();
+        // Every owned pool has closed, so a client backend still attached to the database is a
+        // leaked connection. The forced drop terminates it, and its client receives a 57P01
+        // error; the leak fails this test while the drop still reclaims the database.
+        const { rows: attached } = await observer.query(
+          "SELECT application_name, state FROM pg_stat_activity WHERE datname = $1 AND backend_type = 'client backend'",
+          [database],
+        );
+        expect.soft(attached).toEqual([]);
         await observer.query(
           `DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`,
         );
