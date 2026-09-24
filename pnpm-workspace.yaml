@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "examples/*"
 allowBuilds:
   "@apollo/protobufjs": false
   "@swc/core": true
