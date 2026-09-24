@@ -11,7 +11,9 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { getAuthTables } from "better-auth/db";
 import type {
   AuthTransport,
+  BetterAuthAppOptions,
   BetterAuthRuntimeOptions,
+  BetterAuthStaticOptions,
   ExtensionRef,
   HttpPlatform,
   PrincipalSource,
@@ -51,6 +53,15 @@ export interface HttpFixture {
   readonly url: string;
   close(): Promise<void>;
 }
+/**
+ * Runtime options only. The fixture sets static and app options after spreading these, so a
+ * static key here would be overwritten; typing those keys as never rejects them, including
+ * through inferred variables that escape excess-property checks.
+ */
+type FixtureRuntimeOptions = Partial<BetterAuthRuntimeOptions<AuthLike>> & {
+  readonly [K in keyof (BetterAuthStaticOptions &
+    BetterAuthAppOptions)]?: never;
+};
 export async function startHttpFixture(options: {
   auth: AuthLike;
   adapter: AbstractHttpAdapter;
@@ -60,7 +71,7 @@ export async function startHttpFixture(options: {
   transports?: readonly ExtensionRef<AuthTransport>[];
   principals?: readonly ExtensionRef<PrincipalSource>[];
   providers?: readonly Provider[];
-  moduleOptions?: Partial<BetterAuthRuntimeOptions<AuthLike>>;
+  moduleOptions?: FixtureRuntimeOptions;
   configure?: (app: INestApplication) => void | Promise<void>;
 }): Promise<HttpFixture> {
   const module = await Test.createTestingModule({
