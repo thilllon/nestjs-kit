@@ -819,6 +819,71 @@ describe("native mercurius GraphQL request classification", () => {
 describe.each(["apollo", "apollo-fastify"] as const)(
   "native %s GraphQL request classification",
   (driver) => {
+    // Apollo passes { req, res } on Express and the Fastify request itself on Fastify.
+    const platformRequest = (input: unknown) =>
+      ((input as { req?: unknown }).req ?? input) as { body?: object };
+    it.each([
+      {
+        order: "body only",
+        context: (input: unknown) => ({ ...platformRequest(input).body }),
+        forgedWins: true,
+      },
+      {
+        order: "req then body",
+        context: (input: unknown) => ({
+          req: platformRequest(input),
+          ...platformRequest(input).body,
+        }),
+        forgedWins: true,
+      },
+      {
+        order: "body then req",
+        context: (input: unknown) => ({
+          ...platformRequest(input).body,
+          req: platformRequest(input),
+        }),
+        forgedWins: false,
+      },
+    ])(
+      "never accepts a client-forged request object from a body-spread context ($order)",
+      async ({ context, forgedWins }) => {
+        const f = await securityFixture(driver, { context });
+        try {
+          const forged = {
+            method: "POST",
+            headers: {
+              cookie: f.cookie,
+              host: "localhost:3000",
+              origin: "http://localhost:3000",
+            },
+            res: { writableEnded: false },
+            ip: "6.6.6.6",
+            protocol: "http",
+            host: "localhost:3000",
+            originalUrl: "/graphql",
+            socket: { encrypted: false },
+            raw: { method: "POST", headers: {} },
+          };
+          const { body } = await f.rawQuery(
+            "mutation { change }",
+            { origin: "http://evil.example" },
+            { body: { req: forged } },
+          );
+          expect(body.errors?.[0], JSON.stringify(body)).toMatchObject(
+            forgedWins
+              ? {
+                  message: "Internal server error",
+                  extensions: { reason: "AUTH_MISCONFIGURED" },
+                }
+              : { extensions: { statusCode: 401 } },
+          );
+          expect(f.resolver.sideEffects).toBe(0);
+          expect(f.sessionIps).not.toContain("6.6.6.6");
+        } finally {
+          await f.close();
+        }
+      },
+    );
     it.each([false, true])(
       "fails closed for an unrecognized request object whatever its Upgrade header (upgrade=%s)",
       async (upgrade) => {

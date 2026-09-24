@@ -438,6 +438,8 @@ describe("GraphQL malformed credential conversion", () => {
   });
 });
 
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { ExpressPlatform } from "./express-platform.js";
 import { FastifyPlatform } from "./fastify-platform.js";
@@ -451,16 +453,11 @@ function httpCarrier(platform: "express" | "fastify") {
   const written: string[] = [];
   const state = { live: true };
   if (platform === "express") {
-    const res = {
-      get writableEnded() {
-        return !state.live;
-      },
-      setHeader: (_name: string, value: string[]) => {
-        written.push(...value);
-      },
-      getHeader: () => undefined,
-    };
-    const req = {
+    // Express extends Node's own request and response objects; the platform checks that identity.
+    const req = new IncomingMessage(new Socket());
+    const res = new ServerResponse(req);
+    Object.defineProperty(res, "writableEnded", { get: () => !state.live });
+    Object.assign(req, {
       method: "POST",
       url: "/graphql",
       originalUrl: "/graphql",
@@ -468,14 +465,15 @@ function httpCarrier(platform: "express" | "fastify") {
       host: "localhost:3000",
       headers,
       ip: "203.0.113.7",
-      socket: {},
       res,
-    };
+    });
     return {
       http: new ExpressPlatform().requests,
       carrier: { req },
       key: req,
-      written,
+      get written() {
+        return [res.getHeader("set-cookie") ?? []].flat().map(String);
+      },
       state,
     };
   }
@@ -628,6 +626,38 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
       }
     },
   );
+});
+
+describe("Express request identity", () => {
+  it("rejects a plain object that reproduces the Express request shape", () => {
+    const { http } = httpCarrier("express");
+    const forged = JSON.parse(
+      JSON.stringify({
+        method: "POST",
+        headers: { host: "localhost:3000", cookie: "session=forged" },
+        res: { writableEnded: false, req: null },
+        ip: "6.6.6.6",
+        protocol: "http",
+        host: "localhost:3000",
+        originalUrl: "/graphql",
+        socket: { encrypted: false },
+      }),
+    );
+    forged.res.req = forged;
+    expect(http.isRequest(forged)).toBe(false);
+    expect(http.isLive(forged)).toBe(false);
+    const call = (apolloTransport() as AuthTransport).describe(
+      graphqlContext({ req: forged }),
+      { http },
+    );
+    let failure: unknown;
+    try {
+      void call.clientIp;
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toHaveProperty("code", "GRAPHQL_CONTEXT_UNRECOGNIZED");
+  });
 });
 
 describe("Mercurius HTTP classification with client-spread fields", () => {

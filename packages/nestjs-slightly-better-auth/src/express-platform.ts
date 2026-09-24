@@ -1,5 +1,5 @@
-import type {
-  IncomingHttpHeaders,
+import {
+  type IncomingHttpHeaders,
   IncomingMessage,
   ServerResponse,
 } from "node:http";
@@ -143,17 +143,20 @@ function requestUrl(req: ExpressRequest): string {
   return `${req.protocol ?? (socket.encrypted ? "https" : "http")}://${req.host ?? ""}${rawTarget(req)}`;
 }
 
+/**
+ * Identifies Express's request by the Node objects it extends, never by shape: a GraphQL
+ * context can carry client-parsed data, and JSON can reproduce any structural check.
+ */
 function isExpressRequest(value: unknown): value is ExpressRequest {
-  if (typeof value !== "object" || value === null) {
+  if (!(value instanceof IncomingMessage)) {
     return false;
   }
-  const req = value as Partial<ExpressRequest>;
+  const res: unknown = Reflect.get(value, "res");
   return (
-    typeof req.method === "string" &&
-    typeof req.headers === "object" &&
-    typeof req.res === "object" &&
-    req.res !== null &&
-    (req.res.req === undefined || req.res.req === value)
+    res instanceof ServerResponse &&
+    res.req === value &&
+    typeof res.setHeader === "function" &&
+    typeof res.getHeader === "function"
   );
 }
 
