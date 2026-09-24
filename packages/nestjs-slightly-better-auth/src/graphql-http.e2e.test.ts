@@ -209,6 +209,8 @@ import { BetterAuthService } from "./auth-service.js";
 import { CurrentSession } from "./session-principal.js";
 import type { AuthSession } from "./auth-types.js";
 import { startHttpFixture } from "./test-fixtures.js";
+import { request as httpRequest } from "node:http";
+import { createAuthMiddleware } from "better-auth/api";
 
 @ObjectType()
 class SecurityRow {
@@ -314,6 +316,7 @@ async function securityFixture(
   const memory = memoryAdapter(database);
   let reads = 0;
   let outage = false;
+  const sessionIps: (string | null)[] = [];
   const auth = betterAuth({
     secret: crypto.randomUUID() + crypto.randomUUID(),
     baseURL: "http://localhost:3000",
@@ -321,6 +324,17 @@ async function securityFixture(
     emailAndPassword: { enabled: true },
     advanced: { disableOriginCheck: false },
     session: { updateAge: 1 },
+    hooks: {
+      // Records the bridge client-IP header each principal session read receives.
+      before: createAuthMiddleware(async (context) => {
+        if (context.path === "/get-session") {
+          const entry = [...(context.headers?.entries() ?? [])].find(([name]) =>
+            name.startsWith("x-nsba-ip-"),
+          );
+          sessionIps.push(entry?.[1] ?? null);
+        }
+      }),
+    },
     database: (config: Parameters<typeof memory>[0]) => {
       const adapter = memory(config);
       return {
@@ -406,6 +420,7 @@ async function securityFixture(
       cookie,
       userId: signup.response.user.id,
       reads: () => reads,
+      sessionIps,
       errors,
       warnings,
       resolver: f.app.get(SecurityResolver),
@@ -416,6 +431,45 @@ async function securityFixture(
           body: JSON.stringify({ query }),
         });
         return { response, body: await response.json() };
+      },
+      /** Sends headers fetch forbids, such as Upgrade, over a plain HTTP/1.1 POST. */
+      rawQuery(query: string, headers: Record<string, string>) {
+        const payload = JSON.stringify({ query });
+        return new Promise<{
+          status: number;
+          setCookie: string[];
+          body: { data?: Record<string, unknown>; errors?: unknown[] };
+        }>((resolve, reject) => {
+          const request = httpRequest(
+            `${f.url}/graphql`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "content-length": String(Buffer.byteLength(payload)),
+                ...headers,
+              },
+            },
+            (response) => {
+              const chunks: Buffer[] = [];
+              response.on("data", (chunk: Buffer) => chunks.push(chunk));
+              response.on("end", () => {
+                try {
+                  resolve({
+                    status: response.statusCode ?? 0,
+                    setCookie: response.headers["set-cookie"] ?? [],
+                    body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+                  });
+                } catch (error) {
+                  reject(error);
+                }
+              });
+              response.on("error", reject);
+            },
+          );
+          request.on("error", reject);
+          request.end(payload);
+        });
       },
     };
   } catch (error) {
@@ -619,6 +673,65 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
         );
         expect(f.reads()).toBe(0);
         expect(f.resolver.sideEffects).toBe(0);
+      } finally {
+        await f.close();
+      }
+    });
+    it("keeps a GraphQL POST carrying Upgrade: websocket on the HTTP path", async () => {
+      const f = await securityFixture(driver);
+      try {
+        const upgraded = await f.rawQuery("{ guarded }", {
+          cookie: f.cookie,
+          origin: "http://localhost:3000",
+          upgrade: "websocket",
+        });
+        expect(upgraded.status).toBe(200);
+        expect(upgraded.body).toEqual({ data: { guarded: "guarded" } });
+        expect(upgraded.setCookie.length).toBeGreaterThan(0);
+        const plain = await f.rawQuery("{ guarded }", { cookie: f.cookie });
+        expect(plain.body).toEqual({ data: { guarded: "guarded" } });
+        expect(f.sessionIps).toHaveLength(2);
+        expect(f.sessionIps[0]).toMatch(/^(::ffff:)?127\.0\.0\.1$|^::1$/);
+        expect(f.sessionIps[0]).toBe(f.sessionIps[1]);
+      } finally {
+        await f.close();
+      }
+    });
+    it("applies the live-request check to a retained request carrying Upgrade: websocket", async () => {
+      let context: object | undefined;
+      const f = await securityFixture(driver, {
+        context: (input: unknown, reply: unknown) => {
+          const req =
+            driver === "apollo" ? (input as { req: unknown }).req : input;
+          context ??= {
+            req,
+            get reply() {
+              return replyWithRequest(reply, req);
+            },
+            set reply(_reply: unknown) {},
+          };
+          return context;
+        },
+      });
+      try {
+        const first = await f.rawQuery("{ guarded }", {
+          cookie: f.cookie,
+          origin: "http://localhost:3000",
+          upgrade: "websocket",
+        });
+        expect(first.body).toEqual({ data: { guarded: "guarded" } });
+        const second = await f.rawQuery("{ guarded }", {
+          origin: "http://localhost:3000",
+          upgrade: "websocket",
+        });
+        expect(
+          second.body.errors?.[0],
+          JSON.stringify(second.body),
+        ).toMatchObject({
+          message: "Internal server error",
+          extensions: { reason: "AUTH_MISCONFIGURED" },
+        });
+        expect(f.resolver.sideEffects).toBe(1);
       } finally {
         await f.close();
       }

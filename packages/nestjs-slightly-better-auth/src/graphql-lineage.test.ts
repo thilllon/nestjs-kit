@@ -428,3 +428,155 @@ describe("GraphQL malformed credential conversion", () => {
     }
   });
 });
+
+import type { AbstractHttpAdapter } from "@nestjs/core";
+import { ExpressPlatform } from "./express-platform.js";
+import { FastifyPlatform } from "./fastify-platform.js";
+
+function httpCarrier(platform: "express" | "fastify") {
+  const headers = {
+    host: "localhost:3000",
+    upgrade: "websocket",
+    cookie: "session=credential",
+  };
+  const written: string[] = [];
+  const state = { live: true };
+  if (platform === "express") {
+    const res = {
+      get writableEnded() {
+        return !state.live;
+      },
+      setHeader: (_name: string, value: string[]) => {
+        written.push(...value);
+      },
+      getHeader: () => undefined,
+    };
+    const req = {
+      method: "POST",
+      url: "/graphql",
+      originalUrl: "/graphql",
+      protocol: "http",
+      host: "localhost:3000",
+      headers,
+      ip: "203.0.113.7",
+      socket: {},
+      res,
+    };
+    return {
+      http: new ExpressPlatform().requests,
+      carrier: { req },
+      key: req,
+      written,
+      state,
+    };
+  }
+  const fastify = new FastifyPlatform();
+  let onRequest:
+    | ((request: unknown, reply: unknown, done: () => void) => void)
+    | undefined;
+  fastify.prepare({
+    adapter: {
+      getInstance: () => ({
+        addHook: (_name: string, hook: typeof onRequest) => {
+          onRequest = hook;
+        },
+      }),
+    } as unknown as AbstractHttpAdapter,
+    logger: console,
+    route: () => undefined,
+  });
+  const raw = { headers, httpVersionMajor: 1 };
+  const reply = {
+    get sent() {
+      return !state.live;
+    },
+    raw: { headersSent: false },
+    header: (_name: string, value: string) => {
+      written.push(value);
+    },
+  };
+  const req = {
+    raw,
+    headers: raw.headers,
+    method: "POST",
+    protocol: "http",
+    host: "localhost:3000",
+    originalUrl: "/graphql",
+    ip: "203.0.113.7",
+  };
+  onRequest?.(req, reply, () => {});
+  return {
+    http: fastify.requests,
+    carrier: { req },
+    key: raw,
+    written,
+    state,
+  };
+}
+function graphqlContext(carrier: object) {
+  class Resolver {
+    query() {}
+  }
+  const context = new ExecutionContextHost(
+    [null, {}, carrier, info({}, ["query"])],
+    Resolver,
+    Resolver.prototype.query,
+  );
+  context.setType("graphql");
+  return context;
+}
+
+describe("GraphQL HTTP classification with a client Upgrade header", () => {
+  it.each(["express", "fastify"] as const)(
+    "keeps a %s Apollo HTTP request carrying Upgrade: websocket on the platform path",
+    (platform) => {
+      const f = httpCarrier(platform);
+      const call = (apolloTransport() as AuthTransport).describe(
+        graphqlContext(f.carrier),
+        { http: f.http },
+      );
+      expect(call.connection).toBeUndefined();
+      expect(call.key).toBe(f.key);
+      expect(call.clientIp).toBe("203.0.113.7");
+      expect(call.request).toEqual({
+        method: "POST",
+        url: "http://localhost:3000/graphql",
+      });
+      expect(call.browser?.enforce).toBe(false);
+      expect(call.cookies?.append(["refreshed=1"])).not.toBe(false);
+      expect(f.written).toEqual(["refreshed=1"]);
+      f.state.live = false;
+      let failure: unknown;
+      try {
+        call.headers();
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toHaveProperty("code", "GRAPHQL_CONTEXT_STALE_REQUEST");
+    },
+  );
+  it.each(["express", "fastify"] as const)(
+    "keeps graphql-ws and subscriptions-transport upgrade requests on the socket path with %s predicates",
+    (platform) => {
+      const { http } = httpCarrier(platform);
+      const request = {
+        headers: { host: "localhost:3000", upgrade: "websocket" },
+        url: "/graphql",
+      };
+      for (const carrier of [
+        { req: { connectionParams: {}, extra: { request } } },
+        { req: request },
+        { extra: { request } },
+      ]) {
+        const call = (apolloTransport() as AuthTransport).describe(
+          graphqlContext(carrier),
+          { http },
+        );
+        expect(call.connection).toBe(request);
+        expect(call.key).toBe(carrier);
+        expect(call.clientIp).toBeNull();
+        expect(call.cookies).toBeNull();
+      }
+    },
+  );
+});

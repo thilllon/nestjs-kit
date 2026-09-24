@@ -164,17 +164,30 @@ function ambientHeaders(request: unknown): Headers {
   }
   return toWebHeaders((value?.headers ?? {}) as IncomingHttpHeaders);
 }
-function carrierDetails(context: unknown, driver: "apollo" | "mercurius") {
+function carrierDetails(
+  context: unknown,
+  driver: "apollo" | "mercurius",
+  http: TransportKit["http"],
+) {
   const carrier = record(context) ?? {};
   const req = record(carrier.req);
   const extra = record(carrier.extra);
+  // The Upgrade header is client-controlled: an HTTP operation may carry it.
+  // A positive platform answer keeps the HTTP path and its liveness check.
+  const httpRequest =
+    driver === "apollo" &&
+    (http?.isRequest(req) === true || http?.isRequest(extra?.request) === true);
   const defaultConnection =
-    req && "connectionParams" in req ? record(req.extra) : undefined;
+    !httpRequest && req && "connectionParams" in req
+      ? record(req.extra)
+      : undefined;
   const socket =
     driver === "apollo"
-      ? (upgrade(defaultConnection?.request) ??
-        websocket(req) ??
-        websocket(extra?.request))
+      ? httpRequest
+        ? undefined
+        : (upgrade(defaultConnection?.request) ??
+          websocket(req) ??
+          websocket(extra?.request))
       : (upgrade(carrier[MERCURIUS_UPGRADE]) ??
         ("_connectionInit" in carrier
           ? (upgrade(carrier.request) ??
@@ -259,7 +272,11 @@ class GraphqlTransport implements AuthTransport {
   }
 
   private assertRequest(args: readonly unknown[], kit: TransportKit) {
-    const details = carrierDetails(graphqlArgs(args).context, this.id);
+    const details = carrierDetails(
+      graphqlArgs(args).context,
+      this.id,
+      kit.http,
+    );
     if (details.socket) {
       return details;
     }
@@ -286,7 +303,7 @@ class GraphqlTransport implements AuthTransport {
     this.kit = kit;
     const args = context.getArgs();
     const normalized = graphqlArgs(args);
-    const initial = carrierDetails(normalized.context, this.id);
+    const initial = carrierDetails(normalized.context, this.id, kit.http);
     const key =
       !initial.socket && kit.http?.isRequest(initial.request)
         ? kit.http.key(initial.request)
