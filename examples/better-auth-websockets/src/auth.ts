@@ -4,7 +4,10 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { bearer } from "better-auth/plugins";
 import { nestjs } from "nestjs-slightly-better-auth/plugin";
 
-const baseURL = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+// The default base URL follows PORT, so Better Auth trusts the origin that
+// serves both HTTP and Socket.IO.
+const baseURL =
+  process.env.BETTER_AUTH_URL ?? `http://localhost:${process.env.PORT ?? 3000}`;
 // Without BETTER_AUTH_SECRET, each process signs cookies with a fresh secret.
 // The in-memory stores below also reset on restart, so no session survives it.
 const secret =

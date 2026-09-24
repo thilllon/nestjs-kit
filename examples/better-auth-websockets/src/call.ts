@@ -2,20 +2,25 @@ import { parseArgs } from "node:util";
 import { connect, request, type GatewayError } from "./client.js";
 
 const usage =
-  "Usage: node dist/call.js <event> [--namespace <name>] [--token <session token>] [--url <server URL>]";
+  "Usage: [SESSION_TOKEN=<token>] node dist/call.js <event> [--namespace <name>] [--url <server URL>]";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     namespace: { type: "string", default: "/" },
-    token: { type: "string" },
-    url: { type: "string", default: "http://localhost:3000" },
+    url: {
+      type: "string",
+      default: `http://localhost:${process.env.PORT ?? 3000}`,
+    },
   },
 });
+// The token comes from the environment, which other local users cannot read,
+// unlike command-line arguments.
+const token = process.env.SESSION_TOKEN || undefined;
 
 async function call(event: string): Promise<void> {
   const namespace = values.namespace.replace(/^\/?/, "/");
-  const socket = await connect(`${values.url}${namespace}`, values.token);
+  const socket = await connect(`${values.url}${namespace}`, token);
   try {
     console.log(JSON.stringify(await request(socket, event)));
   } finally {

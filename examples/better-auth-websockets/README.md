@@ -22,15 +22,15 @@ mise exec -- pnpm --filter better-auth-websockets-example start
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. HTTP and Socket.IO share port 3000.
 
-| Variable             | Default                 | Purpose                                                                                                              |
-| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `PORT`               | `3000`                  | HTTP and Socket.IO port.                                                                                             |
-| `BETTER_AUTH_URL`    | `http://localhost:3000` | Better Auth base URL; its origin is trusted for cookie-authenticated requests and handshakes.                        |
-| `BETTER_AUTH_SECRET` | random per process      | Secret that signs cookies and tokens. Sessions survive a restart only with a fixed secret and a persistent database. |
+| Variable             | Default                  | Purpose                                                                                                              |
+| -------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `PORT`               | `3000`                   | HTTP and Socket.IO port.                                                                                             |
+| `BETTER_AUTH_URL`    | `http://localhost:$PORT` | Better Auth base URL; its origin is trusted for cookie-authenticated requests and handshakes.                        |
+| `BETTER_AUTH_SECRET` | random per process       | Secret that signs cookies and tokens. Sessions survive a restart only with a fixed secret and a persistent database. |
 
 ## Try it
 
-`dist/call.js` connects to a namespace, emits one event and prints the acknowledgement, or the failure with a non-zero exit code. Its options are `--namespace` (default `/`), `--token` and `--url` (default `http://localhost:3000`).
+`dist/call.js` connects to a namespace, emits one event and prints the acknowledgement, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable, which other local users cannot read, unlike command-line arguments. Its options are `--namespace` (default `/`) and `--url` (default `http://localhost:$PORT`).
 
 Guests connect to the default namespace. The `status` and `greeting` messages accept them, and `profile` answers `401`:
 
@@ -40,31 +40,31 @@ mise exec -- node examples/better-auth-websockets/dist/call.js greeting
 mise exec -- node examples/better-auth-websockets/dist/call.js profile
 ```
 
-Sign up an application user, keep the session token from the response body, and send it with the handshake:
+Sign up an application user and keep the session token from the response body in `SESSION_TOKEN`; the client sends it with the handshake:
 
 ```sh
-TOKEN=$(curl --silent --header "content-type: application/json" \
+export SESSION_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Ada","email":"ada@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/auth/sign-up/email | jq --raw-output .token)
-mise exec -- node examples/better-auth-websockets/dist/call.js profile --token "$TOKEN"
+mise exec -- node examples/better-auth-websockets/dist/call.js profile
 ```
 
-The transport resolves the session again for every message, so signing out also ends access on connections that stay open. After sign-out, `profile` answers `401` for the same token:
-
-```sh
-curl --header "authorization: Bearer $TOKEN" --request POST \
-  http://localhost:3000/api/auth/sign-out
-mise exec -- node examples/better-auth-websockets/dist/call.js profile --token "$TOKEN"
-```
-
-Operators sign up through the named instance's mount at `/api/admin-auth`. The `/admin` namespace rejects handshakes without an operator session with a `401` `connect_error`, including the application user's token:
+Operators sign up through the named instance's mount at `/api/admin-auth`. The `/admin` namespace rejects a handshake without an operator session, including one with the application user's token, with a `401` `connect_error`:
 
 ```sh
 OPERATOR_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Grace","email":"grace@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/admin-auth/sign-up/email | jq --raw-output .token)
-mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin --token "$OPERATOR_TOKEN"
-mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin --token "$TOKEN"
+SESSION_TOKEN="$OPERATOR_TOKEN" mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin
+mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin
+```
+
+The transport resolves the session again for every message, so signing out also ends access on connections that stay open. After sign-out, `profile` answers `401` for the same token. `curl --header @-` reads the header from standard input, which keeps the token out of its arguments:
+
+```sh
+printf 'authorization: Bearer %s\n' "$SESSION_TOKEN" |
+  curl --header @- --request POST http://localhost:3000/api/auth/sign-out
+mise exec -- node examples/better-auth-websockets/dist/call.js profile
 ```
 
 Browsers can authenticate with the session cookie instead of a token. The handshake must then come from one of Better Auth's trusted origins; otherwise the connection fails with `403`.

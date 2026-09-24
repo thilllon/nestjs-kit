@@ -22,17 +22,17 @@ mise exec -- pnpm --filter better-auth-rpc-example start
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. The HTTP server listens on port 3000 and the TCP microservice on `127.0.0.1:4000`.
 
-| Variable             | Default                 | Purpose                                                                                                              |
-| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `PORT`               | `3000`                  | HTTP port.                                                                                                           |
-| `RPC_HOST`           | `127.0.0.1`             | TCP microservice host.                                                                                               |
-| `RPC_PORT`           | `4000`                  | TCP microservice port.                                                                                               |
-| `BETTER_AUTH_URL`    | `http://localhost:3000` | Better Auth base URL. RPC messages have no HTTP host, so the base URL is static.                                     |
-| `BETTER_AUTH_SECRET` | random per process      | Secret that signs cookies and tokens. Sessions survive a restart only with a fixed secret and a persistent database. |
+| Variable             | Default                  | Purpose                                                                                                              |
+| -------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `PORT`               | `3000`                   | HTTP port.                                                                                                           |
+| `RPC_HOST`           | `127.0.0.1`              | TCP microservice host.                                                                                               |
+| `RPC_PORT`           | `4000`                   | TCP microservice port.                                                                                               |
+| `BETTER_AUTH_URL`    | `http://localhost:$PORT` | Better Auth base URL. RPC messages have no HTTP host, so the base URL is static.                                     |
+| `BETTER_AUTH_SECRET` | random per process       | Secret that signs cookies and tokens. Sessions survive a restart only with a fixed secret and a persistent database. |
 
 ## Try it
 
-`dist/call.js` sends one message through a Nest TCP client and prints the reply, or the failure with a non-zero exit code. Its options are `--token`, `--host` and `--port`, which default to `RPC_HOST` and `RPC_PORT`.
+`dist/call.js` sends one message through a Nest TCP client and prints the reply, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable, which other local users cannot read, unlike command-line arguments. Its options are `--host` and `--port`, which default to `RPC_HOST` and `RPC_PORT`.
 
 `account.status` and `account.greeting` accept messages without credentials, and `account.profile` answers `401`:
 
@@ -42,13 +42,13 @@ mise exec -- node examples/better-auth-rpc/dist/call.js account.greeting
 mise exec -- node examples/better-auth-rpc/dist/call.js account.profile
 ```
 
-Sign up an application user over HTTP, keep the session token from the response body, and send it with each message:
+Sign up an application user over HTTP and keep the session token from the response body in `SESSION_TOKEN`; the client sends it with each message:
 
 ```sh
-TOKEN=$(curl --silent --header "content-type: application/json" \
+export SESSION_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Ada","email":"ada@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/auth/sign-up/email | jq --raw-output .token)
-mise exec -- node examples/better-auth-rpc/dist/call.js account.profile --token "$TOKEN"
+mise exec -- node examples/better-auth-rpc/dist/call.js account.profile
 ```
 
 Operators sign up through the named instance's mount at `/api/admin-auth`. Their token authenticates the `admin.*` messages, and the application user's token does not:
@@ -57,16 +57,16 @@ Operators sign up through the named instance's mount at `/api/admin-auth`. Their
 OPERATOR_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Grace","email":"grace@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/admin-auth/sign-up/email | jq --raw-output .token)
-mise exec -- node examples/better-auth-rpc/dist/call.js admin.me --token "$OPERATOR_TOKEN"
-mise exec -- node examples/better-auth-rpc/dist/call.js admin.me --token "$TOKEN"
+SESSION_TOKEN="$OPERATOR_TOKEN" mise exec -- node examples/better-auth-rpc/dist/call.js admin.me
+mise exec -- node examples/better-auth-rpc/dist/call.js admin.me
 ```
 
-Each message resolves the session again. After sign-out, the same token answers `401`:
+Each message resolves the session again. After sign-out, the same token answers `401`. `curl --header @-` reads the header from standard input, which keeps the token out of its arguments:
 
 ```sh
-curl --header "authorization: Bearer $TOKEN" --request POST \
-  http://localhost:3000/api/auth/sign-out
-mise exec -- node examples/better-auth-rpc/dist/call.js account.profile --token "$TOKEN"
+printf 'authorization: Bearer %s\n' "$SESSION_TOKEN" |
+  curl --header @- --request POST http://localhost:3000/api/auth/sign-out
+mise exec -- node examples/better-auth-rpc/dist/call.js account.profile
 ```
 
 ## Files

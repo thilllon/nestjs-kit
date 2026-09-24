@@ -2,16 +2,18 @@ import { parseArgs } from "node:util";
 import { createClient, send } from "./client.js";
 
 const usage =
-  "Usage: node dist/call.js <pattern> [--token <session token>] [--host <host>] [--port <port>]";
+  "Usage: [SESSION_TOKEN=<token>] node dist/call.js <pattern> [--host <host>] [--port <port>]";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
-    token: { type: "string" },
     host: { type: "string", default: process.env.RPC_HOST ?? "127.0.0.1" },
     port: { type: "string", default: process.env.RPC_PORT ?? "4000" },
   },
 });
+// The token comes from the environment, which other local users cannot read,
+// unlike command-line arguments.
+const token = process.env.SESSION_TOKEN || undefined;
 
 const [pattern] = positionals;
 if (pattern === undefined || positionals.length > 1) {
@@ -23,7 +25,7 @@ if (pattern === undefined || positionals.length > 1) {
     port: Number(values.port),
   });
   try {
-    console.log(JSON.stringify(await send(client, pattern, values.token)));
+    console.log(JSON.stringify(await send(client, pattern, token)));
   } catch (error) {
     console.error(
       JSON.stringify(
