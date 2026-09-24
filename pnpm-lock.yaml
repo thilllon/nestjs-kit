@@ -556,6 +556,9 @@ importers:
       kafkajs:
         specifier: 2.2.4
         version: 2.2.4
+      light-my-request:
+        specifier: 6.6.0
+        version: 6.6.0
       mercurius:
         specifier: 16.10.0
         version: 16.10.0(graphql@16.14.2)

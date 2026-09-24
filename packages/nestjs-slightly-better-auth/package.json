@@ -303,6 +303,7 @@
     "ioredis": "6.0.0",
     "jose": "6.2.12",
     "kafkajs": "2.2.4",
+    "light-my-request": "6.6.0",
     "mercurius": "16.10.0",
     "mqtt": "5.16.0",
     "pg": "8.23.0",

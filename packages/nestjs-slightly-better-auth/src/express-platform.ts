@@ -3,6 +3,7 @@ import {
   IncomingMessage,
   ServerResponse,
 } from "node:http";
+import { Readable } from "node:stream";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { parse, pathToRegexp } from "path-to-regexp";
 import type {
@@ -146,15 +147,19 @@ function requestUrl(req: ExpressRequest): string {
 /**
  * Identifies Express's request by the Node objects it extends, never by shape: a GraphQL
  * context can carry client-parsed data, and JSON can reproduce any structural check.
+ * light-my-request's inject() re-parents Express's shared request prototype onto its own
+ * Readable-based request for the whole process, so a stream request is accepted too; its
+ * response must still be a ServerResponse bound to it in both directions.
  */
 function isExpressRequest(value: unknown): value is ExpressRequest {
-  if (!(value instanceof IncomingMessage)) {
+  if (!(value instanceof IncomingMessage || value instanceof Readable)) {
     return false;
   }
   const res: unknown = Reflect.get(value, "res");
   return (
     res instanceof ServerResponse &&
     res.req === value &&
+    Reflect.get(value, "res") === res &&
     typeof res.setHeader === "function" &&
     typeof res.getHeader === "function"
   );

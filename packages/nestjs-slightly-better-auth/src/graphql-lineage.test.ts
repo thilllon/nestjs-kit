@@ -440,6 +440,7 @@ describe("GraphQL malformed credential conversion", () => {
 
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Socket } from "node:net";
+import { Readable } from "node:stream";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { ExpressPlatform } from "./express-platform.js";
 import { FastifyPlatform } from "./fastify-platform.js";
@@ -657,6 +658,29 @@ describe("Express request identity", () => {
       failure = error;
     }
     expect(failure).toHaveProperty("code", "GRAPHQL_CONTEXT_UNRECOGNIZED");
+  });
+  it("accepts a stream request only with a ServerResponse bound to it in both directions", () => {
+    // light-my-request's inject() makes Express requests Readable streams, not IncomingMessages.
+    const { http } = httpCarrier("express");
+    const stream = new Readable({ read() {} });
+    const bound = new ServerResponse(stream as unknown as IncomingMessage);
+    Object.assign(stream, { method: "GET", headers: {}, res: bound });
+    expect(http.isRequest(stream)).toBe(true);
+    expect(http.isLive(stream)).toBe(true);
+    const other = new Readable({ read() {} });
+    Object.assign(other, {
+      method: "GET",
+      headers: {},
+      res: new ServerResponse(new IncomingMessage(new Socket())),
+    });
+    expect(http.isRequest(other)).toBe(false);
+    const unbound = new Readable({ read() {} });
+    Object.assign(unbound, {
+      method: "GET",
+      headers: {},
+      res: { req: unbound },
+    });
+    expect(http.isRequest(unbound)).toBe(false);
   });
 });
 
