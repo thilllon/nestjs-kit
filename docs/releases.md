@@ -31,6 +31,8 @@ For each npm package, configure a GitHub Actions trusted publisher using:
 | Environment       | Leave empty; the workflow does not specify an environment |
 | Permission        | Allow publishing                                          |
 
+The workflow filename is part of every package's trusted-publisher registration, and npm checks the calling workflow file of an OIDC publication. Never rename or move `.github/workflows/release.yml`; publication runs in it or in a reusable workflow it calls. Publication from any other calling workflow fails for every package.
+
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
 All ten established package identities, including `nestjs-slightly-better-auth`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
@@ -45,7 +47,9 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-No package is held today. List one here while it waits, with its checked-in placeholder version, its intended first release and its tracking issue.
+| Package           | Checked-in placeholder | First release | Tracking                                                  |
+| ----------------- | ---------------------- | ------------- | --------------------------------------------------------- |
+| `nestjs-strategy` | `0.0.0`                | `1.0.0`       | [#572](https://github.com/thilllon/nestjs-kit/issues/572) |
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
@@ -62,7 +66,7 @@ To publish a held package:
      mise exec -- pnpm pkg set "version=$VERSION" &&
      mise exec -- pnpm build &&
      mise exec -- pnpm pack --out "/tmp/$PACKAGE.tgz" &&
-     tar -tzf "/tmp/$PACKAGE.tgz"
+     tar --list --gzip --file "/tmp/$PACKAGE.tgz"
    ```
 
    Inspect the listed files: only `dist`, `README.md`, `LICENSE` and `package.json` belong in the archive. Then publish it with the owner's npm authentication from the same directory and restore the version edit. `--no-git-checks` is needed only because of that edit:
@@ -100,7 +104,9 @@ Release automation uses `workflow_dispatch`, which [can start a workflow with `G
 
 GitHub documents that [job checks from dispatched workflows do not satisfy required PR checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated). A green dispatched run alone is therefore insufficient. After the real CI run succeeds, release validation rechecks its repository, CI workflow ID, unique run key, commit SHA and successful `Validate` job. Only then does it create a completed `Validate` check through the [Checks API](https://docs.github.com/en/rest/checks/runs#create-a-check-run), targeting that same SHA and linking to the actual run. Failed, skipped or mismatched validation cannot produce a success report.
 
-The release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. The merge job additionally receives `actions: write` only to dispatch the fresh publication run when the gate is enabled. No personal token, separate GitHub App or protection bypass is configured. The merge checks the validated PR head, original main base and resulting merged tree. Publication in the fresh run verifies its own event commit and validated tree.
+When `GITHUB_TOKEN` opens or updates the version PR, GitHub creates its `pull_request` CI run [in an approval-required state](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs). Release automation does not approve that run, because the dispatched run validates the same commit. When the version PR merges, GitHub concludes the unapproved run as a failure without jobs. The `cleanup` job then deletes that run, which also deletes its check suite, but only when the run has no jobs and its check suite holds no check runs. GitHub attaches a check run created with `GITHUB_TOKEN` to an existing GitHub Actions check suite on the commit, so the empty-suite condition keeps the `Validate` report.
+
+The release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. The merge job additionally receives `actions: write` only to dispatch the fresh publication run when the gate is enabled. The cleanup job receives `actions: write` to delete the unapproved run and `checks: read` to inspect its check suite. No personal token, separate GitHub App or protection bypass is configured. The merge checks the validated PR head, original main base and resulting merged tree. Publication in the fresh run verifies its own event commit and validated tree.
 
 ## Provenance source revision
 

@@ -52,12 +52,12 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm test:packaging
-      - name: Start PostgreSQL for integration tests
+      - name: Start integration services
         run: pnpm docker:up
-      - name: Test against real PostgreSQL
+      - name: Test HTTP, database, socket, and broker integrations
         run: pnpm test:e2e
       - name: Stop integration services
         if: always()
         run: pnpm docker:down
       - name: Scan tracked files for secrets
-        run: gitleaks git --redact --no-banner --log-opts='-1' .
+        run: gitleaks git --redact --no-banner --log-opts='--max-count=1' .

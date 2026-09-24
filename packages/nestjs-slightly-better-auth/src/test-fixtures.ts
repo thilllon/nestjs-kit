@@ -1,10 +1,16 @@
-import type { INestApplication, Provider, Type } from "@nestjs/common";
+import type {
+  INestApplication,
+  ModuleMetadata,
+  Provider,
+  Type,
+} from "@nestjs/common";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { getAuthTables } from "better-auth/db";
 import type {
+  AuthTransport,
   BetterAuthRuntimeOptions,
   ExtensionRef,
   HttpPlatform,
@@ -39,6 +45,38 @@ export function createTestAuth(
       ),
   });
 }
+export async function createTestIdentity(
+  auth: ReturnType<typeof createTestAuth>,
+  emailSuffix = globalThis.crypto.randomUUID(),
+): Promise<{ cookie: string; token: string; userId: string }> {
+  const response = await auth.api.signUpEmail({
+    body: {
+      name: "Integration user",
+      email: `${emailSuffix}@example.test`,
+      password: "integration-test-password",
+    },
+    asResponse: true,
+  });
+  if (!response.ok) {
+    throw new Error(`Test signup failed with status ${response.status}`);
+  }
+  const body = (await response.json()) as {
+    token?: string;
+    user?: { id?: string };
+  };
+  if (!body.token || !body.user?.id) {
+    throw new Error("Test signup did not return a session token and user ID");
+  }
+  return {
+    cookie: response.headers
+      .getSetCookie()
+      .map((value) => value.split(";", 1)[0])
+      .join("; "),
+    token: body.token,
+    userId: body.user.id,
+  };
+}
+
 export interface HttpFixture {
   readonly app: INestApplication;
   readonly url: string;
@@ -49,6 +87,8 @@ export async function startHttpFixture(options: {
   adapter: AbstractHttpAdapter;
   platform: ExtensionRef<HttpPlatform>;
   controllers: readonly Type[];
+  imports?: ModuleMetadata["imports"];
+  transports?: readonly ExtensionRef<AuthTransport>[];
   providers?: readonly Provider[];
   moduleOptions?: Partial<BetterAuthRuntimeOptions<AuthLike>>;
   configure?: (app: INestApplication) => void | Promise<void>;
@@ -59,7 +99,9 @@ export async function startHttpFixture(options: {
         ...options.moduleOptions,
         auth: options.auth,
         platforms: [options.platform],
+        transports: options.transports,
       }),
+      ...(options.imports ?? []),
     ],
     controllers: [...options.controllers],
     providers: [...(options.providers ?? [])],
