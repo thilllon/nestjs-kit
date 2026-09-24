@@ -390,8 +390,8 @@ importers:
         specifier: 5.5.1
         version: 5.5.1(graphql@16.14.2)(supports-color@7.2.0)
       '@apollo/subgraph':
-        specifier: 2.14.4
-        version: 2.14.4(graphql@16.14.2)
+        specifier: 2.15.1
+        version: 2.15.1(graphql@16.14.2)
       '@as-integrations/express5':
         specifier: 1.1.2
         version: 1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0))
@@ -405,8 +405,8 @@ importers:
         specifier: 5.1.1
         version: 5.1.1
       '@nestjs/apollo':
-        specifier: 14.0.1
-        version: 14.0.1(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(@apollo/subgraph@2.14.4(graphql@16.14.2))(@as-integrations/express5@1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0)))(@as-integrations/fastify@3.1.0(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(fastify@5.12.4))(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(@nestjs/graphql@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2))(graphql@16.14.2)
+        specifier: 14.0.2
+        version: 14.0.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(@apollo/subgraph@2.15.1(graphql@16.14.2))(@as-integrations/express5@1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0)))(@as-integrations/fastify@3.1.0(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(fastify@5.12.4))(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(graphql@16.14.2)
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
@@ -414,11 +414,11 @@ importers:
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/platform-express@12.0.3)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/graphql':
-        specifier: 14.0.1
-        version: 14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)
+        specifier: 14.0.2
+        version: 14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2)
       '@nestjs/mercurius':
-        specifier: 14.0.1
-        version: 14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@mercuriusjs/federation@5.1.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/graphql@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2))(fastify@5.12.4)(graphql@16.14.2)(mercurius@16.10.0(graphql@16.14.2))
+        specifier: 14.0.2
+        version: 14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@mercuriusjs/federation@5.1.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(fastify@5.12.4)(graphql@16.14.2)(mercurius@16.10.0(graphql@16.14.2))
       '@nestjs/platform-express':
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(supports-color@7.2.0)
@@ -550,12 +550,6 @@ packages:
     peerDependencies:
       graphql: 14.x || 15.x || 16.x
 
-  '@apollo/federation-internals@2.14.4':
-    resolution: {integrity: sha512-z8h/T0N4HROGY8o/l3WQZpj3OKNuPRt14Onm38aaksthDaw8z/nhz426USJVa50ZRU19LIN3RY28dE0tcTmCAQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      graphql: ^16.5.0
-
   '@apollo/protobufjs@1.2.8':
     resolution: {integrity: sha512-r7xNeUqZX+eBBEmyvaPw0/cSz6zgf5jdH8mjUz8ynKpNs/GU7vi2T7sNcZINk2ZID7wwjG91FCgdpCrQuJ8rzA==}
     hasBin: true
@@ -571,11 +565,11 @@ packages:
     peerDependencies:
       graphql: ^16.11.0
 
-  '@apollo/subgraph@2.14.4':
-    resolution: {integrity: sha512-voALjXu3aOp2vq3LXGom2yWgG/wDmH2CMuPrZVxG/TkqcNYFzmlESC4E/XI18qfGqnvWGjMckQ2EgwRwmLaJoQ==}
-    engines: {node: '>=14.15.0'}
+  '@apollo/subgraph@2.15.1':
+    resolution: {integrity: sha512-y9G5Mw5Pn/kW7u4IoyrmdFfDUe1A7s4vXYKvsqlXLO1xSYRANmVnHTRY90qGqR5Vohe79BZ/lMWDDXGsiiX+AQ==}
+    engines: {node: '>=22.0.0'}
     peerDependencies:
-      graphql: ^16.5.0
+      graphql: ^16.11.0
 
   '@apollo/usage-reporting-protobuf@4.1.2':
     resolution: {integrity: sha512-aTnAD41RYz0d5dawlyR5Iclkgzx0Xb0njUJmEfvZ6pS4f4HU8wCYyctPpWat/HWp2PmRwDfX5R1k4uVcDKZ4xA==}
@@ -1363,8 +1357,8 @@ packages:
   '@mercuriusjs/federation@5.1.1':
     resolution: {integrity: sha512-7Ch2vS4t6jwnu2qE6MHaGDRmv+zeywuzLQAdVyoH5HtLOSI/8BcRvoFme3uL+6YCMMioLXcN02ewSP8zxNVRCQ==}
 
-  '@nestjs/apollo@14.0.1':
-    resolution: {integrity: sha512-zEIPOmywVqP3SZ0506wzmJH7LBu0V2KAQj6tOBNfZTStG5j7PxbGx9/7HS12oDKG7Moue2GHty7sZFAx42QyuQ==}
+  '@nestjs/apollo@14.0.2':
+    resolution: {integrity: sha512-y1xELgQgWhbkM89dcDnBdwSExYvBv6NCQuEmmJBBOv2yBHHZIuvovx6DxlhuONG8F2oFwxuATXEM+RYP3qcLVQ==}
     peerDependencies:
       '@apollo/gateway': ^2.0.0
       '@apollo/server': ^5.0.0
@@ -1416,8 +1410,8 @@ packages:
       '@nestjs/websockets':
         optional: true
 
-  '@nestjs/graphql@14.0.1':
-    resolution: {integrity: sha512-KLh/J9qZuHKokcCpzE9x4VXshjXhUYgKd8SOfgflPgChGFIAzkHy23YWqm8vU9SrTLGYOPlorzWcyTUuQeWvKA==}
+  '@nestjs/graphql@14.0.2':
+    resolution: {integrity: sha512-9uEU36uey1loiltPlzdQ0LBI0TAD7xnbSsO+eVDkuz90jvWX6+vCkLt7HdxOGgtWBPBd+FgOJ+v0gZS1J06/8Q==}
     peerDependencies:
       '@apollo/subgraph': ^2.9.3
       '@nestjs/common': ^12.0.0
@@ -1427,6 +1421,7 @@ packages:
       graphql: ^16.11.0 || ^17.0.0
       reflect-metadata: ^0.1.13 || ^0.2.0
       ts-morph: ^20.0.0 || ^21.0.0 || ^24.0.0 || ^25.0.0 || ^26.0.0 || ^27.0.0 || ^28.0.0
+      typescript: ^5.5.0 || ^6.0.0
     peerDependenciesMeta:
       '@apollo/subgraph':
         optional: true
@@ -1435,6 +1430,8 @@ packages:
       class-validator:
         optional: true
       ts-morph:
+        optional: true
+      typescript:
         optional: true
 
   '@nestjs/mapped-types@12.0.0':
@@ -1451,8 +1448,8 @@ packages:
       class-validator:
         optional: true
 
-  '@nestjs/mercurius@14.0.1':
-    resolution: {integrity: sha512-oJXigeyJe7ofWqV+w88asyXd5YiXuiRL4AJH7a98xnvtLQjN67F3O5FHjrbpJdkMC5k1kYCDqX26wppKij8i5A==}
+  '@nestjs/mercurius@14.0.2':
+    resolution: {integrity: sha512-Yx9W6cP9Cs4IVIPf5urXVhMTu/tz4W/W/eCRtjLo4t5LZ10gaeAhFfor35MARpT0brT/fhy1jVFgSyrcSvt1Rg==}
     peerDependencies:
       '@apollo/subgraph': ^2.0.0
       '@mercuriusjs/federation': ^5.0.0
@@ -2011,9 +2008,6 @@ packages:
   '@types/serve-static@2.2.0':
     resolution: {integrity: sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ==}
 
-  '@types/uuid@9.0.8':
-    resolution: {integrity: sha512-jg+97EGIcY9AGHJJRaaPVgetKDsrTgbRjQ5Msgjh/DQKEFl0DtyRr/VCOyD1T2R1MNeWPK/u7JoGhlDZnKBAfA==}
-
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
@@ -2336,10 +2330,6 @@ packages:
     resolution: {integrity: sha512-Bq3SmSpyFHaWjPk8If9yc6svM8c56dB5BAtW4Qbw5jHTwwXXcTLoRMkpDJp6VL0XzlWaCHTXrkFURMYmD0sLqg==}
     engines: {node: '>=12'}
 
-  ansi-styles@4.3.0:
-    resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
-    engines: {node: '>=8'}
-
   ansi-styles@6.2.3:
     resolution: {integrity: sha512-4Dj6M28JB+oAH8kFkTLUo+a2jwOFkuqb3yucU0CANcRRUbxS0cP0nZYCGjcc3BNXwRIsUVmDGgzawme7zvJHvg==}
     engines: {node: '>=12'}
@@ -2507,10 +2497,6 @@ packages:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
 
-  chalk@4.1.2:
-    resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
-    engines: {node: '>=10'}
-
   chokidar@4.0.3:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
     engines: {node: '>= 14.16.0'}
@@ -2529,13 +2515,6 @@ packages:
   cloudinary@2.11.0:
     resolution: {integrity: sha512-o2pAkDDqrzPFE/mn9GCfFjBIGQmPs++Ts6rtkFl4vY528DNHiMovKWjH16HBjeGa9iwI7eAad24aWN2emT0aww==}
     engines: {node: '>=9'}
-
-  color-convert@2.0.1:
-    resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
-    engines: {node: '>=7.0.0'}
-
-  color-name@1.1.4:
-    resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
 
   combined-stream@1.0.8:
     resolution: {integrity: sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==}
@@ -3160,10 +3139,6 @@ packages:
 
   jose@6.2.12:
     resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
-
-  js-levenshtein@1.1.6:
-    resolution: {integrity: sha512-X2BB11YZtrRqY4EnQcLX5Rh373zbK4alC1FW7D7MBhL2gtcC17cTnr6DmfHZeS0s2rTHjUTMMHfG7gO8SSdw+g==}
-    engines: {node: '>=0.10.0'}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -4059,11 +4034,6 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
-  uuid@9.0.1:
-    resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
-    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
-    hasBin: true
-
   validate-npm-package-name@5.0.1:
     resolution: {integrity: sha512-OljLrQ9SQdOUqTaQxqL5dEfZWrXExyyWsozYlAWFawPVNuD83igl7uJD2RTkNMbniIYgt8l81eCJGIdQF7avLQ==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
@@ -4246,14 +4216,6 @@ snapshots:
     dependencies:
       graphql: 16.14.2
 
-  '@apollo/federation-internals@2.14.4(graphql@16.14.2)':
-    dependencies:
-      '@types/uuid': 9.0.8
-      chalk: 4.1.2
-      graphql: 16.14.2
-      js-levenshtein: 1.1.6
-      uuid: 9.0.1
-
   '@apollo/protobufjs@1.2.8':
     dependencies:
       '@protobufjs/aspromise': 1.1.2
@@ -4303,10 +4265,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@apollo/subgraph@2.14.4(graphql@16.14.2)':
+  '@apollo/subgraph@2.15.1(graphql@16.14.2)':
     dependencies:
       '@apollo/cache-control-types': 1.0.3(graphql@16.14.2)
-      '@apollo/federation-internals': 2.14.4(graphql@16.14.2)
+      '@graphql-tools/utils': 12.0.1(graphql@16.14.2)
       graphql: 16.14.2
 
   '@apollo/usage-reporting-protobuf@4.1.2':
@@ -5239,18 +5201,18 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@nestjs/apollo@14.0.1(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(@apollo/subgraph@2.14.4(graphql@16.14.2))(@as-integrations/express5@1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0)))(@as-integrations/fastify@3.1.0(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(fastify@5.12.4))(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(@nestjs/graphql@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2))(graphql@16.14.2)':
+  '@nestjs/apollo@14.0.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(@apollo/subgraph@2.15.1(graphql@16.14.2))(@as-integrations/express5@1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0)))(@as-integrations/fastify@3.1.0(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(fastify@5.12.4))(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(graphql@16.14.2)':
     dependencies:
       '@apollo/server': 5.5.1(graphql@16.14.2)(supports-color@7.2.0)
       '@nestjs/common': 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
       '@nestjs/core': 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/platform-express@12.0.3)(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@nestjs/graphql': 14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)
+      '@nestjs/graphql': 14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2)
       graphql: 16.14.2
       iterall: 1.3.0
       lodash.omit: 4.18.0
       tslib: 2.8.1
     optionalDependencies:
-      '@apollo/subgraph': 2.14.4(graphql@16.14.2)
+      '@apollo/subgraph': 2.15.1(graphql@16.14.2)
       '@as-integrations/express5': 1.1.2(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(express@5.2.1(supports-color@7.2.0))
       '@as-integrations/fastify': 3.1.0(@apollo/server@5.5.1(graphql@16.14.2)(supports-color@7.2.0))(fastify@5.12.4)
 
@@ -5280,7 +5242,7 @@ snapshots:
     optionalDependencies:
       '@nestjs/platform-express': 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(supports-color@7.2.0)
 
-  '@nestjs/graphql@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)':
+  '@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2)':
     dependencies:
       '@graphql-tools/merge': 9.2.4(graphql@16.14.2)
       '@graphql-tools/schema': 10.1.1(graphql@16.14.2)
@@ -5299,7 +5261,8 @@ snapshots:
       tslib: 2.8.1
       ws: 8.21.3
     optionalDependencies:
-      '@apollo/subgraph': 2.14.4(graphql@16.14.2)
+      '@apollo/subgraph': 2.15.1(graphql@16.14.2)
+      typescript: 7.0.2
     transitivePeerDependencies:
       - '@fastify/websocket'
       - bufferutil
@@ -5311,16 +5274,16 @@ snapshots:
       '@nestjs/common': 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
       reflect-metadata: 0.2.2
 
-  '@nestjs/mercurius@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@mercuriusjs/federation@5.1.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/graphql@14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2))(fastify@5.12.4)(graphql@16.14.2)(mercurius@16.10.0(graphql@16.14.2))':
+  '@nestjs/mercurius@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@mercuriusjs/federation@5.1.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(fastify@5.12.4)(graphql@16.14.2)(mercurius@16.10.0(graphql@16.14.2))':
     dependencies:
       '@nestjs/common': 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
-      '@nestjs/graphql': 14.0.1(@apollo/subgraph@2.14.4(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)
+      '@nestjs/graphql': 14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2)
       fastify: 5.12.4
       graphql: 16.14.2
       mercurius: 16.10.0(graphql@16.14.2)
       tslib: 2.8.1
     optionalDependencies:
-      '@apollo/subgraph': 2.14.4(graphql@16.14.2)
+      '@apollo/subgraph': 2.15.1(graphql@16.14.2)
       '@mercuriusjs/federation': 5.1.1
 
   '@nestjs/platform-express@12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.0.3)(supports-color@7.2.0)':
@@ -5736,8 +5699,6 @@ snapshots:
       '@types/http-errors': 2.0.5
       '@types/node': 24.13.5
 
-  '@types/uuid@9.0.8': {}
-
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 24.13.5
@@ -5940,10 +5901,6 @@ snapshots:
 
   ansi-regex@6.2.2: {}
 
-  ansi-styles@4.3.0:
-    dependencies:
-      color-convert: 2.0.1
-
   ansi-styles@6.2.3: {}
 
   anynum@1.0.1: {}
@@ -6080,11 +6037,6 @@ snapshots:
 
   chai@6.2.2: {}
 
-  chalk@4.1.2:
-    dependencies:
-      ansi-styles: 4.3.0
-      supports-color: 7.2.0
-
   chokidar@4.0.3:
     dependencies:
       readdirp: 4.1.2
@@ -6102,12 +6054,6 @@ snapshots:
   cloudinary@2.11.0:
     dependencies:
       lodash: 4.17.23
-
-  color-convert@2.0.1:
-    dependencies:
-      color-name: 1.1.4
-
-  color-name@1.1.4: {}
 
   combined-stream@1.0.8:
     dependencies:
@@ -6563,7 +6509,8 @@ snapshots:
 
   graphql@16.14.2: {}
 
-  has-flag@4.0.0: {}
+  has-flag@4.0.0:
+    optional: true
 
   has-property-descriptors@1.0.2:
     dependencies:
@@ -6668,8 +6615,6 @@ snapshots:
   jju@1.4.0: {}
 
   jose@6.2.12: {}
-
-  js-levenshtein@1.1.6: {}
 
   js-tokens@4.0.0: {}
 
@@ -7326,6 +7271,7 @@ snapshots:
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
+    optional: true
 
   thread-stream@4.2.0:
     dependencies:
@@ -7514,8 +7460,6 @@ snapshots:
       requires-port: 1.0.0
 
   util-deprecate@1.0.2: {}
-
-  uuid@9.0.1: {}
 
   validate-npm-package-name@5.0.1: {}
 
