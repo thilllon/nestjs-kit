@@ -48,6 +48,10 @@ The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Buil
 
 [Contributing](../../CONTRIBUTING.md) explains repository checks and PRs. See [package instructions](AGENTS.md) and [import provenance](docs/provenance.md) before working with the historical material.
 
+## Examples
+
+The [Express](../../examples/better-auth-express/README.md) and [Fastify](../../examples/better-auth-fastify/README.md) example applications register a default and a named instance, guard routes and read the signed-in user through a principal parameter. They start without external services.
+
 ## Releases
 
 Versions come from Changesets, and publication runs from the monorepo's release workflow with npm trusted publishing and provenance; see [release automation](../../docs/releases.md). New entry points are additive, so they ship as minor versions.

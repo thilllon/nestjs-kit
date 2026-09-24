@@ -68,6 +68,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
 - `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
 - `packages/nestjs-strategy`: strategy-pattern registries for Nest providers.
+- `examples/better-auth-*`: private example applications for `nestjs-slightly-better-auth`. Their unit tests boot each application, and releases skip them.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
