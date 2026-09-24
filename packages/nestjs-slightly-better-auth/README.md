@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), built on an independently reviewed specification.
 
-> **Scope.** The package covers HTTP, WebSocket and RPC authentication. HTTP support comprises the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, and the admin, organization and API-key authorization units. The `./websockets` entry authenticates Socket.IO and raw `ws` gateways, and the `./microservices` entry authenticates Nest microservice messages. The `./testing` entry provides consumer testing helpers and `./testing/conformance` reusable conformance kits. The GraphQL transport is not included; it arrives in a later minor version behind its own entry point. The [changelog](CHANGELOG.md) records the version that introduces each entry point.
+> **Scope.** The package covers HTTP, GraphQL, WebSocket and RPC authentication: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, the admin, organization and API-key authorization units, the Apollo and Mercurius transports of the `./graphql` entry, the Socket.IO and raw `ws` gateway transports of the `./websockets` entry and the Nest microservice transport of the `./microservices` entry. The `./testing` entry provides consumer testing helpers and `./testing/conformance` reusable conformance kits. The [changelog](CHANGELOG.md) records the version that introduces each entry point.
 
 ## Install
 
@@ -15,6 +15,15 @@ pnpm add nestjs-slightly-better-auth better-auth
 ```
 
 Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer. The `./testing` and `./testing/conformance` entries also need the optional peer `@nestjs/testing` 12; the root entry never loads it or a test runner.
+
+The `./graphql` entry has two optional peer dependencies, `@nestjs/graphql` ^14.0.2 and `graphql` ^16.14.2, plus the Nest driver of your GraphQL server:
+
+```sh
+# Apollo on Express
+pnpm add @nestjs/graphql graphql @nestjs/apollo @apollo/server @as-integrations/express5
+# Mercurius on Fastify
+pnpm add @nestjs/graphql graphql @nestjs/mercurius mercurius @nestjs/platform-fastify
+```
 
 The `./websockets` entry also needs the optional peer `@nestjs/websockets` 12 and the Nest adapter for your socket library:
 
@@ -41,11 +50,108 @@ The `./express` and `./fastify` entries connect native Nest applications to Bett
 
 Express preserves native controller parsing for unconditional routes that overlap the auth mount. Body-capable controller routes that also depend on host or non-URI version conditions are rejected at startup with `CONDITIONAL_ROUTE_SHADOW`; move them outside the auth mount. The integration checks the effective Express router flags because changing application settings after router creation does not change existing route matching. This is a tested Express 5 compatibility boundary, not an inspection of the router stack.
 
+The Express platform recognizes a request by Node object identity: an `http.IncomingMessage` or stream request whose `res` is the `http.ServerResponse` bound to it. Objects built from request data never qualify. Requests dispatched with light-my-request's `inject(app.getHttpAdapter().getInstance(), ...)` are supported. `inject()` re-parents Express's shared request and response prototypes for the whole process, and a listening Express server in the same process then fails inside light-my-request, so keep injected and listening tests in separate test files.
+
 Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
 
-The GraphQL integration has separate implementation and end-to-end acceptance gates. It will use an optional entry point so applications install only the transports they use.
-
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The remaining entry points are tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534).
+
+## GraphQL
+
+The `./graphql` entry provides `apolloTransport()` for `@nestjs/apollo` and `mercuriusTransport()` for `@nestjs/mercurius`. Queries, mutations, subscriptions and federation reference resolvers use the same access decorators, principal parameters and authorization units as controllers. Only this entry imports `@nestjs/graphql` and `graphql`.
+
+Create the Better Auth instance with the construction plugin. The example stores data in PostgreSQL through `pg`, which the commands above do not install; add it with `pnpm add pg` or pass another [Better Auth database](https://www.better-auth.com/docs/concepts/database):
+
+```ts
+// auth.ts
+import { betterAuth } from "better-auth";
+import { nestjs } from "nestjs-slightly-better-auth/plugin";
+import { Pool } from "pg";
+
+export const auth = betterAuth({
+  database: new Pool({ connectionString: process.env.DATABASE_URL }),
+  emailAndPassword: { enabled: true },
+  plugins: [nestjs()],
+});
+```
+
+Register the GraphQL module and the transport that matches its driver:
+
+```ts
+// app.module.ts
+import { ApolloDriver, type ApolloDriverConfig } from "@nestjs/apollo";
+import { Module } from "@nestjs/common";
+import { GraphQLModule, Query, Resolver } from "@nestjs/graphql";
+import {
+  type AuthPrincipal,
+  BetterAuthModule,
+  CurrentPrincipal,
+  Public,
+} from "nestjs-slightly-better-auth";
+import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import { apolloTransport } from "nestjs-slightly-better-auth/graphql";
+import { auth } from "./auth";
+
+@Resolver()
+export class ViewerResolver {
+  @Query(() => String)
+  viewer(@CurrentPrincipal() principal: AuthPrincipal) {
+    return principal.userId;
+  }
+
+  @Query(() => String)
+  @Public()
+  health() {
+    return "ok";
+  }
+}
+
+@Module({
+  imports: [
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      autoSchemaFile: true,
+      subscriptions: { "graphql-ws": true },
+      fieldResolverEnhancers: ["guards", "filters"],
+    }),
+    BetterAuthModule.forRoot({
+      auth,
+      platforms: [expressPlatform()],
+      transports: [apolloTransport()],
+    }),
+  ],
+  providers: [ViewerResolver],
+})
+export class AppModule {}
+```
+
+For Mercurius, use `MercuriusDriver`, `fastifyPlatform()` from `nestjs-slightly-better-auth/fastify` and `mercuriusTransport()`. `mercuriusSubscriptionContext()` returns a Mercurius `subscription.context` function that keeps the upgrade request and its original browser headers with every socket operation; the socket tests cover Mercurius with and without it. A custom GraphQL `context` must be a function that returns a fresh object for every operation. For Apollo HTTP operations, it keeps the platform request at `context.req`: the Express request, or the Fastify request that the context function receives as its first argument, not that request's `raw` `IncomingMessage`. For Apollo socket operations, it either leaves `context.req` unset, so Nest assigns the graphql-ws context, or keeps graphql-ws's `extra` at `context.extra` and the connection parameters at `context.connectionParams`; the upgrade request alone is not recognized. An operation whose context carries neither fails closed with `AUTH_MISCONFIGURED` (`GRAPHQL_CONTEXT_UNRECOGNIZED`). Startup fails with `GRAPHQL_STATIC_CONTEXT` for a static context object and with `GRAPHQL_DRIVER_MISMATCH` when the transport does not match the configured driver.
+
+### Operations and fields
+
+Each root field of an operation is authorized independently, so aliases and batched operations can share one session read while receiving different organization decisions. A denied field produces a GraphQL error whose `extensions` contain `code`, `statusCode` and, where applicable, `reason`. Authentication infrastructure failures surface as `Internal server error` with `code: "INTERNAL_SERVER_ERROR"` and `reason` `AUTH_UNAVAILABLE` or `AUTH_MISCONFIGURED`; the underlying error never reaches the client. Better Auth's browser-origin check applies to HTTP mutations and to every socket operation.
+
+Field resolvers without access decorators inherit the principal of their actual ancestor operation, including across named instances. Protecting field and reference resolvers requires Nest to run guards on them: set `fieldResolverEnhancers: ["guards", "filters"]`, and add `"interceptors"` when those fields use scoped service readers. With `"guards"` enabled, Nest runs every global guard once per field invocation, and the boot advice `W_FIELD_GUARDS_MULTIPLY_GLOBAL_ENHANCERS` names the affected guards and interceptors. A field resolver that declares access metadata without field guards fails startup with `FIELD_RESOLVER_UNGUARDED`; `fieldResolverCoverage: "warn" | "off"` relaxes that check. Without `"filters"`, Nest does not route field errors through its exception pipeline, so they are not logged; the library then emits `W_FIELD_EXCEPTION_FILTERS_DISABLED`. With filters enabled, repeated infrastructure and reader errors produce one Nest ERROR per logical request while every affected field receives a safe error.
+
+### Subscriptions and socket operations
+
+Socket operations authenticate each operation independently from the WebSocket upgrade request and never refresh the session. Browser-origin checks always use the original upgrade headers, before any session read, so connection parameters cannot replace the browser's `Origin`. The platform's own request predicate classifies HTTP operations first, and Apollo recognizes a socket operation only through the graphql-ws connection and its WebSocket. A client-sent `Upgrade: websocket` header therefore never selects the socket path: an HTTP operation keeps the platform client IP, response cookie forwarding and the completed-request check, and an unrecognized context still fails closed. Mercurius treats an operation whose context carries the route's own Fastify reply as HTTP before any socket detection, and otherwise identifies sockets only through its subscription context, so neither request headers nor client fields spread into a custom context select the socket path.
+
+By default, `authorization` and `cookie` values in the `connection_init` payload replace the matching upgrade headers. `connectionParamHeaders` replaces that list of keys, matched case-insensitively. A selected value that is not a string or is not a valid header value rejects the operation with `UNAUTHENTICATED` and `reason: "MALFORMED_CREDENTIALS"`, without falling back to another credential and without echoing the value in errors or logs.
+
+`subscriptionCredentials(connectionContext)` replaces this mapping. The `HeadersInit` it returns becomes the operation's credentials, and `host`, `x-forwarded-host` and `x-forwarded-proto` are copied from the upgrade request when absent. Returning `undefined` presents no credentials, and `connectionParamHeaders` is not consulted. Invalid header values reject with `MALFORMED_CREDENTIALS`; errors thrown by the function are application errors, not credential denials.
+
+`subscriptionPrincipalTtlMs` reuses a connection's principal for that many milliseconds. The default `0` resolves the principal for every socket operation. A positive value delays the effect of session revocation on open connections by up to the TTL; routes with `@RequireAuth({ authoritative: true })` always resolve a fresh principal.
+
+### Federation
+
+Both transports support `ApolloFederationDriver` and `MercuriusFederationDriver` with schema-first schemas and code-first federation versions 1 and 2. `@ResolveReference()` resolvers are always checked: without field guards, startup fails with `FEDERATION_FIELD_GUARDS_REQUIRED` or `REFERENCE_RESOLVER_UNGUARDED`, and `federationCoverage` relaxes the check.
+
+Federation schema generation in `@nestjs/graphql` loads `@apollo/subgraph`, which the install commands above do not include. Federation applications must install a compatible version, for example `pnpm add @apollo/subgraph@^2.15.1`; otherwise startup fails before authentication runs. `@apollo/subgraph` 2.15 requires `@nestjs/graphql` 14.0.2 or newer, as described under [Supported versions](#supported-versions).
+
+### Supported versions
+
+The native GraphQL tests run Nest 12.0.3 with `@nestjs/graphql`, `@nestjs/apollo` and `@nestjs/mercurius` 14.0.2, `graphql` 16.14.2, `@apollo/server` 5.5.1, `mercurius` 16.10.0, `@mercuriusjs/federation` 5.1.1 and `@apollo/subgraph` 2.15.1. Code-first federation with `@apollo/subgraph` 2.15 requires `@nestjs/graphql` 14.0.2 or newer. With `@nestjs/graphql` 14.0.1, schema generation fails before authentication runs: federation 1 cannot load the subgraph directives module that 2.15 removed, and federation 2 fails with `TypeError: doc.definitions is not iterable`. The `@nestjs/graphql` peer range therefore starts at 14.0.2.
 
 ## WebSocket gateways
 

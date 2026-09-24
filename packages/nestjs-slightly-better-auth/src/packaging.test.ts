@@ -179,19 +179,89 @@ const entryPoints = Object.entries(manifest.exports).flatMap(
         ],
 );
 
-// The entry points that import each optional peer. The key type requires one mapping per
-// optional peer, and every other entry point must load without that peer.
+// The entry points that import each optional peer, directly or through another peer. The key
+// type requires one mapping per optional peer, and every other entry point must load without it.
 const optionalPeerEntries: Record<
   keyof typeof manifest.peerDependenciesMeta,
   readonly string[]
 > = {
+  "@nestjs/graphql": ["graphql"],
   "@nestjs/microservices": ["microservices"],
   // ./testing imports only @nestjs/testing types; the caller passes in the TestingModuleBuilder.
   "@nestjs/testing": ["testing/conformance"],
   "@nestjs/websockets": ["websockets"],
+  // @nestjs/graphql, not the built ./graphql entry, requests graphql.
+  graphql: ["graphql"],
 };
 
 describe("built authentication package", () => {
+  it.each(["mts", "cts"] as const)(
+    "preserves GraphQL transport declarations for a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule, AuthFailures, type AuthLike } from "nestjs-slightly-better-auth";
+import { apolloTransport, mercuriusTransport, mercuriusSubscriptionContext, BetterAuthGraphqlDenial, type GraphqlTransportOptions } from "nestjs-slightly-better-auth/graphql";
+declare const auth: AuthLike;
+const options: GraphqlTransportOptions = { connectionParamHeaders: ["authorization"], subscriptionCredentials: () => ({ authorization: "Bearer example" }), subscriptionPrincipalTtlMs: 50, fieldResolverCoverage: "error" };
+BetterAuthModule.forRoot({ auth, transports: [apolloTransport(options)], http: { mount: false } });
+BetterAuthModule.forRoot({ auth, transports: [mercuriusTransport()], http: { mount: false } });
+const context = mercuriusSubscriptionContext();
+context({}, { headers: {} });
+new BetterAuthGraphqlDenial(AuthFailures.unauthenticated());
+// @ts-expect-error Unknown coverage modes cannot silently disable enforcement.
+apolloTransport({ fieldResolverCoverage: "ignore" });
+`,
+      );
+    },
+  );
+
+  it.each([
+    { format: "esm", driver: "apollo", platform: "express" },
+    { format: "cjs", driver: "apollo", platform: "express" },
+    { format: "esm", driver: "mercurius", platform: "fastify" },
+    { format: "cjs", driver: "mercurius", platform: "fastify" },
+  ] as const)(
+    "initializes $driver with its actual $format transport artifact",
+    ({ format, driver, platform }) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const graphql = await load("./dist/graphql.${format === "esm" ? "mjs" : "cjs"}");
+         const platform = await load("./dist/${platform}.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { GraphQLModule } = await import("@nestjs/graphql");
+         const { ${driver === "apollo" ? "ApolloDriver" : "MercuriusDriver"}: Driver } = await import("@nestjs/${driver}");
+         const { ${platform === "express" ? "ExpressAdapter" : "FastifyAdapter"}: Adapter } = await import("@nestjs/platform-${platform}");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [
+           kit.BetterAuthModule.forRoot({ auth, platforms: [platform.${platform}Platform()], transports: [graphql.${driver}Transport()], logSummary: false }),
+           GraphQLModule.forRoot({ driver: Driver, typeDefs: "type Query { ping: String! }", resolvers: { Query: { ping: () => "pong" } } }),
+         ] }).compile();
+         const adapter = new Adapter();
+         const app = moduleRef.createNestApplication(adapter, { logger: false });
+         try {
+           await app.init();
+           ${platform === "fastify" ? "await adapter.getInstance().ready();" : ""}
+           console.log(JSON.stringify({ originalInstance: app.get(kit.BetterAuthService).instance === auth, adapter: app.getHttpAdapter().getType() }));
+         } finally { await app.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        originalInstance: true,
+        adapter: platform,
+      });
+    },
+  );
+
   it.each(["mts", "cts"] as const)(
     "preserves WebSocket adapter and connection-auth types in a .%s consumer",
     async (extension) => {
@@ -792,10 +862,13 @@ void organization;
          const peer = ${JSON.stringify(peer)};
          const dist = pathToFileURL(process.cwd() + "/dist/").href;
          let distRequests = 0;
+         let peerRequests = 0;
          // Resolve the optional peer as an absent package, as Node does when it is not installed.
+         // The graphql peer is requested by @nestjs/graphql rather than by the built entry itself.
          const hooks = registerHooks({
            resolve(specifier, context, nextResolve) {
              if (specifier === peer || specifier.startsWith(peer + "/")) {
+               peerRequests += 1;
                if (context.parentURL?.startsWith(dist)) {
                  distRequests += 1;
                }
@@ -809,12 +882,13 @@ void organization;
            const modules = {};
            for (const entry of ${JSON.stringify(entries)}) {
              const before = distRequests;
+             const peerBefore = peerRequests;
              observed.entries[entry.name] = await Promise.resolve().then(() => load(entry.path)).then(
                (loaded) => {
                  modules[entry.name] = loaded;
                  return distRequests === before ? "loaded" : "loaded after requesting the peer";
                },
-               (error) => (distRequests > before ? "requested the peer: " : "") + error.code + " " + String(error.message).includes(peer),
+               (error) => (peerRequests > peerBefore ? "requested the peer: " : "") + error.code + " " + String(error.message).includes(peer),
              );
            }
            const { NestFactory } = await import("@nestjs/core");
