@@ -327,8 +327,8 @@ importers:
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/platform-express@12.0.3)
       pubnub:
-        specifier: 13.0.1
-        version: 13.0.1
+        specifier: 13.0.3
+        version: 13.0.3
 
   packages/nestjs-sendbird:
     dependencies:
@@ -2525,9 +2525,6 @@ packages:
       picomatch:
         optional: true
 
-  fflate@0.8.2:
-    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
-
   fflate@0.8.3:
     resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
@@ -3059,8 +3056,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  pubnub@13.0.1:
-    resolution: {integrity: sha512-ApqwQx0vN8Zx4S9rPuhNbZ2w4S5XZy1CR4KNtI3kdXpe2JQBGODygXar2inrEmPXrCvi+5pJb90gF10/xJ1hnA==}
+  pubnub@13.0.3:
+    resolution: {integrity: sha512-umZnd1jT/yVQlbVN8G7ayIamVUtvnshclcdzbsKxQP2TuwrP5xhoAB9y7+FMfX29OreM2/UynKWwkQS27QFjcw==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       react-native-url-polyfill: ^2.0.0
@@ -5423,8 +5420,6 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
-  fflate@0.8.2: {}
-
   fflate@0.8.3: {}
 
   file-type@22.1.0:
@@ -5886,14 +5881,14 @@ snapshots:
       picocolors: 1.1.1
       sade: 1.8.1
 
-  pubnub@13.0.1:
+  pubnub@13.0.3:
     dependencies:
       agentkeepalive: 3.5.3
       buffer: 6.0.3
       cbor-js: 0.1.0
       cbor-sync: 1.0.4
       fast-text-encoding: 1.0.6
-      fflate: 0.8.2
+      fflate: 0.8.3
       lil-uuid: 0.1.1
       undici: 7.29.1
 
