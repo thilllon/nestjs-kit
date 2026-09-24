@@ -1,6 +1,6 @@
 {
   "name": "nestjs-sendbird",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Sendbird Platform API clients for NestJS with isolated named applications",
   "license": "ISC",
   "author": "thilllon",
