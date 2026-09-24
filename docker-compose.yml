@@ -27,7 +27,15 @@ services:
     ports:
       - "127.0.0.1:${NATS_PORT:-54222}:4222"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--output-document",
+          "-",
+          "http://127.0.0.1:8222/healthz",
+        ]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -66,7 +74,15 @@ services:
     ports:
       - "127.0.0.1:${RABBITMQ_PORT:-55672}:5672"
     healthcheck:
-      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
+      test:
+        [
+          "CMD",
+          "su-exec",
+          "rabbitmq",
+          "rabbitmq-diagnostics",
+          "--quiet",
+          "ping",
+        ]
       interval: 3s
       timeout: 5s
       retries: 30
@@ -83,13 +99,13 @@ services:
         [
           "CMD",
           "mosquitto_pub",
-          "-h",
+          "--host",
           "127.0.0.1",
-          "-t",
+          "--topic",
           "health",
-          "-m",
+          "--message",
           "ready",
-          "-V",
+          "--protocol-version",
           "mqttv5",
         ]
       interval: 2s
