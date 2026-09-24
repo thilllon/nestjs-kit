@@ -32,7 +32,7 @@ The Turbo build compiles `nestjs-slightly-better-auth` before the example. The H
 
 ## Try it
 
-`dist/call.js` sends one message through a Nest TCP client and prints the reply, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable, which other local users cannot read, unlike command-line arguments. Its options are `--host` and `--port`, which default to `RPC_HOST` and `RPC_PORT`.
+`dist/call.js` sends one message through a Nest TCP client and prints the reply, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable rather than from its arguments, which other local users can usually list. Its options are `--host` and `--port`, which default to `RPC_HOST` and `RPC_PORT`.
 
 `account.status` and `account.greeting` accept messages without credentials, and `account.profile` answers `401`:
 

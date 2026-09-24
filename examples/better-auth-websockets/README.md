@@ -30,7 +30,7 @@ The Turbo build compiles `nestjs-slightly-better-auth` before the example. HTTP 
 
 ## Try it
 
-`dist/call.js` connects to a namespace, emits one event and prints the acknowledgement, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable, which other local users cannot read, unlike command-line arguments. Its options are `--namespace` (default `/`) and `--url` (default `http://localhost:$PORT`).
+`dist/call.js` connects to a namespace, emits one event and prints the acknowledgement, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable rather than from its arguments, which other local users can usually list. Its options are `--namespace` (default `/`) and `--url` (default `http://localhost:$PORT`).
 
 Guests connect to the default namespace. The `status` and `greeting` messages accept them, and `profile` answers `401`:
 

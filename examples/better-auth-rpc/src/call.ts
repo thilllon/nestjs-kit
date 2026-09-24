@@ -11,8 +11,8 @@ const { positionals, values } = parseArgs({
     port: { type: "string", default: process.env.RPC_PORT ?? "4000" },
   },
 });
-// The token comes from the environment, which other local users cannot read,
-// unlike command-line arguments.
+// The token comes from the environment: other local users can usually list a
+// process's command-line arguments, but not its environment.
 const token = process.env.SESSION_TOKEN || undefined;
 
 const [pattern] = positionals;

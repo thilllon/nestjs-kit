@@ -14,8 +14,8 @@ const { positionals, values } = parseArgs({
     },
   },
 });
-// The token comes from the environment, which other local users cannot read,
-// unlike command-line arguments.
+// The token comes from the environment: other local users can usually list a
+// process's command-line arguments, but not its environment.
 const token = process.env.SESSION_TOKEN || undefined;
 
 async function call(event: string): Promise<void> {
