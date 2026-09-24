@@ -10,7 +10,12 @@ import { Public, UseBetterAuth } from "./auth-decorators.js";
 import { createTestAuth } from "./test-fixtures.js";
 import { describe, expect, it } from "vitest";
 import type { AuthTransport, ExtensionDefinition } from "./auth-contracts.js";
-import { AuthFailures } from "./auth-errors.js";
+import {
+  AuthFailures,
+  BetterAuthConfigurationError,
+  createInfrastructureError,
+} from "./auth-errors.js";
+import { connectionErrorLog } from "./ws-connection-auth.js";
 import {
   socketIoTransport,
   wsTransport,
@@ -302,3 +307,68 @@ it.each([null, 42, {}, [], true])(
     );
   },
 );
+it.each(["\r", "\n", "\0", "\u0100"])(
+  "rejects a malformed default Socket.IO token string without quoting it (%j)",
+  (character) => {
+    const secret = "DEFAULT_TOKEN_SECRET";
+    let failure: unknown;
+    try {
+      unit(socketIoTransport())
+        .describe(
+          context({
+            handshake: {
+              headers: { cookie: "valid=credential", host: "localhost" },
+              auth: { token: `${secret}${character}suffix` },
+            },
+          }),
+          { http: null },
+        )
+        .headers();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      status: 401,
+      reason: "MALFORMED_CREDENTIALS",
+    });
+    expect(failure).not.toHaveProperty("cause");
+    expect(JSON.stringify(failure)).not.toContain(secret);
+  },
+);
+describe("connection middleware error log", () => {
+  const secret = "CONNECTION_LOG_SECRET";
+  it("withholds foreign error messages, which can quote credentials", () => {
+    for (const error of [
+      new TypeError(`Headers.append: "${secret}" is an invalid header name.`),
+      `thrown ${secret}`,
+    ]) {
+      const log = connectionErrorLog(error);
+      expect(`${log.message}\n${log.stack ?? ""}`).not.toContain(secret);
+      expect(log.message).toContain("(message withheld)");
+    }
+    const log = connectionErrorLog(new TypeError(secret));
+    expect(log.message).toContain("TypeError (message withheld)");
+    expect(log.stack).toMatch(/\n\s+at /);
+  });
+  it("keeps package diagnostics and already-redacted infrastructure causes", () => {
+    expect(
+      connectionErrorLog(
+        BetterAuthConfigurationError.atRequest(
+          "WS_UPGRADE_REQUEST_MISSING",
+          "WebSocket authentication requires its upgrade request.",
+        ),
+      ).message,
+    ).toContain(
+      "WS_UPGRADE_REQUEST_MISSING: WebSocket authentication requires its upgrade request.",
+    );
+    const log = connectionErrorLog(
+      createInfrastructureError(new Error(`connect failed for ${secret}`), {
+        secrets: [secret],
+      }),
+    );
+    expect(log.message).toContain(
+      "Authentication service unavailable (Error: connect failed for [REDACTED])",
+    );
+    expect(`${log.message}\n${log.stack ?? ""}`).not.toContain(secret);
+  });
+});

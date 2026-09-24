@@ -1,9 +1,11 @@
-import { Inject } from "@nestjs/common";
+import { Inject, Logger } from "@nestjs/common";
 import { ExecutionContextHost } from "@nestjs/core/helpers/execution-context-host.js";
 import type { PrincipalResolver, PrincipalResult } from "./auth-contracts.js";
 import {
   AuthFailures,
   isAuthFailure,
+  isConfigurationError,
+  isInfrastructureError,
   BetterAuthConfigurationError,
   type AuthFailure,
 } from "./auth-errors.js";
@@ -12,6 +14,7 @@ import {
   PRINCIPAL_RESOLVER,
   TRANSPORT_REGISTRY,
 } from "./auth-tokens.js";
+import { readErrorProperty } from "./error-redactor.js";
 import type { InstanceLookup } from "./instance-registry.js";
 import type { TransportRegistry } from "./transport-registry.js";
 
@@ -21,8 +24,44 @@ export const WS_CONNECTION_AUTH: unique symbol = Symbol.for(
 export function wsCloseCodeFor(failure: AuthFailure): 4401 | 4403 | 4429 {
   return failure.status === 401 ? 4401 : failure.status === 403 ? 4403 : 4429;
 }
+
+const STACK_FRAME = /^\s+at .+:\d+:\d+\)?$/;
+
+/**
+ * Describes an unexpected connection-authentication error for the server log. Package
+ * errors carry fixed messages and already-redacted causes. Application and runtime error
+ * messages can quote client credentials (native Headers errors do), so only their name
+ * and stack frames are kept.
+ */
+export function connectionErrorLog(error: unknown): {
+  message: string;
+  stack?: string;
+} {
+  const text = (value: unknown) =>
+    typeof value === "string" ? value : undefined;
+  let summary: string;
+  if (isConfigurationError(error)) {
+    summary = `${error.code}: ${error.detail}`;
+  } else if (isInfrastructureError(error)) {
+    const cause = readErrorProperty(error, "cause");
+    summary = `${error.message} (${text(readErrorProperty(cause, "name")) ?? "Error"}: ${text(readErrorProperty(cause, "message")) ?? ""})`;
+  } else {
+    const name = text(readErrorProperty(error, "name"));
+    summary = `${name !== undefined && /^[\w$.]{1,64}$/.test(name) ? name : typeof error} (message withheld)`;
+  }
+  const frames = (text(readErrorProperty(error, "stack")) ?? "")
+    .split(/\r?\n/)
+    .filter((line) => STACK_FRAME.test(line));
+  return {
+    message: `WebSocket connection authentication failed: ${summary}`,
+    stack: frames.length > 0 ? [summary, ...frames].join("\n") : undefined,
+  };
+}
+
 /** Connection authentication delegates to the same origin and principal kernel as messages. */
 export class WsConnectionAuth {
+  private readonly logger = new Logger("BetterAuth");
+
   constructor(
     @Inject(INSTANCE_REGISTRY) private readonly instances: InstanceLookup,
     @Inject(PRINCIPAL_RESOLVER) private readonly resolver: PrincipalResolver,
@@ -107,7 +146,9 @@ export class WsConnectionAuth {
             }),
           );
         },
-        () => {
+        (error: unknown) => {
+          const log = connectionErrorLog(error);
+          this.logger.error(log.message, log.stack);
           next(
             Object.assign(new Error("Internal server error"), {
               data: {

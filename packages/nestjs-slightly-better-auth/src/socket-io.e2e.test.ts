@@ -783,3 +783,44 @@ it.each([
     }
   },
 );
+it("logs unexpected connection middleware failures without the credential", async () => {
+  const secret = "SOCKET_IO_MAPPER_SECRET";
+  const logs = vi
+    .spyOn(Logger.prototype, "error")
+    .mockImplementation(() => undefined);
+  const f = await fixture({
+    required: false,
+    credentials: (client) => {
+      throw new TypeError(
+        `mapper failed for ${String(client.handshake.auth?.token)}`,
+      );
+    },
+  });
+  let client: Socket | undefined;
+  try {
+    const failure = await connect(f.url, {
+      headers: { origin: "http://localhost:3000" },
+      token: secret,
+    }).then(
+      (connected) => {
+        client = connected;
+        return null;
+      },
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({
+      data: { statusCode: 500, message: "Internal server error" },
+    });
+    expect(inspect(failure, { depth: 10 })).not.toContain(secret);
+    expect(logs).toHaveBeenCalledTimes(1);
+    expect(logs.mock.calls[0]?.[0]).toBe(
+      "WebSocket connection authentication failed: TypeError (message withheld)",
+    );
+    expect(inspect(logs.mock.calls, { depth: 10 })).not.toContain(secret);
+    expect(f.reads()).toBe(0);
+  } finally {
+    client?.close();
+    await f.close();
+    logs.mockRestore();
+  }
+});
