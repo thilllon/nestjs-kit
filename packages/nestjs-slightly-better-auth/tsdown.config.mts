@@ -10,6 +10,7 @@ export default defineConfig([
       express: "src/express.ts",
       fastify: "src/fastify.ts",
       graphql: "src/graphql.ts",
+      websockets: "src/websockets.ts",
       microservices: "src/microservices.ts",
       admin: "src/admin.ts",
       organization: "src/organization.ts",

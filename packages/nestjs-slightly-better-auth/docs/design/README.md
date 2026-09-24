@@ -3,9 +3,9 @@
 This directory preserves the design and review history of
 `nestjs-slightly-better-auth`, now maintained in the `nestjs-kit` monorepo.
 The final v7 specification has independent design approval and is the contract the
-implementation follows. The package implements its HTTP scope, its GraphQL transports
-through the `./graphql` entry and its RPC transport through the `./microservices` entry;
-WebSocket transports and the conformance kit are still to come.
+implementation follows. The package implements its HTTP scope and, through the
+`./graphql`, `./websockets` and `./microservices` entries, its GraphQL, WebSocket and
+RPC transports; the conformance kit is still to come.
 
 Three reviewers examine Better Auth fidelity, NestJS correctness and SOLID, and
 security and operations. Historical designs and research retain their original

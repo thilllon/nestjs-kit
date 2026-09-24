@@ -165,6 +165,32 @@ void invalidKind;
   }
 }
 
+// Built entry points, derived from the package exports so new entries join the artifact checks.
+const entryPoints = Object.entries(manifest.exports).flatMap(
+  ([subpath, target]) =>
+    typeof target === "string"
+      ? []
+      : [
+          {
+            name: subpath === "." ? "index" : subpath.slice("./".length),
+            esm: target.import.default,
+            cjs: target.require.default,
+          },
+        ],
+);
+
+// The entry point that imports each optional peer, directly or through another peer. The key
+// type requires one mapping per optional peer, and every other entry point must load without it.
+const optionalPeerEntries: Record<
+  keyof typeof manifest.peerDependenciesMeta,
+  string
+> = {
+  "@nestjs/graphql": "graphql",
+  "@nestjs/microservices": "microservices",
+  "@nestjs/websockets": "websockets",
+  graphql: "graphql",
+};
+
 describe("built authentication package", () => {
   it.each(["mts", "cts"] as const)(
     "preserves GraphQL transport declarations for a .%s consumer",
@@ -229,6 +255,70 @@ apolloTransport({ fieldResolverCoverage: "ignore" });
       expect(JSON.parse(result)).toEqual({
         originalInstance: true,
         adapter: platform,
+      });
+    },
+  );
+
+  it.each(["mts", "cts"] as const)(
+    "preserves WebSocket adapter and connection-auth types in a .%s consumer",
+    async (extension) => {
+      await compileConsumer(
+        extension,
+        `import { BetterAuthModule } from "nestjs-slightly-better-auth";
+import { socketIoTransport, wsTransport, withUpgradeRequest, recordUpgradeRequest, WS_CONNECTION_AUTH, WsConnectionAuth, wsCloseCodeFor } from "nestjs-slightly-better-auth/websockets";
+import type { AuthLike } from "nestjs-slightly-better-auth";
+declare const auth: AuthLike;
+BetterAuthModule.forRoot({ auth, transports: [socketIoTransport({ credentials: client => ({ authorization: String(client.handshake.auth?.token ?? "") }) }), wsTransport()], http: { mount: false } });
+class Adapter {
+  bindClientConnect(_server: unknown, _callback: (...args: any[]) => void): void {}
+  nativeMethod(): string { return "preserved"; }
+}
+const Wrapped = withUpgradeRequest(Adapter);
+const method: string = new Wrapped().nativeMethod();
+recordUpgradeRequest({}, { headers: { cookie: "example" }, url: "/socket" });
+declare const connections: WsConnectionAuth;
+connections.authenticate({}, { instance: "named" });
+connections.socketIoMiddleware({ required: false });
+const token: symbol = WS_CONNECTION_AUTH;
+const code: 4401 | 4403 | 4429 = wsCloseCodeFor({ status: 401, code: "UNAUTHENTICATED", message: "Unauthorized" });
+// @ts-expect-error An unsupported TTL policy is not accepted.
+wsTransport({ principalTtlMs: "forever" });
+void method; void token; void code;
+`,
+      );
+    },
+  );
+
+  it.each(["esm", "cjs"] as const)(
+    "injects connection authentication from the actual %s WebSocket entry",
+    (format) => {
+      const result = node(
+        `process.env.NODE_ENV = "test";
+         const { createRequire } = await import("node:module");
+         const require = createRequire(import.meta.url);
+         const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
+         const kit = await load("./dist/index.${format === "esm" ? "mjs" : "cjs"}");
+         const sockets = await load("./dist/websockets.${format === "esm" ? "mjs" : "cjs"}");
+         const { Test } = await import("@nestjs/testing");
+         const { Logger } = await import("@nestjs/common");
+         const { betterAuth } = await import("better-auth");
+         const { memoryAdapter } = await import("better-auth/adapters/memory");
+         const { nestjs } = await import("nestjs-slightly-better-auth/plugin");
+         Logger.overrideLogger(false);
+         const auth = betterAuth({ baseURL: "http://localhost:3000", secret: crypto.randomUUID().repeat(2), database: memoryAdapter({}), logger: { disabled: true }, plugins: [nestjs()] });
+         const moduleRef = await Test.createTestingModule({ imports: [kit.BetterAuthModule.forRoot({ auth, transports: [sockets.socketIoTransport(), sockets.wsTransport()], http: { mount: false }, logSummary: false })] }).compile();
+         try {
+           await moduleRef.init();
+           const byToken = moduleRef.get(sockets.WS_CONNECTION_AUTH);
+           console.log(JSON.stringify({ sameProvider: byToken === moduleRef.get(sockets.WsConnectionAuth), authenticate: typeof byToken.authenticate, middleware: typeof byToken.socketIoMiddleware, originalInstance: moduleRef.get(kit.BetterAuthService).instance === auth }));
+         } finally { await moduleRef.close(); }`,
+        "--input-type=module",
+      );
+      expect(JSON.parse(result)).toEqual({
+        sameProvider: true,
+        authenticate: "function",
+        middleware: "function",
+        originalInstance: true,
       });
     },
   );
@@ -749,66 +839,54 @@ void organization;
     });
   });
 
-  // Entry points that import each optional peer; every other entry must run without it.
-  const optionalPeerEntries: Record<string, readonly string[]> = {
-    "@nestjs/graphql": ["graphql"],
-    "@nestjs/microservices": ["microservices"],
-    graphql: ["graphql"],
-  };
-  const entryPoints = Object.keys(manifest.exports)
-    .filter((path) => path !== "./package.json")
-    .map((path) => (path === "." ? "index" : path.slice(2)));
-
-  it("declares an entry mapping for every optional peer", () => {
-    expect(Object.keys(optionalPeerEntries).sort()).toEqual(
-      Object.keys(manifest.peerDependenciesMeta).sort(),
-    );
-    for (const entries of Object.values(optionalPeerEntries)) {
-      for (const entry of entries) {
-        expect(entryPoints).toContain(entry);
-      }
-    }
-  });
-
   it.each(
-    Object.entries(optionalPeerEntries).flatMap(([peer, dependents]) =>
-      (["esm", "cjs"] as const).map((format) => ({
-        peer,
-        dependents,
-        format,
-      })),
+    Object.entries(optionalPeerEntries).flatMap(([peer, owner]) =>
+      (["esm", "cjs"] as const).map((format) => ({ format, peer, owner })),
     ),
   )(
     "runs every other $format entry point without the optional $peer peer",
-    ({ peer, dependents, format }) => {
-      const extension = format === "esm" ? "mjs" : "cjs";
-      const independent = entryPoints.filter(
-        (entry) => !dependents.includes(entry),
-      );
+    ({ format, peer, owner }) => {
+      const entries = entryPoints.map((entry) => ({
+        name: entry.name,
+        path: entry[format],
+      }));
       const result = node(
         `import { createRequire, registerHooks } from "node:module";
          import { pathToFileURL } from "node:url";
          process.env.NODE_ENV = "test";
          const require = createRequire(import.meta.url);
          const load = ${format === "esm" ? "path => import(path)" : "path => require(path)"};
-         const dist = pathToFileURL(process.cwd() + "/dist/").href;
          const peer = ${JSON.stringify(peer)};
-         const requests = [];
+         const dist = pathToFileURL(process.cwd() + "/dist/").href;
+         let distRequests = 0;
+         let peerRequests = 0;
          // Resolve the optional peer as an absent package, as Node does when it is not installed.
+         // The graphql peer is requested by @nestjs/graphql rather than by the built entry itself.
          const hooks = registerHooks({
            resolve(specifier, context, nextResolve) {
              if (specifier === peer || specifier.startsWith(peer + "/")) {
-               requests.push(context.parentURL?.startsWith(dist) ? "dist" : "external");
+               peerRequests += 1;
+               if (context.parentURL?.startsWith(dist)) {
+                 distRequests += 1;
+               }
                throw Object.assign(new Error("Cannot find package '" + specifier + "'"), { code: "ERR_MODULE_NOT_FOUND" });
              }
              return nextResolve(specifier, context);
            },
          });
-         const observed = {};
+         const observed = { entries: {} };
          try {
            const modules = {};
-           for (const entry of ${JSON.stringify(independent)}) {
-             modules[entry] = await load("./dist/" + entry + ".${extension}");
+           for (const entry of ${JSON.stringify(entries)}) {
+             const before = distRequests;
+             const peerBefore = peerRequests;
+             observed.entries[entry.name] = await Promise.resolve().then(() => load(entry.path)).then(
+               (loaded) => {
+                 modules[entry.name] = loaded;
+                 return distRequests === before ? "loaded" : "loaded after requesting the peer";
+               },
+               (error) => (peerRequests > peerBefore ? "requested the peer: " : "") + error.code + " " + String(error.message).includes(peer),
+             );
            }
            const { Test } = await import("@nestjs/testing");
            const { Logger } = await import("@nestjs/common");
@@ -837,16 +915,6 @@ void organization;
            } finally {
              await app.close();
            }
-           observed.loaded = Object.keys(modules);
-           observed.distRequests = requests.filter((source) => source === "dist").length;
-           observed.dependents = {};
-           for (const entry of ${JSON.stringify(dependents)}) {
-             observed.dependents[entry] = await Promise.resolve().then(() => load("./dist/" + entry + ".${extension}")).then(
-               () => "loaded",
-               (error) => error.code + " " + String(error.message).includes("'" + peer),
-             );
-           }
-           observed.peerRequested = requests.length > 0;
          } finally {
            hooks.deregister();
          }
@@ -854,13 +922,15 @@ void organization;
         "--input-type=module",
       );
       expect(JSON.parse(result)).toEqual({
-        initialized: true,
-        loaded: independent,
-        distRequests: 0,
-        dependents: Object.fromEntries(
-          dependents.map((entry) => [entry, "ERR_MODULE_NOT_FOUND true"]),
+        entries: Object.fromEntries(
+          entries.map(({ name }) => [
+            name,
+            name === owner
+              ? "requested the peer: ERR_MODULE_NOT_FOUND true"
+              : "loaded",
+          ]),
         ),
-        peerRequested: true,
+        initialized: true,
       });
     },
   );

@@ -6,7 +6,7 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com), built on an independently reviewed specification.
 
-> **Scope.** The package covers HTTP, GraphQL and RPC: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, the admin, organization and API-key authorization units, the Apollo and Mercurius transports of the `./graphql` entry and the Nest microservice transport of the `./microservices` entry. WebSocket transports and the conformance testing kit are not included; they ship in later minor versions behind their own entry points. The [changelog](CHANGELOG.md) records the version that adds each entry point.
+> **Scope.** The package covers HTTP, GraphQL, WebSocket and RPC authentication: the Nest authentication kernel, the Better Auth construction plugin, the Express and Fastify platforms, the admin, organization and API-key authorization units, the Apollo and Mercurius transports of the `./graphql` entry, the Socket.IO and raw `ws` gateway transports of the `./websockets` entry and the Nest microservice transport of the `./microservices` entry. The conformance testing kit is not included; it arrives in a later minor version behind its own entry point. The [changelog](CHANGELOG.md) records the version that introduces each entry point.
 
 ## Install
 
@@ -23,6 +23,13 @@ The `./graphql` entry has two optional peer dependencies, `@nestjs/graphql` ^14.
 pnpm add @nestjs/graphql graphql @nestjs/apollo @apollo/server @as-integrations/express5
 # Mercurius on Fastify
 pnpm add @nestjs/graphql graphql @nestjs/mercurius mercurius @nestjs/platform-fastify
+```
+
+The `./websockets` entry also needs the optional peer `@nestjs/websockets` 12 and the Nest adapter for your socket library:
+
+```sh
+pnpm add @nestjs/websockets @nestjs/platform-socket.io # Socket.IO
+pnpm add @nestjs/websockets @nestjs/platform-ws # raw ws
 ```
 
 The `./microservices` entry also needs the optional peer `@nestjs/microservices` 12 and the client library Nest uses for your transport, for example:
@@ -44,8 +51,6 @@ The `./express` and `./fastify` entries connect native Nest applications to Bett
 Express preserves native controller parsing for unconditional routes that overlap the auth mount. Body-capable controller routes that also depend on host or non-URI version conditions are rejected at startup with `CONDITIONAL_ROUTE_SHADOW`; move them outside the auth mount. The integration checks the effective Express router flags because changing application settings after router creation does not change existing route matching. This is a tested Express 5 compatibility boundary, not an inspection of the router stack.
 
 Fastify does not expose its configured `trustProxy` value through a public inspection API. The boot summary therefore reports proxy trust as `unknown`, and diagnostics that depend on the setting are unavailable. Client IP resolution still uses the native Fastify request. Configure proxy trust on your Nest Fastify adapter and verify it against your deployment topology.
-
-WebSocket integrations have separate implementation and end-to-end acceptance gates. They will use an optional entry point so applications install only the transports they use. HTTP, GraphQL and RPC tests do not establish that the WebSocket integration is ready.
 
 Start with the [design workspace](docs/design/README.md), [reviewed specification](docs/design/design-v7.md), [review ledger](docs/design/ledger.md) and [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md). Independent Better Auth, NestJS and security reviews approved the final v7 snapshot after resolving the round-6 and round-7 findings. The remaining entry points are tracked in [issue #534](https://github.com/thilllon/nestjs-kit/issues/534).
 
@@ -145,6 +150,71 @@ Federation schema generation in `@nestjs/graphql` loads `@apollo/subgraph`, whic
 ### Supported versions
 
 The native GraphQL tests run Nest 12.0.3 with `@nestjs/graphql`, `@nestjs/apollo` and `@nestjs/mercurius` 14.0.2, `graphql` 16.14.2, `@apollo/server` 5.5.1, `mercurius` 16.10.0, `@mercuriusjs/federation` 5.1.1 and `@apollo/subgraph` 2.15.1. Code-first federation with `@apollo/subgraph` 2.15 requires `@nestjs/graphql` 14.0.2 or newer. With `@nestjs/graphql` 14.0.1, schema generation fails before authentication runs: federation 1 cannot load the subgraph directives module that 2.15 removed, and federation 2 fails with `TypeError: doc.definitions is not iterable`. The `@nestjs/graphql` peer range therefore starts at 14.0.2.
+
+## WebSocket gateways
+
+The `./websockets` entry authenticates Socket.IO and raw `ws` gateways. Register `socketIoTransport()` or `wsTransport()` in the module's `transports`, and decorate every gateway with `@UseBetterAuth()` so both the guard and the invocation scope run for its message handlers. Startup fails with `GATEWAY_UNGUARDED` when a message handler lacks that coverage; `@Public()` opts a gateway or handler out, and the transports' `gatewayCoverage` option downgrades the check to `"warn"` or `"off"`. Message handlers use the same access, session and authorization decorators as controllers.
+
+```ts
+import { Inject, Module } from "@nestjs/common";
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
+import type { Server } from "socket.io";
+import {
+  BetterAuthModule,
+  CurrentSession,
+  RequireAuth,
+  UseBetterAuth,
+} from "nestjs-slightly-better-auth";
+import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import {
+  socketIoTransport,
+  WS_CONNECTION_AUTH,
+  type WsConnectionAuth,
+} from "nestjs-slightly-better-auth/websockets";
+import { auth } from "./auth"; // betterAuth({ plugins: [nestjs(), bearer()], ... })
+
+@WebSocketGateway()
+@UseBetterAuth()
+export class EventsGateway {
+  constructor(
+    @Inject(WS_CONNECTION_AUTH)
+    private readonly connectionAuth: WsConnectionAuth,
+  ) {}
+
+  afterInit(server: Server) {
+    // Optional: reject unauthenticated handshakes before any message arrives.
+    server.use(this.connectionAuth.socketIoMiddleware({ required: true }));
+  }
+
+  @RequireAuth()
+  @SubscribeMessage("whoami")
+  whoami(@CurrentSession() session: { user: { email: string } }) {
+    return { email: session.user.email };
+  }
+}
+
+@Module({
+  imports: [
+    BetterAuthModule.forRoot({
+      auth,
+      platforms: [expressPlatform()],
+      transports: [socketIoTransport()],
+    }),
+  ],
+  providers: [EventsGateway],
+})
+export class AppModule {}
+```
+
+Socket.IO reads credentials from the handshake headers. When the handshake has no `Authorization` header, a string `auth.token` becomes `Authorization: Bearer <token>`, which Better Auth's `bearer()` plugin accepts. Raw `ws` reads the upgrade request, so wrap Nest's adapter to record it: `app.useWebSocketAdapter(new (withUpgradeRequest(WsAdapter))(app))`. Without that record, public messages still run and protected messages fail with a 500 `WS_UPGRADE_REQUEST_MISSING` configuration error.
+
+A `credentials(client)` option on either transport replaces the default mapping: the entries of the `HeadersInit` it returns override the handshake headers of the same name for authentication. The browser-origin check always uses the original handshake, so mapped credentials cannot bypass it. A non-string `auth.token`, or mapped credentials that are not string pairs or contain CR, LF, NUL or other invalid header characters, fail with a 401 `MALFORMED_CREDENTIALS` before any Better Auth call. Other credentials on the connection are not tried in their place, and the failure does not carry the rejected value. Errors thrown by the mapper itself are not converted into authentication failures.
+
+Connection authentication runs the same origin check and default credential sources as messages, for the default instance or the one named by `instance`. `socketIoMiddleware({ required, instance })` rejects a Socket.IO handshake with a `connect_error` whose `data` holds `statusCode`, `code` and `reason`; `required: false` admits connections without credentials but still rejects invalid ones. Unexpected errors reach the client as a 500 `Internal server error`, and the server logs a summary that omits foreign error messages because they can quote credentials. For raw `ws`, call `authenticate(client)` in `handleConnection` and close rejected connections with `wsCloseCodeFor(result.failure)`, which maps 401, 403 and 429 failures to close codes 4401, 4403 and 4429.
+
+Principal caching is off by default. A positive `principalTtlMs` reuses a successful authentication on the same connection and therefore delays revocation for ordinary handlers; handlers declared with `@RequireAuth({ authoritative: true })` always revalidate. Neither message nor connection authentication refreshes cookies.
+
+Tests run real Socket.IO 4.8.3 and ws 8.21.3 clients against Nest 12.0.3, where Nest delivers raw `ws` authentication failures as native `exception` messages.
 
 ## RPC authentication
 
