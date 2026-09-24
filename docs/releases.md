@@ -53,7 +53,7 @@ While a package is held, `pnpm exec changeset` does not offer it. Write its Chan
 
 To publish a held package:
 
-1. Merge a documentation PR that removes the package README's first-release note, as [#506](https://github.com/thilllon/nestjs-kit/pull/506) did for Nodemailer, so the npm page carries a durable installation guide.
+1. Merge a documentation PR that removes the package README's first-release note, so the npm page carries a durable installation guide.
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
@@ -104,10 +104,6 @@ GitHub documents that [job checks from dispatched workflows do not satisfy requi
 
 The release validation job receives `actions: write` and `checks: write`; it does not check out or execute package code. The merge job additionally receives `actions: write` only to dispatch the fresh publication run when the gate is enabled. No personal token, separate GitHub App or protection bypass is configured. The merge checks the validated PR head, original main base and resulting merged tree. Publication in the fresh run verifies its own event commit and validated tree.
 
-This protected flow was verified by [release PR #497](https://github.com/thilllon/nestjs-kit/pull/497). [Full CI](https://github.com/thilllon/nestjs-kit/actions/runs/35381245044) passed on the exact PR head, and the [release workflow](https://github.com/thilllon/nestjs-kit/actions/runs/35381191397) reported its result and merged through `github-actions[bot]` under the active required-check rules without bypass actors or owner approval. Publication remained gated. The evidence is recorded in [#495](https://github.com/thilllon/nestjs-kit/issues/495) and [#477](https://github.com/thilllon/nestjs-kit/issues/477).
-
 ## Provenance source revision
 
 pnpm [records `GITHUB_SHA` as the signed source revision](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/provenance_gen.rs#L228-L267). Checking out a newly merged version commit inside an older workflow run does not change that event SHA. The separate publication run ensures the signed source revision and the commit used to build the npm archive agree.
-
-Historical releases can retain the earlier mismatch; immutable npm versions and their attestations are not rewritten. [Issue #502](https://github.com/thilllon/nestjs-kit/issues/502) records the evidence and verification of the corrected flow on the next requested major releases.
