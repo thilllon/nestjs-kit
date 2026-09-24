@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { DiscoveryService, ModuleRef, Reflector } from "@nestjs/core";
 import type { TestingModuleBuilder } from "@nestjs/testing";
+import type { BetterAuthOptions } from "better-auth";
 import type {
   AuthorizationPolicy,
   AuthPrincipalBase,
@@ -40,6 +41,7 @@ import {
   MOUNT_COORDINATOR,
   ROUTE_PLANNER,
   TRANSPORT_REGISTRY,
+  WS_CONNECTION_AUTH,
 } from "./auth-tokens.js";
 import type { AuthLike, AuthPrincipal, PrincipalKind } from "./auth-types.js";
 import { allow, deny } from "./authorization-evaluator.js";
@@ -262,12 +264,45 @@ export interface TransportConformanceOptions {
     fields: readonly (keyof GraphFixtures["fields"])[],
     headers: HeadersInit,
   ): Promise<GraphResult>;
+  /**
+   * Connection shapes (WebSocket gateways): opens ONE connection whose handshake carries `headers`, sends one message to
+   * each given fixture handler on it in order, each after the previous one answered, and returns every outcome. Required
+   * when the transport's browser leg is its connection's handshake: the T-ws-origin-* cases then fail without it, and
+   * are skipped with a reason for other transports.
+   */
+  invokeConnection?(
+    app: INestApplication,
+    handlers: readonly Exclude<keyof TransportFixtures, "graph">[],
+    headers: HeadersInit,
+  ): Promise<TransportInvocationResult[]>;
+  /**
+   * Connection shapes: authenticates one connection whose handshake carries `headers` through the app's connection-time
+   * authentication (WS_CONNECTION_AUTH), requiring a principal: `ok` when one authenticates, otherwise the failure
+   * (401 without credentials). Required when the app provides WS_CONNECTION_AUTH: the T-ws-origin-* cases then fail
+   * without it.
+   */
+  authenticateConnection?(
+    app: INestApplication,
+    headers: HeadersInit,
+  ): Promise<ConnectionAuthenticationResult>;
   expectCookieCapable: boolean;
-  /** Whether the transport has a browser leg (false for RPC): enables the T-csrf-* cases. */
+  /**
+   * Whether the transport describes a browser leg (false for RPC; T-selection fails a false claim). A leg that follows each
+   * operation enables the T-csrf-* cases; a leg that is the connection's handshake, shared by the connection's messages and
+   * enforced on every one, enables the T-ws-origin-* cases instead. The kit reads which from the transport.
+   */
   expectBrowserLeg: boolean;
 }
 
+/** The outcome of connection-time authentication (authenticateConnection). */
+export interface ConnectionAuthenticationResult {
+  ok: boolean;
+  error?: TransportInvocationResult["error"];
+}
+
 const KEY_SOURCE_ID = "nestjs-slightly-better-auth:conformance-api-key";
+/** An origin only a function-valued trustedOrigins returns (T-ws-origin-*). */
+const FUNCTION_TRUSTED_ORIGIN = "https://function-trusted.example";
 const ALLOWED_ORGS = new Set(["org-a", "org-a2"]);
 const SESSION_KIND = "session" as PrincipalKind;
 const API_KEY_KIND = "api-key" as PrincipalKind;
@@ -731,11 +766,19 @@ interface KitEnv {
   readonly keys: KitKeys;
   readonly identity: KitIdentity;
   readonly source: PrincipalSource<AuthPrincipalBase>;
+  /**
+   * The transport's browser leg is its connection's handshake: a browser always sends Origin there, so the kit's cookie
+   * credential carries the trusted base URL as Origin, as a page of that origin does.
+   */
+  readonly connectionLeg: boolean;
   sessionCookieName(): Promise<string>;
 }
 
-async function environment(): Promise<KitEnv> {
-  const auth = createConformanceAuth();
+async function environment(
+  authOptions: Omit<BetterAuthOptions, "database"> = {},
+  connectionLeg = false,
+): Promise<KitEnv> {
+  const auth = createConformanceAuth(authOptions);
   const probe = await probeOf(auth);
   const identity = await kitIdentity(auth);
   const keys: KitKeys = {
@@ -751,6 +794,7 @@ async function environment(): Promise<KitEnv> {
     keys,
     identity,
     source: keySource(keys),
+    connectionLeg,
     async sessionCookieName() {
       const context = (await auth.$context) as {
         authCookies: { sessionToken: { name: string } };
@@ -920,37 +964,77 @@ async function transportHas(
   return found;
 }
 
+/**
+ * Whether the transport's browser leg is its connection's handshake: the leg of an anonymous `optional` (read) invocation
+ * outlives the invocation's logical request, as a WebSocket's handshake does. A cross-site page reads every reply on such
+ * a connection, so the T-ws-origin-* cases expect every message enforced. Other legs follow each operation (HTTP
+ * requests, GraphQL over HTTP).
+ */
+async function connectionShaped(
+  options: TransportConformanceOptions,
+): Promise<boolean> {
+  let shaped = false;
+  await withApp(
+    options,
+    await environment(),
+    async ({ app, instrumentation }) => {
+      succeeded(
+        await options.invoke(app, "optional", {}),
+        "an anonymous optional invocation",
+      );
+      const [context] = instrumentation.contexts;
+      assert.ok(context, "the guard described no invocation");
+      const call = app
+        .get<TransportRegistry>(TRANSPORT_REGISTRY, { strict: false })
+        .describe(context, resolvedTransport(app, options.transport));
+      const browser = call.browser;
+      shaped = browser !== undefined && browser.key !== call.key;
+    },
+  );
+  return shaped;
+}
+
 function sessionReads(probe: ProbeState, from: number): number {
   return probe.calls.slice(from).filter((path) => path === "/get-session")
     .length;
 }
 
 function denied(
-  result: TransportInvocationResult,
+  result: Pick<TransportInvocationResult, "ok" | "body" | "error">,
   status: number,
   reason?: string,
+  label = "",
 ): void {
+  const prefix = label ? `${label}: ` : "";
   assert.equal(
     result.ok,
     false,
-    `expected a ${status} denial, got success: ${JSON.stringify(result.body)}`,
+    `${prefix}expected a ${status} denial, got success: ${JSON.stringify(result.body)}`,
   );
   assert.equal(
     result.error?.statusCode,
     status,
-    `expected ${status}, got ${JSON.stringify(result.error)}`,
+    `${prefix}expected ${status}, got ${JSON.stringify(result.error)}`,
   );
   if (reason !== undefined) {
-    assert.equal(result.error?.reason, reason, JSON.stringify(result.error));
+    assert.equal(
+      result.error?.reason,
+      reason,
+      `${prefix}${JSON.stringify(result.error)}`,
+    );
   }
 }
 
-function internal(result: TransportInvocationResult): void {
-  assert.equal(result.ok, false, "expected a generic internal error");
+function internal(
+  result: Pick<TransportInvocationResult, "ok" | "error">,
+  label = "",
+): void {
+  const prefix = label ? `${label}: ` : "";
+  assert.equal(result.ok, false, `${prefix}expected a generic internal error`);
   const status = result.error?.statusCode;
   assert.ok(
     status === undefined || status >= 500,
-    `expected a 5xx, got ${JSON.stringify(result.error)}`,
+    `${prefix}expected a 5xx, got ${JSON.stringify(result.error)}`,
   );
 }
 
@@ -998,18 +1082,40 @@ export function transportConformance(
   options: TransportConformanceOptions,
 ): ConformanceCase[] {
   const cases: ConformanceCase[] = [];
+  let legShape: Promise<boolean> | undefined;
+  /** Whether the browser leg is the connection's handshake, read once per kit from the transport. */
+  const connectionLeg = async (): Promise<boolean> => {
+    if (!options.expectBrowserLeg) {
+      return false;
+    }
+    legShape ??= connectionShaped(options);
+    return legShape;
+  };
+  const kitEnvironment = async (
+    authOptions?: Omit<BetterAuthOptions, "database">,
+  ): Promise<KitEnv> => environment(authOptions, await connectionLeg());
+  const addRun = (
+    id: string,
+    title: string,
+    run: () => Promise<ConformanceOutcome>,
+    skip?: string,
+  ) => cases.push(conformanceCase(id, title, run, skip));
   const add = (
     id: string,
     title: string,
     run: (env: KitEnv) => Promise<ConformanceOutcome>,
     skip?: string,
-  ) =>
-    cases.push(
-      conformanceCase(id, title, async () => run(await environment()), skip),
-    );
+  ) => addRun(id, title, async () => run(await kitEnvironment()), skip);
   const noBrowser = options.expectBrowserLeg
     ? undefined
     : "the transport declares no browser leg";
+  /** Undefined when the browser leg follows each operation; a skip when it is the connection's handshake. */
+  const operationLeg = async (): Promise<ConformanceSkip | undefined> =>
+    (await connectionLeg())
+      ? conformanceSkip(
+          "the browser leg is the connection's handshake, enforced on every message (T-ws-origin-* cover it)",
+        )
+      : undefined;
   const noLineage = "the transport has no lineage and gives no invokeTwice";
   const noNesting = "the transport nests no handlers and gives no invokeGraph";
   const twiceSkip =
@@ -1057,23 +1163,35 @@ export function transportConformance(
     [],
     ["guards", "interceptors"],
   ];
-  const cookie = (env: KitEnv) => ({ cookie: env.identity.cookie });
+  const cookie = (env: KitEnv) => ({
+    cookie: env.identity.cookie,
+    ...(env.connectionLeg ? { origin: KIT_BASE_URL } : {}),
+  });
 
   add(
     "T-selection",
     "handles() accepts its contexts with and without credentials and rejects foreign ones",
     (env) =>
       withApp(options, env, async ({ app, instrumentation }) => {
+        const transport = resolvedTransport(app, options.transport);
+        const registry = app.get<TransportRegistry>(TRANSPORT_REGISTRY, {
+          strict: false,
+        });
         succeeded(await options.invoke(app, "optional", {}));
+        if (!options.expectBrowserLeg) {
+          for (const context of [...instrumentation.contexts]) {
+            assert.equal(
+              registry.describe(context, transport).browser,
+              undefined,
+              "the transport describes a browser leg, so expectBrowserLeg must be true",
+            );
+          }
+        }
         succeeded(await options.invoke(app, "optional", cookie(env)));
         assert.ok(
           instrumentation.contexts.length >= 2,
           "the guard described no invocation",
         );
-        const transport = resolvedTransport(app, options.transport);
-        const registry = app.get<TransportRegistry>(TRANSPORT_REGISTRY, {
-          strict: false,
-        });
         for (const context of instrumentation.contexts) {
           assert.equal(transport.handles(context), true);
           assert.equal(
@@ -1291,7 +1409,8 @@ export function transportConformance(
   add(
     "T-csrf-http-unsafe",
     "an unsafe cookie operation needs a trusted origin, checked before any session read",
-    (env) =>
+    async (env) =>
+      (await operationLeg()) ??
       withApp(options, env, async ({ app }) => {
         const from = env.probe.calls.length;
         denied(
@@ -1337,7 +1456,8 @@ export function transportConformance(
   add(
     "T-csrf-http-cookie-plus-token",
     "a cookie plus a bearer token from an untrusted origin is still denied",
-    (env) =>
+    async (env) =>
+      (await operationLeg()) ??
       withApp(options, env, async ({ app }) => {
         for (const token of ["a.b", env.identity.token]) {
           denied(
@@ -1357,6 +1477,10 @@ export function transportConformance(
     "T-csrf-login-proxy",
     "a forwarding login proxy follows Better Auth's form rule, and service forwarding needs a declaration",
     async (env) => {
+      const skip = await operationLeg();
+      if (skip) {
+        return skip;
+      }
       const user = await kitIdentity(env.auth, { password: true });
       const credentials = { email: user.email, password: user.password };
       await withApp(options, env, async ({ app }) => {
@@ -1480,6 +1604,10 @@ export function transportConformance(
     "T-csrf-safe-methods",
     "safe cookie reads are not denied by origin validation, while forwarding enforces form mode without cookies",
     async (env) => {
+      const skip = await operationLeg();
+      if (skip) {
+        return skip;
+      }
       const user = await kitIdentity(env.auth, { password: true });
       await withApp(options, env, async ({ app }) => {
         for (const headers of [
@@ -1513,6 +1641,330 @@ export function transportConformance(
           signIns,
           "a cross-site safe operation of a forwarding handler reached Better Auth",
         );
+      });
+    },
+    noBrowser,
+  );
+  /** Guarded fixtures a connection case sends, one message each, on one connection. */
+  const guardedMessages: readonly FixtureName[] = [
+    "required",
+    "optional",
+    "acceptsApiKey",
+  ];
+  /** Undefined when the browser leg is the connection's handshake and invokeConnection is given; fails without it. */
+  const connectionReady = async (): Promise<ConformanceSkip | undefined> => {
+    if (!(await connectionLeg())) {
+      return conformanceSkip(
+        "the browser leg follows each operation (T-csrf-* cover it)",
+      );
+    }
+    assert.ok(
+      options.invokeConnection,
+      "the transport's browser leg is its connection's handshake, so invokeConnection is required",
+    );
+    return undefined;
+  };
+  /** Whether the kit checks connection-time authentication: required when the app provides WS_CONNECTION_AUTH. */
+  const authenticatesConnections = (app: INestApplication): boolean => {
+    let provided: boolean;
+    try {
+      app.get(WS_CONNECTION_AUTH, { strict: false });
+      provided = true;
+    } catch {
+      provided = false;
+    }
+    assert.ok(
+      !provided || options.authenticateConnection,
+      "the app provides WS_CONNECTION_AUTH, so authenticateConnection is required",
+    );
+    return options.authenticateConnection !== undefined;
+  };
+  /** Every guarded message of one connection, and connection-time authentication, answer the denial. */
+  const deniedOnConnection = async (
+    app: INestApplication,
+    headers: Record<string, string>,
+    status: number,
+    reason: string,
+    label: string,
+  ) => {
+    const results = await options.invokeConnection!(
+      app,
+      guardedMessages,
+      headers,
+    );
+    assert.equal(results.length, guardedMessages.length, label);
+    for (const [index, result] of results.entries()) {
+      denied(result, status, reason, `${label}, ${guardedMessages[index]}`);
+    }
+    if (authenticatesConnections(app)) {
+      denied(
+        await options.authenticateConnection!(app, headers),
+        status,
+        reason,
+        `${label}, connection-time authentication`,
+      );
+    }
+  };
+  /** Every guarded message of one connection reads the user, and connection-time authentication succeeds. */
+  const allowedOnConnection = async (
+    app: INestApplication,
+    headers: Record<string, string>,
+    userId: string,
+    label: string,
+  ) => {
+    const results = await options.invokeConnection!(
+      app,
+      guardedMessages,
+      headers,
+    );
+    assert.equal(results.length, guardedMessages.length, label);
+    for (const [index, result] of results.entries()) {
+      succeeded(result, `${label}, ${guardedMessages[index]}`);
+      assert.equal(principalOf(result)?.userId, userId, label);
+    }
+    if (authenticatesConnections(app)) {
+      const connection = await options.authenticateConnection!(app, headers);
+      assert.equal(
+        connection.ok,
+        true,
+        `${label}, connection-time authentication: ${JSON.stringify(connection.error)}`,
+      );
+    }
+  };
+  addRun(
+    "T-ws-origin-untrusted",
+    "a handshake with a cookie and an untrusted or missing Origin is denied on every message and at connection time, a token-only handshake is allowed, and a function-valued trustedOrigins runs once per connection",
+    async () => {
+      const skip = await connectionReady();
+      if (skip) {
+        return skip;
+      }
+      const requests: (Request | undefined)[] = [];
+      const env = await kitEnvironment({
+        trustedOrigins: (request?: Request) => {
+          requests.push(request);
+          return [FUNCTION_TRUSTED_ORIGIN];
+        },
+      });
+      await withApp(options, env, async ({ app }) => {
+        const session = env.identity.cookie;
+        await deniedOnConnection(
+          app,
+          { cookie: session, origin: UNTRUSTED_ORIGIN },
+          403,
+          "INVALID_ORIGIN",
+          "a cookie handshake from an untrusted Origin",
+        );
+        await deniedOnConnection(
+          app,
+          { cookie: session },
+          403,
+          "MISSING_OR_NULL_ORIGIN",
+          "a cookie handshake without Origin",
+        );
+        for (const origin of [KIT_BASE_URL, UNTRUSTED_ORIGIN]) {
+          await allowedOnConnection(
+            app,
+            { authorization: `Bearer ${env.identity.token}`, origin },
+            env.identity.userId,
+            `a token-only handshake from ${origin}`,
+          );
+        }
+        const from = requests.length;
+        const results = await options.invokeConnection!(app, guardedMessages, {
+          cookie: session,
+          origin: FUNCTION_TRUSTED_ORIGIN,
+        });
+        for (const result of results) {
+          succeeded(
+            result,
+            "a cookie handshake from a function-trusted Origin",
+          );
+        }
+        assert.equal(
+          requests.length - from,
+          1,
+          `trustedOrigins() ran ${requests.length - from} times for one connection of ${guardedMessages.length} messages`,
+        );
+      });
+    },
+    noBrowser,
+  );
+  add(
+    "T-ws-origin-junk-token",
+    "a cookie plus a junk or valid bearer token from an untrusted Origin is denied on every message and at connection time",
+    async (env) =>
+      (await connectionReady()) ??
+      withApp(options, env, async ({ app }) => {
+        for (const [token, kind] of [
+          ["a.b", "junk"],
+          [env.identity.token, "valid"],
+        ] as const) {
+          await deniedOnConnection(
+            app,
+            {
+              cookie: env.identity.cookie,
+              authorization: `Bearer ${token}`,
+              origin: UNTRUSTED_ORIGIN,
+            },
+            403,
+            "INVALID_ORIGIN",
+            `a cookie plus a ${kind} bearer token from an untrusted Origin`,
+          );
+        }
+      }),
+    noBrowser,
+  );
+  const host = new URL(KIT_BASE_URL).host;
+  const dynamicBaseURL = { allowedHosts: [host], fallback: KIT_BASE_URL };
+  addRun(
+    "T-ws-origin-dynamic-baseurl",
+    "with a dynamic baseURL, a same-origin cookie handshake is allowed without a 500 and a cross-site one is denied",
+    async () => {
+      const skip = await connectionReady();
+      if (skip) {
+        return skip;
+      }
+      const env = await kitEnvironment({ baseURL: dynamicBaseURL });
+      await withApp(options, env, async ({ app }) => {
+        await allowedOnConnection(
+          app,
+          { cookie: env.identity.cookie, host, origin: KIT_BASE_URL },
+          env.identity.userId,
+          "a same-origin cookie handshake",
+        );
+        await deniedOnConnection(
+          app,
+          { cookie: env.identity.cookie, host, origin: UNTRUSTED_ORIGIN },
+          403,
+          "INVALID_ORIGIN",
+          "a cross-site cookie handshake",
+        );
+      });
+    },
+    noBrowser,
+  );
+  addRun(
+    "T-ws-origin-forwarded-host",
+    "forwarded host and protocol headers never make an untrusted Origin the handshake's own, with a dynamic or unset baseURL and either trustedProxyHeaders",
+    async () => {
+      const skip = await connectionReady();
+      if (skip) {
+        return skip;
+      }
+      const spoof = {
+        host,
+        origin: UNTRUSTED_ORIGIN,
+        "x-forwarded-host": new URL(UNTRUSTED_ORIGIN).host,
+        "x-forwarded-proto": "https",
+      };
+      for (const baseURL of [dynamicBaseURL, undefined]) {
+        for (const trustedProxyHeaders of [false, true]) {
+          const env = await kitEnvironment({
+            baseURL,
+            advanced: { trustedProxyHeaders },
+          });
+          const label = `${baseURL ? "dynamic" : "unset"} baseURL, trustedProxyHeaders ${trustedProxyHeaders}`;
+          await withApp(options, env, async ({ app }) => {
+            await deniedOnConnection(
+              app,
+              { cookie: env.identity.cookie, ...spoof },
+              403,
+              "INVALID_ORIGIN",
+              `${label}: a forwarded-host spoof`,
+            );
+            await allowedOnConnection(
+              app,
+              { cookie: env.identity.cookie, host, origin: KIT_BASE_URL },
+              env.identity.userId,
+              `${label}: a same-origin handshake`,
+            );
+          });
+        }
+      }
+    },
+    noBrowser,
+  );
+  addRun(
+    "T-ws-origin-function-trusted-origins",
+    "a function-valued trustedOrigins receives the handshake's absolute URL, and a throwing one answers the generic internal error",
+    async () => {
+      const skip = await connectionReady();
+      if (skip) {
+        return skip;
+      }
+      const requests: (Request | undefined)[] = [];
+      let outage: Error | undefined;
+      const env = await kitEnvironment({
+        trustedOrigins: (request?: Request) => {
+          requests.push(request);
+          if (outage) {
+            throw outage;
+          }
+          return [FUNCTION_TRUSTED_ORIGIN];
+        },
+      });
+      await withApp(options, env, async ({ app }) => {
+        const headers = {
+          cookie: env.identity.cookie,
+          host,
+          origin: FUNCTION_TRUSTED_ORIGIN,
+        };
+        const from = requests.length;
+        await allowedOnConnection(
+          app,
+          headers,
+          env.identity.userId,
+          "a cookie handshake from a function-trusted Origin",
+        );
+        const received = requests.slice(from);
+        assert.ok(received.length > 0, "trustedOrigins() was not called");
+        for (const request of received) {
+          assert.ok(
+            request instanceof Request,
+            "trustedOrigins() received no Request",
+          );
+          assert.equal(
+            new URL(request.url).origin,
+            KIT_BASE_URL,
+            `trustedOrigins() received ${request.url}, not the handshake's absolute URL`,
+          );
+        }
+        const secret = `trusted-origins-outage-${globalThis.crypto.randomUUID()}`;
+        outage = new Error(secret);
+        try {
+          const results = await options.invokeConnection!(
+            app,
+            guardedMessages,
+            headers,
+          );
+          for (const [index, result] of results.entries()) {
+            internal(
+              result,
+              `a throwing trustedOrigins(), ${guardedMessages[index]}`,
+            );
+            assert.ok(
+              !JSON.stringify(result.error ?? {}).includes(secret),
+              "the client saw the trustedOrigins() error",
+            );
+          }
+          if (authenticatesConnections(app)) {
+            const connection = await options.authenticateConnection!(
+              app,
+              headers,
+            );
+            internal(
+              connection,
+              "a throwing trustedOrigins(), connection-time authentication",
+            );
+            assert.ok(
+              !JSON.stringify(connection.error ?? {}).includes(secret),
+              "the client saw the trustedOrigins() error at connection time",
+            );
+          }
+        } finally {
+          outage = undefined;
+        }
       });
     },
     noBrowser,

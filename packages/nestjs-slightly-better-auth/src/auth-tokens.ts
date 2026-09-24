@@ -89,6 +89,10 @@ export const DB_HOOK_METADATA = Symbol.for(
   "nestjs-slightly-better-auth:db-hook",
 );
 export const AUTH_ENHANCER = Symbol.for("nestjs-slightly-better-auth:enhancer");
+/** Connection-time WebSocket authentication, provided by the socket.io and ws transport definitions. */
+export const WS_CONNECTION_AUTH: unique symbol = Symbol.for(
+  "nestjs-slightly-better-auth:ws-connection-auth",
+);
 
 export function getPrincipalSourcesToken(instance: string): symbol {
   return Symbol.for(

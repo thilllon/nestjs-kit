@@ -18,9 +18,7 @@ import { readErrorProperty } from "./error-redactor.js";
 import type { InstanceLookup } from "./instance-registry.js";
 import type { TransportRegistry } from "./transport-registry.js";
 
-export const WS_CONNECTION_AUTH: unique symbol = Symbol.for(
-  "nestjs-slightly-better-auth:ws-connection-auth",
-);
+export { WS_CONNECTION_AUTH } from "./auth-tokens.js";
 export function wsCloseCodeFor(failure: AuthFailure): 4401 | 4403 | 4429 {
   return failure.status === 401 ? 4401 : failure.status === 403 ? 4403 : 4429;
 }

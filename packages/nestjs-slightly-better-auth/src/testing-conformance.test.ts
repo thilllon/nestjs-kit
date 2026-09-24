@@ -63,6 +63,8 @@ const REFERENCE_HANDLERS = Symbol("reference-handlers");
 interface ReferenceOperation {
   readonly headers: Headers;
   readonly setCookies: string[];
+  /** The connection that carries the operation, when the transport describes a connection-shaped browser leg. */
+  readonly connection: object;
 }
 interface ReferenceMessage {
   readonly input: Record<string, unknown>;
@@ -78,7 +80,8 @@ class ReferenceDenial extends IntrinsicException {
 /**
  * An in-process transport with a custom context type: one operation (the logical request) carries one or more
  * invocations, like aliased fields. `sharedInvocation` reproduces the defect of reusing the operation as the invocation;
- * `readsWithoutBrowserLeg` the defect of describing no browser leg for safe operations.
+ * `readsWithoutBrowserLeg` the defect of describing no browser leg for safe operations. `connectionLeg` describes the
+ * operation's connection as its browser leg, like a WebSocket handshake.
  */
 class ReferenceTransport implements AuthTransport {
   readonly id = "reference";
@@ -87,6 +90,7 @@ class ReferenceTransport implements AuthTransport {
     private readonly defects: {
       sharedInvocation?: boolean;
       readsWithoutBrowserLeg?: boolean;
+      connectionLeg?: boolean;
     } = {},
   ) {}
 
@@ -101,6 +105,7 @@ class ReferenceTransport implements AuthTransport {
     ];
     const url = "http://localhost:3000/reference";
     const readsWithoutBrowserLeg = this.defects.readsWithoutBrowserLeg;
+    const leg = this.defects.connectionLeg ? operation.connection : operation;
     return {
       key: operation,
       invocation: this.defects.sharedInvocation ? operation : message,
@@ -129,7 +134,7 @@ class ReferenceTransport implements AuthTransport {
           enforce: message.operation === "unsafe",
           headers: () => new Headers(operation.headers),
           url,
-          key: operation,
+          key: leg,
         };
       },
     };
@@ -355,6 +360,7 @@ function referenceHarness(
       const operation: ReferenceOperation = {
         headers: new Headers(headers),
         setCookies: [],
+        connection: {},
       };
       const { fixtures } = dispatchers.get(app)!;
       const results = await Promise.all(
@@ -379,6 +385,7 @@ function referenceHarness(
       const operation: ReferenceOperation = {
         headers: new Headers(headers),
         setCookies: [],
+        connection: {},
       };
       const [first, second] = await Promise.all(
         inputs.map((input) =>
@@ -426,6 +433,46 @@ describe("transport kit mutations", () => {
     );
     await expect(caseById(cases, "T-csrf-safe-methods").run()).rejects.toThrow(
       /expected a 403 denial/,
+    );
+  });
+
+  it("decides the origin cases from the transport's browser leg, not from the helpers", async () => {
+    const cases = transportConformance(
+      referenceHarness(new ReferenceTransport({ connectionLeg: true })),
+    );
+    for (const id of [
+      "T-ws-origin-untrusted",
+      "T-ws-origin-junk-token",
+      "T-ws-origin-dynamic-baseurl",
+      "T-ws-origin-forwarded-host",
+      "T-ws-origin-function-trusted-origins",
+    ]) {
+      expect(caseById(cases, id).skip).toBeUndefined();
+      await expect(caseById(cases, id).run()).rejects.toThrow(
+        /browser leg is its connection's handshake, so invokeConnection is required/,
+      );
+    }
+    for (const id of [
+      "T-csrf-http-unsafe",
+      "T-csrf-http-cookie-plus-token",
+      "T-csrf-login-proxy",
+      "T-csrf-safe-methods",
+    ]) {
+      await expect(caseById(cases, id).run()).resolves.toEqual({
+        skipped:
+          "the browser leg is the connection's handshake, enforced on every message (T-ws-origin-* cover it)",
+      });
+    }
+    await expect(
+      caseById(
+        transportConformance({
+          ...referenceHarness(new ReferenceTransport()),
+          expectBrowserLeg: false,
+        }),
+        "T-selection",
+      ).run(),
+    ).rejects.toThrow(
+      /describes a browser leg, so expectBrowserLeg must be true/,
     );
   });
 
