@@ -57,7 +57,11 @@ const pluginFiles = [
   "plugin.ts",
 ];
 /** Unpublished fixtures that only tests import. */
-const testSupport = ["jwt-extension-fixture.ts", "test-fixtures.ts"];
+const testSupport = [
+  "jwt-extension-fixture.ts",
+  "kafka-fixture.ts",
+  "test-fixtures.ts",
+];
 /**
  * Published test utilities (design v7 §2.2.16, §14.1 and §14.8). The conformance kits boot real
  * modules against their own Better Auth instance, so they reach the composition root, the plugin

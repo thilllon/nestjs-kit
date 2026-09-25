@@ -20,7 +20,6 @@ import {
 } from "@nestjs/common";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import {
-  ClientKafka,
   type ClientOptions,
   type ClientProxy,
   ClientProxyFactory,
@@ -54,6 +53,11 @@ import {
   transportConformance,
 } from "./conformance-transport.js";
 import { expressPlatform } from "./express.js";
+import {
+  kafkaTestConsumer,
+  ReadyClientKafka,
+  ReadyServerKafka,
+} from "./kafka-fixture.js";
 import {
   kafkaCarrier,
   mqttCarrier,
@@ -102,6 +106,8 @@ interface RpcClient {
     input: Record<string, unknown>,
     headers: Headers,
   ): Promise<TransportInvocationResult>;
+  /** Resolves once the connected client receives every reply produced from now on (broker consumers). */
+  ready?(timeoutMs: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -110,6 +116,8 @@ interface RpcServer {
   readonly options: MicroserviceOptions;
   readonly port?: () => number;
   readonly definition?: PackageDefinition;
+  /** Resolves once the started server receives every request produced from now on (broker consumers). */
+  readonly ready?: (timeoutMs: number) => Promise<void>;
 }
 
 /** One RPC transport family: its credential carrier, handler decorator, server and client. */
@@ -488,8 +496,9 @@ function redis(): RpcFamily {
 }
 
 /**
- * Kafka topics are created once per kit run and shared by its boots, whose server and client consumer groups are
- * their own: a new group starts at the latest offset, so no boot reads another boot's messages.
+ * Kafka topics are created once per kit run and shared by its boots. Each boot's server joins its own consumer group,
+ * which starts at the log end once ready, so no boot reads another boot's requests. One client serves every boot of
+ * the run, so its reply consumer group joins once; correlation ids keep the boots' replies apart.
  */
 function kafka(): RpcFamily {
   const run = `nsba-kit-${randomUUID()}`;
@@ -500,6 +509,7 @@ function kafka(): RpcFamily {
     logLevel: logLevel.NOTHING,
   }).admin();
   let topics: Promise<string[]> | undefined;
+  let shared: Promise<ReadyClientKafka> | undefined;
   const pattern = (fixture: string) => `${run}.${fixture}`;
   const ensureTopics = (fixtures: readonly string[]) => {
     topics ??= (async () => {
@@ -520,46 +530,69 @@ function kafka(): RpcFamily {
     })();
     return topics;
   };
-  const options = (boot: string): MicroserviceOptions => ({
-    transport: Transport.KAFKA,
-    options: {
-      client: { brokers, clientId: boot, logLevel: logLevel.NOTHING },
-      consumer: { groupId: boot },
-      subscribe: { fromBeginning: false },
-    },
+  const options = (id: string) => ({
+    client: { brokers, clientId: id, logLevel: logLevel.NOTHING },
+    consumer: { groupId: id, ...kafkaTestConsumer },
+    subscribe: { fromBeginning: false },
   });
+  const sharedClient = (fixtures: Iterable<string>) => {
+    shared ??= (async () => {
+      const client = new ReadyClientKafka(options(`${run}-client`));
+      for (const fixture of fixtures) {
+        client.subscribeToResponseOf(pattern(fixture));
+      }
+      try {
+        await client.connect();
+      } catch (error) {
+        // The next boot connects a new client instead of repeating this failure.
+        shared = undefined;
+        await client.close();
+        throw error;
+      }
+      return client;
+    })();
+    return shared;
+  };
   return {
     carriers: [kafkaCarrier()],
     handler: (_boot, fixture) => MessagePattern(pattern(fixture)),
     async server(boot, fixtures) {
       await ensureTopics(fixtures);
-      return { options: options(boot) };
+      const strategy = new ReadyServerKafka(options(boot));
+      return {
+        options: { strategy },
+        ready: (timeoutMs) => strategy.ready(timeoutMs),
+      };
     },
     async connect(boot) {
-      const client = ClientProxyFactory.create(
-        options(`${boot.id}-client`) as ClientOptions,
-      ) as ClientKafka;
-      for (const fixture of boot.handlers.keys()) {
-        client.subscribeToResponseOf(pattern(fixture));
-      }
-      await client.connect();
-      return proxyClient(
-        client as unknown as ClientProxy,
-        pattern,
-        (data, headers) => ({
-          value: data,
-          headers: Object.fromEntries(
-            [...headers].map(([name, value]) => [name, Buffer.from(value)]),
-          ),
-        }),
-      );
+      const client = await sharedClient(boot.handlers.keys());
+      return {
+        ...proxyClient(
+          client as unknown as ClientProxy,
+          pattern,
+          (data, headers) => ({
+            value: data,
+            headers: Object.fromEntries(
+              [...headers].map(([name, value]) => [name, Buffer.from(value)]),
+            ),
+          }),
+        ),
+        ready: (timeoutMs) => client.ready(timeoutMs),
+        // release() closes the shared client after the run.
+        close: async () => undefined,
+      };
     },
     async release() {
-      if (topics) {
-        try {
-          await admin.deleteTopics({ topics: await topics });
-        } finally {
-          await admin.disconnect();
+      try {
+        const client = await shared?.catch(() => undefined);
+        await client?.close();
+      } finally {
+        if (topics) {
+          try {
+            await admin.deleteTopics({ topics: await topics });
+          } finally {
+            await admin.disconnect();
+          }
         }
       }
     },
@@ -633,9 +666,24 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
   );
   const client = (app: INestApplication): Promise<RpcClient> => {
     const boot = boots.get(app)!;
-    boot.state.client ??= within(boot.start(), "the transport server").then(
-      () => within(family.connect(boot), "the client connection"),
-    );
+    boot.state.client ??= (async () => {
+      await within(boot.start(), "the transport server");
+      const connected = await within(
+        family.connect(boot),
+        "the client connection",
+      );
+      try {
+        // A broker consumer can join its group and fix its start offsets after listen() and connect() resolve.
+        await Promise.all([
+          boot.state.server?.ready?.(REPLY_TIMEOUT_MS),
+          connected.ready?.(REPLY_TIMEOUT_MS),
+        ]);
+      } catch (error) {
+        await connected.close();
+        throw error;
+      }
+      return connected;
+    })();
     return boot.state.client;
   };
   return {
@@ -744,7 +792,7 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
 
 /**
  * Runs the kit, with the family's inapplicable cases skipped for the given reasons. Broker cases get a longer timeout:
- * each serving boot connects a server and a client to the broker (Kafka joins two consumer groups).
+ * each serving boot connects to the broker, and a Kafka boot waits until its consumer groups are ready.
  */
 function runFamily(
   family: RpcFamily,
