@@ -577,7 +577,8 @@ function kafka(): RpcFamily {
       };
     },
     async connect(boot) {
-      const client = await sharedClient(boot.handlers.keys());
+      const connecting = sharedClient(boot.handlers.keys());
+      const client = await connecting;
       return {
         ...proxyClient(
           client as unknown as ClientProxy,
@@ -589,7 +590,18 @@ function kafka(): RpcFamily {
             ),
           }),
         ),
-        ready: (timeoutMs) => client.ready(timeoutMs),
+        async ready(timeoutMs) {
+          try {
+            await client.ready(timeoutMs);
+          } catch (error) {
+            // The next boot connects a new client instead of reusing one that is not ready.
+            if (shared === connecting) {
+              shared = undefined;
+              await client.close();
+            }
+            throw error;
+          }
+        },
         // release() closes the shared client after the run.
         close: async () => undefined,
       };
