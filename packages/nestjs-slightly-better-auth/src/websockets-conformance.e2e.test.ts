@@ -3,12 +3,13 @@ import {
   Module,
   type ExecutionContext,
   type INestApplication,
+  type LoggerService,
 } from "@nestjs/common";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import { IoAdapter } from "@nestjs/platform-socket.io";
 import { WsAdapter } from "@nestjs/platform-ws";
-import { Test } from "@nestjs/testing";
+import { Test, type TestingModuleBuilder } from "@nestjs/testing";
 import {
   MessageBody,
   type OnGatewayConnection,
@@ -19,7 +20,7 @@ import {
 } from "@nestjs/websockets";
 import type { Namespace } from "socket.io";
 import { io, type Socket } from "socket.io-client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type {
   AuthTransport,
@@ -34,6 +35,7 @@ import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { BetterAuthService } from "./auth-service.js";
 import { runConformance } from "./conformance-fixtures.js";
+import type { PolicyDelivery } from "./conformance-policy-harness.js";
 import {
   type ConnectionAuthenticationResult,
   type FixtureHandler,
@@ -45,6 +47,13 @@ import {
 } from "./conformance-transport.js";
 import { readErrorProperty } from "./error-redactor.js";
 import { expressPlatform } from "./express.js";
+import { orgPermissionPolicy, organizationRef } from "./organization.js";
+import {
+  adminPolicyOptions,
+  organizationPolicyOptions,
+  policyDeliveryCases,
+} from "./policy-kit-fixtures.js";
+import { RequestScope } from "./request-scope.js";
 import {
   socketIoTransport,
   UPGRADE_REQUEST,
@@ -549,6 +558,32 @@ async function wsAuthenticate(
 
 const apps = new WeakMap<object, string>();
 
+/** Compiles `builder`, serves its gateways with the flavor's adapter on a listening Express app and records its URL. */
+async function listen(
+  flavor: Flavor,
+  builder: TestingModuleBuilder,
+  logger: LoggerService | false,
+): Promise<INestApplication> {
+  const moduleRef = await builder.compile();
+  const app = moduleRef.createNestApplication(new ExpressAdapter(), {
+    logger,
+  });
+  app.useWebSocketAdapter(
+    flavor === "ws"
+      ? new (withUpgradeRequest(WsAdapter))(app)
+      : new IoAdapter(app),
+  );
+  try {
+    await app.init();
+    await app.listen(0, "127.0.0.1");
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
+  apps.set(app, await app.getUrl());
+  return app;
+}
+
 /**
  * A built-in WebSocket transport, exposed through a real gateway on a listening Express app: one connection per
  * invocation, handshake headers from the kit's headers, bearer tokens where browsers put them.
@@ -617,24 +652,7 @@ function websocketHarness(
       if (options.override) {
         builder = options.override(builder);
       }
-      const moduleRef = await builder.compile();
-      const app = moduleRef.createNestApplication(new ExpressAdapter(), {
-        logger: options.logger ?? false,
-      });
-      app.useWebSocketAdapter(
-        flavor === "ws"
-          ? new (withUpgradeRequest(WsAdapter))(app)
-          : new IoAdapter(app),
-      );
-      try {
-        await app.init();
-        await app.listen(0, "127.0.0.1");
-      } catch (error) {
-        await app.close();
-        throw error;
-      }
-      apps.set(app, await app.getUrl());
-      return app;
+      return listen(flavor, builder, options.logger ?? false);
     },
     invoke: (app, handler, headers, input = {}) =>
       session(app, headers, (client) => client.send(entry(handler), input)),
@@ -680,6 +698,153 @@ const queryToken = (client: WsClientLike) => {
   ).searchParams.get("token");
   return token === null ? undefined : { authorization: `Bearer ${token}` };
 };
+
+/** The principal TTL of the policy deliveries' connections (design v7 §14.1 Z-admin-banned: 300 s). */
+const DELIVERY_TTL_MS = 300_000;
+
+/**
+ * The policy kit's delivery over a built-in WebSocket transport with a 300 s principal TTL: the kit's handlers as
+ * messages of the fixture gateway, the message body as the handler's input, one connection per invoke().
+ */
+function websocketDelivery(
+  flavor: Flavor,
+  transport: ExtensionDefinition<AuthTransport> = flavor === "ws"
+    ? wsTransport({ credentials: queryToken, principalTtlMs: DELIVERY_TTL_MS })
+    : socketIoTransport({ principalTtlMs: DELIVERY_TTL_MS }),
+): PolicyDelivery {
+  const connect = flavor === "ws" ? wsClient : ioClient;
+  return {
+    name: flavor === "ws" ? "ws" : "Socket.IO",
+    connectionPrincipalTtlMs: DELIVERY_TTL_MS,
+    async createApp(handlers, auth, options) {
+      @Module({
+        imports: [
+          BetterAuthModule.forRoot({
+            auth,
+            platforms: [expressPlatform()],
+            transports: [transport],
+            globalGuard: true,
+            principals: options.principals,
+            logSummary: false,
+          } as never),
+        ],
+        providers: [
+          fixtureGateway(flavor, new Map(Object.entries(handlers)), true),
+        ],
+      })
+      class PolicyDeliveryModule {}
+      return listen(
+        flavor,
+        Test.createTestingModule({ imports: [PolicyDeliveryModule] }),
+        options.logger,
+      );
+    },
+    async invoke(app, handler, headers, input = {}) {
+      const client = await connect(apps.get(app)!, headers);
+      try {
+        return await client.send(handler, input);
+      } finally {
+        client.close();
+      }
+    },
+    async connect(app, headers) {
+      const client = await connect(apps.get(app)!, headers);
+      return {
+        invoke: (handler, input = {}) => client.send(handler, input),
+        close: async () => client.close(),
+      };
+    },
+  };
+}
+
+for (const flavor of ["socket.io", "ws"] as const) {
+  describe(`policy kit admin rows over the built-in ${flavor} transport`, async () => {
+    runConformance(
+      policyDeliveryCases(
+        await adminPolicyOptions(),
+        websocketDelivery(flavor),
+      ),
+      { describe, it },
+    );
+  });
+
+  describe(`policy kit organization rows over the built-in ${flavor} transport`, async () => {
+    runConformance(
+      policyDeliveryCases(
+        await organizationPolicyOptions(),
+        websocketDelivery(flavor),
+      ),
+      { describe, it },
+    );
+  });
+}
+
+describe("WebSocket policy delivery mutations", () => {
+  const caseOf = (
+    cases: readonly { id: string; run(): Promise<unknown> }[],
+    id: string,
+  ) => cases.find((item) => item.id === id)!;
+
+  it("fails Z-admin-banned over Socket.IO when authoritative handlers reuse the connection's principal", async () => {
+    const memo = RequestScope.prototype.memoPrincipal;
+    const spy = vi
+      .spyOn(RequestScope.prototype, "memoPrincipal")
+      .mockImplementation(function (this: RequestScope, call, input, compute) {
+        return memo.call(
+          this,
+          call,
+          { ...input, freshness: "default" },
+          compute,
+        );
+      });
+    try {
+      const cases = policyDeliveryCases(
+        await adminPolicyOptions(),
+        websocketDelivery("socket.io"),
+      );
+      await expect(caseOf(cases, "Z-admin-banned").run()).rejects.toThrow(
+        /an authoritative handler reused the connection's principal after sign-out: allowed/,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails Z-admin-banned over ws for a transport that declares a TTL it does not apply", async () => {
+    const cases = policyDeliveryCases(
+      await adminPolicyOptions(),
+      websocketDelivery("ws", wsTransport({ credentials: queryToken })),
+    );
+    await expect(caseOf(cases, "Z-admin-banned").run()).rejects.toThrow(
+      /the connection did not reuse its principal within its declared 300000 ms TTL: 401/,
+    );
+  });
+
+  it("fails Z-org-ref-types over ws for an organization policy that coerces inputs to strings", async () => {
+    const cases = policyDeliveryCases(
+      await organizationPolicyOptions({
+        ...orgPermissionPolicy,
+        evaluate: (params, context) =>
+          orgPermissionPolicy.evaluate(
+            {
+              ...params,
+              organization: organizationRef(async (inner) => {
+                const value = await params.organization(inner);
+                return typeof value === "string"
+                  ? value
+                  : JSON.stringify(value);
+              }),
+            },
+            context,
+          ),
+      }),
+      websocketDelivery("ws"),
+    );
+    await expect(caseOf(cases, "Z-org-ref-types").run()).rejects.toThrow(
+      /orgId \{"\$ne":null\}/,
+    );
+  });
+});
 
 describe("transport kit on the built-in Socket.IO transport", () => {
   runConformance(

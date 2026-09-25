@@ -2,9 +2,12 @@ import {
   Controller,
   Get,
   type ExecutionContext,
+  type INestApplication,
+  type LoggerService,
   type Provider,
 } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
+import type { BetterAuthOptions } from "better-auth";
 import type {
   AuthorizationDecision,
   AuthorizationPolicy,
@@ -44,8 +47,14 @@ import {
   type ConformanceOutcome,
   probeOf,
   type ProbeState,
+  createConformanceAuth,
+  PROBE_TRUSTED_ORIGIN,
   testHelpers,
 } from "./conformance-fixtures.js";
+import type {
+  FixtureHandler,
+  TransportInvocationResult,
+} from "./conformance-transport.js";
 import type { InstanceRegistry } from "./instance-registry.js";
 import type { PolicyResolver } from "./policy-resolver.js";
 import { absent, authenticated, rejected } from "./principal-resolver.js";
@@ -76,6 +85,89 @@ export interface PolicyConformanceOptions {
    * the kit registers placeholder sources that resolve nothing.
    */
   sources?: readonly ExtensionRef<PrincipalSource>[];
+  /**
+   * Transports to deliver the transport-specific rows through, besides the kit's in-process request: each delivery adds
+   * its own variants of Z-admin-banned (connection deliveries with a principal TTL), Z-admin-rejects-api-key-session,
+   * Z-apikey-quota-per-request and Z-org-ref-types, titled with its name.
+   */
+  deliveries?: readonly PolicyDelivery[];
+  /**
+   * Builds the instances the kit needs in another configuration (adminUserIds, customSession shapes, a dynamic baseURL,
+   * an instance without apiKey()) with exactly the given overrides, on the storage under test. It must add what
+   * createConformanceAuth() adds (testUtils(), bearer(), conformanceProbePlugin(), nestjs(), an explicit
+   * advanced.disableOriginCheck: false and session.updateAge 0) and have its schema migrated. Default:
+   * createConformanceAuth(overrides), on the memory adapter.
+   */
+  variant?(
+    overrides: Omit<BetterAuthOptions, "database">,
+  ): AuthLike | Promise<AuthLike>;
+}
+
+/**
+ * A transport the policy kit delivers its transport-specific rows through (design v7 §14.1). Build it from the harness
+ * of a transportConformance run: it exposes the kit's handlers the way that harness exposes the transport kit's fixtures.
+ */
+export interface PolicyDelivery {
+  /** The transport's name in case titles, e.g. 'Socket.IO'. */
+  readonly name: string;
+  /**
+   * Boots an app with BetterAuthModule's globalGuard that exposes each handler under its name in the transport's shape:
+   * a gateway message with explicit coverage, a message pattern or a GraphQL query field, plus the subscription field
+   * that connect()'s operations select on a GraphQL socket. Apply the handler's decorators like transportConformance's
+   * createApp does. The kit's only named input is `orgId`: pass its value through with its JSON type (a GraphQL
+   * harness declares a JSON scalar argument), so ctx.param('orgId') reads it unchanged. Pass `principals` to
+   * BetterAuthModule and use `logger` from boot on. The kit closes the app.
+   */
+  createApp(
+    handlers: Readonly<Record<string, FixtureHandler>>,
+    auth: AuthLike,
+    options: {
+      readonly principals: readonly ExtensionRef<PrincipalSource>[];
+      readonly logger: LoggerService;
+    },
+  ): Promise<INestApplication>;
+  /**
+   * One logical request to a handler with the given headers: a message on its own connection, an RPC request, an
+   * operation. The kit's headers carry the probe plugin's trusted Origin, as a browser on a trusted page sends it.
+   */
+  invoke(
+    app: INestApplication,
+    handler: string,
+    headers: HeadersInit,
+    input?: Record<string, unknown>,
+  ): Promise<TransportInvocationResult>;
+  /**
+   * Connection deliveries (WebSocket gateways, graphql-ws): opens one connection whose handshake carries `headers`.
+   * Its invoke() sends one message, or one subscription operation for GraphQL, after the previous one answered.
+   */
+  connect?(
+    app: INestApplication,
+    headers: HeadersInit,
+  ): Promise<PolicyDeliveryConnection>;
+  /**
+   * The principal TTL of connect()'s connections: the transport's principalTtlMs or subscriptionPrincipalTtlMs. The
+   * connection variant of Z-admin-banned runs when it is positive, and checks that the connection reuses its principal.
+   */
+  readonly connectionPrincipalTtlMs?: number;
+}
+
+/** One connection of a PolicyDelivery. */
+export interface PolicyDeliveryConnection {
+  invoke(
+    handler: string,
+    input?: Record<string, unknown>,
+  ): Promise<TransportInvocationResult>;
+  close(): Promise<void>;
+}
+
+/** An instance with the given overrides, built by options.variant() or createConformanceAuth(). */
+export async function variantOf(
+  options: Pick<PolicyConformanceOptions, "variant">,
+  overrides: Omit<BetterAuthOptions, "database">,
+): Promise<AuthLike> {
+  return options.variant
+    ? await options.variant(overrides)
+    : createConformanceAuth(overrides);
 }
 
 export function requirementsOf(expression: RequirementExpr): Requirement[] {
@@ -419,23 +511,35 @@ export type RequestOutcome =
       readonly error?: unknown;
     };
 
-export interface RequestHarness {
-  readonly probe: ProbeState;
-  readonly logger: CapturingLogger;
-  readonly moduleRef: TestingModule;
+/** One connection of a connection delivery: each request is one message or operation on it. */
+export interface RequestConnection {
   request(
     route: string,
-    headers: HeadersInit,
     input?: Record<string, unknown>,
   ): Promise<RequestOutcome>;
   close(): Promise<void>;
 }
 
+export interface RequestHarness {
+  readonly probe: ProbeState;
+  readonly logger: CapturingLogger;
+  request(
+    route: string,
+    headers: HeadersInit,
+    input?: Record<string, unknown>,
+  ): Promise<RequestOutcome>;
+  /** Connection deliveries only. */
+  connect?(headers: HeadersInit): Promise<RequestConnection>;
+  close(): Promise<void>;
+}
+
+export type RequestOptions = Omit<BootOptions, "transports"> & {
+  routes: Readonly<Record<string, readonly MethodDecorator[]>>;
+};
+
 export async function requestHarness(
   auth: AuthLike,
-  options: Omit<BootOptions, "transports"> & {
-    routes: Readonly<Record<string, readonly MethodDecorator[]>>;
-  },
+  options: RequestOptions,
 ): Promise<RequestHarness> {
   const probe = await probeOf(auth);
   const { moduleRef, controller, logger } = await boot(auth, undefined, {
@@ -446,7 +550,6 @@ export async function requestHarness(
   return {
     probe,
     logger,
-    moduleRef,
     async request(route, headers, input = {}) {
       const key = {};
       const message: KitMessage = {
@@ -483,12 +586,99 @@ export async function requestHarness(
   };
 }
 
+/** A delivery's answer as a request outcome: its status code (500 when it carries none), code and reason. */
+function deliveredOutcome(result: TransportInvocationResult): RequestOutcome {
+  if (result.ok) {
+    return { ok: true, status: 200 };
+  }
+  return {
+    ok: false,
+    status: result.error?.statusCode ?? 500,
+    code: result.error?.code,
+    reason: result.error?.reason,
+    ...(result.error?.statusCode === undefined
+      ? { error: result.error?.message }
+      : {}),
+  };
+}
+
+/** The kit's routes as the delivery's handlers: no parameters, a safe operation, answering `{ ok: true }`. */
+function deliveryHandlers(
+  routes: Readonly<Record<string, readonly MethodDecorator[]>>,
+): Record<string, FixtureHandler> {
+  return Object.fromEntries(
+    Object.entries(routes).map(([name, decorators]) => [
+      name,
+      {
+        decorators,
+        params: [],
+        operation: "read",
+        handle: () => ({ ok: true }),
+      } satisfies FixtureHandler,
+    ]),
+  );
+}
+
+/** The request harness over a PolicyDelivery's real transport. */
+export async function deliveryHarness(
+  delivery: PolicyDelivery,
+  auth: AuthLike,
+  options: RequestOptions,
+): Promise<RequestHarness> {
+  if (options.providers?.length || options.session !== undefined) {
+    throw new BetterAuthConfigurationError(
+      "CONFORMANCE_DELIVERY_OPTIONS",
+      "A policy delivery boots its own application: it takes routes and principal sources only.",
+    );
+  }
+  const probe = await probeOf(auth);
+  const logger = options.logger ?? new CapturingLogger();
+  const app = await delivery.createApp(deliveryHandlers(options.routes), auth, {
+    principals: options.sources ?? [],
+    logger,
+  });
+  const connect = delivery.connect?.bind(delivery);
+  // A browser on a trusted page: the probe plugin's origin is trusted on every kit instance.
+  const browser = (headers: HeadersInit) => {
+    const values = new Headers(headers);
+    if (!values.has("origin")) {
+      values.set("origin", PROBE_TRUSTED_ORIGIN);
+    }
+    return values;
+  };
+  return {
+    probe,
+    logger,
+    request: async (route, headers, input = {}) =>
+      deliveredOutcome(
+        await delivery.invoke(app, route, browser(headers), input),
+      ),
+    ...(connect
+      ? {
+          async connect(headers: HeadersInit): Promise<RequestConnection> {
+            const connection = await connect(app, browser(headers));
+            return {
+              request: async (route, input = {}) =>
+                deliveredOutcome(await connection.invoke(route, input)),
+              close: () => connection.close(),
+            };
+          },
+        }
+      : {}),
+    close: () => app.close(),
+  };
+}
+
+/** Runs `fn` with requests through the in-process guard, or through `delivery`'s transport when given. */
 export async function withRequests(
   auth: AuthLike,
-  options: Parameters<typeof requestHarness>[1],
+  options: RequestOptions,
   fn: (harness: RequestHarness) => Promise<ConformanceOutcome>,
+  delivery?: PolicyDelivery,
 ): Promise<ConformanceOutcome> {
-  const value = await requestHarness(auth, options);
+  const value = delivery
+    ? await deliveryHarness(delivery, auth, options)
+    : await requestHarness(auth, options);
   try {
     return await fn(value);
   } finally {

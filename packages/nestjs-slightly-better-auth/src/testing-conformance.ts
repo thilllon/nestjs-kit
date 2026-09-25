@@ -17,6 +17,8 @@ export {
 } from "./conformance-http.js";
 export {
   type PolicyConformanceOptions,
+  type PolicyDelivery,
+  type PolicyDeliveryConnection,
   policyConformance,
 } from "./conformance-policy.js";
 export {
