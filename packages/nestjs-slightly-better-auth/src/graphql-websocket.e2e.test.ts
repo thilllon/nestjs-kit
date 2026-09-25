@@ -26,6 +26,7 @@ import {
   Public,
   RequireAuth,
 } from "./auth-decorators.js";
+import type { AuthTransport } from "./auth-contracts.js";
 import type { AuthPrincipal } from "./auth-types.js";
 import { expressPlatform } from "./express.js";
 import { fastifyPlatform } from "./fastify.js";
@@ -237,6 +238,18 @@ async function fixture(
   });
   const mercurius = mode.startsWith("mercurius");
   const fastify = mercurius || mode.startsWith("apollo-fastify");
+  const transport = (
+    mercurius
+      ? mercuriusTransport(transportOptions)
+      : apolloTransport(transportOptions)
+  ) as AuthTransport;
+  // Counts the operations that reach the transport, whatever their outcome.
+  let described = 0;
+  const describe = transport.describe.bind(transport);
+  transport.describe = (context, kit) => {
+    described++;
+    return describe(context, kit);
+  };
   const module = await Test.createTestingModule({
     imports: [
       GraphQLModule.forRoot({
@@ -272,11 +285,7 @@ async function fixture(
         auth,
         logSummary: false,
         platforms: [fastify ? fastifyPlatform() : expressPlatform()],
-        transports: [
-          mercurius
-            ? mercuriusTransport(transportOptions)
-            : apolloTransport(transportOptions),
-        ],
+        transports: [transport],
       }),
     ],
     providers: [SocketResolver],
@@ -324,6 +333,7 @@ async function fixture(
       bearer: `Bearer ${signup.response.token}`,
       errors,
       calls: () => module.get(SocketResolver).calls,
+      described: () => described,
       /** Signs up another user and returns its id and session cookie. */
       async signUp() {
         const other = await auth.api.signUpEmail({
@@ -538,6 +548,8 @@ describe.each([
       }
       // Let the server finish the operations of the closed connections.
       await new Promise((resolve) => setTimeout(resolve, 250));
+      // The closed connections' operations reached the transport.
+      expect(f.described()).toBeGreaterThan(0);
       expect(inspect(f.errors, { depth: Infinity })).not.toMatch(
         /AUTH_MISCONFIGURED|GRAPHQL_CONTEXT_STALE_REQUEST/,
       );

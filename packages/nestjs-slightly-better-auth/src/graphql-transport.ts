@@ -321,8 +321,17 @@ class GraphqlTransport implements AuthTransport {
   }
 
   lineage(context: ExecutionContext) {
+    const args = context.getArgs();
+    const normalized = graphqlArgs(args);
+    // A public root reaches the transport through its lineage alone, so an operation can start
+    // here: its socket's classification then holds for the guarded fields nested in it.
+    this.openAtStart(
+      carrierDetails(normalized.context, this.id, this.kit?.http ?? null)
+        .webSocket,
+      normalized.info,
+    );
     return {
-      ...graphqlLineage(context.getArgs(), this.reference(context)),
+      ...graphqlLineage(args, this.reference(context)),
       assertReadable: (args: readonly unknown[]) => {
         if (this.kit) {
           this.assertRequest(args, this.kit);

@@ -802,6 +802,26 @@ describe("GraphQL socket classification at operation start", () => {
     expect(again.headers().get("host")).toBe("localhost:3000");
   });
 
+  it("classifies the socket when a public root first reads the operation's lineage", () => {
+    const { socket, request, carrier } = connection();
+    const transport = apolloTransport() as AuthTransport;
+    const operation = {};
+    const variableValues = {};
+    const root = execution(carrier, operation);
+    (root.args[3] as { variableValues: object }).variableValues =
+      variableValues;
+    // A public root records its lineage without describing a call.
+    transport.lineage?.(root.context);
+    socket.readyState = 3;
+    // A guarded field nested in the same execution starts after the close.
+    const nested = execution(carrier, operation);
+    (nested.args[3] as { variableValues: object }).variableValues =
+      variableValues;
+    const call = transport.describe(nested.context, { http: null });
+    expect(call.connection).toBe(request);
+    expect(call.headers().get("cookie")).toBe("current=credential");
+  });
+
   it("reads no credential of a connection whose socket is not open at the start", () => {
     const socket = openSocket(3);
     const reads = { count: 0 };
