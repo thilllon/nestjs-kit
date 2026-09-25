@@ -1,5 +1,13 @@
 # nestjs-slightly-better-auth
 
+## 1.5.2
+
+### Patch Changes
+
+- eaed90f: `@BeforeAuth()`, `@AfterAuth()`, `@BeforeDatabase()` and `@AfterDatabase()` accept every method whose signature fits the hook: a method may declare fewer parameters, such as a one-parameter database hook or a parameterless endpoint hook, and return a narrower result, such as a `boolean` inferred from a delete hook. `HookMethodDecorator` and `DbHookMethodDecorator` infer the decorated method type and constrain it to `(ctx: AuthHookContext<P>) => unknown` or `DatabaseHookMethod<E, Ph>`. Before-hook bodies stay unvalidated, update payloads stay partial, a delete hook still cannot return replacement data, and a database hook must still accept a missing endpoint context.
+- c4a3fc4: The package loads Nest only through the `@nestjs/common` and `@nestjs/core` package roots, never through internal module paths such as `@nestjs/core/router/route-path-factory.js`. Boot validation composes application route paths from the public `ApplicationConfig` prefix, exclusion and versioning settings with the rules of Nest's router, and `WsConnectionAuth` builds its connection execution context from the public `ExecutionContext` interface. Route paths, shadowing warnings and connection authentication results are unchanged.
+- 9441944: The Apollo transport recognizes a graphql-ws operation whose `connection_init` message has no payload. The upgrade request's credential headers authenticate it, and a connection without credentials is anonymous: guarded operations fail with `UNAUTHENTICATED` and public operations run, instead of every guarded operation failing with `INTERNAL_SERVER_ERROR` (`AUTH_MISCONFIGURED`).
+
 ## 1.5.1
 
 ### Patch Changes
