@@ -1,16 +1,27 @@
 import type { BetterAuthOptions } from "better-auth";
 import type { DatabaseHookTarget } from "./auth-contracts.js";
-import type { DatabaseHookMethod, DatabaseHookResult } from "./auth-types.js";
+import type {
+  DatabaseHookData,
+  DatabaseHookResult,
+  DbHookFn,
+} from "./auth-types.js";
 import type { BridgeBinding } from "./bridge-protocol.js";
 
-/** Construct all dispatchers once; bindings supply only the late-bound methods. */
+/**
+ * Construct all dispatchers once; bindings supply only the late-bound methods.
+ *
+ * The dispatchers take the SDK's own parameter types, so they satisfy `databaseHooks` whatever
+ * instance the program registers. Bound hooks declare `DatabaseHookData`, which adds the
+ * registered instance's plugin and additional fields (for example admin()'s `banned`) to the
+ * same rows; the dispatcher states that narrowing once when it forwards a payload.
+ */
 export function createDatabaseDispatchers(
   getBinding: () => BridgeBinding | null,
   countUnbound: () => void,
 ): NonNullable<BetterAuthOptions["databaseHooks"]> {
   function operation<E extends DatabaseHookTarget>(target: E) {
     const before = async (
-      ...[data, ctx]: Parameters<DatabaseHookMethod<E, "before">>
+      ...[data, ctx]: Parameters<DbHookFn<E, "before">>
     ): Promise<DatabaseHookResult<E, "before">> => {
       const binding = getBinding();
       if (!binding) {
@@ -22,7 +33,9 @@ export function createDatabaseDispatchers(
       let changed = false;
       for (const hook of hooks) {
         const result = await hook(
-          target.endsWith(".create") ? { ...data, ...accumulated } : data,
+          (target.endsWith(".create")
+            ? { ...data, ...accumulated }
+            : data) as DatabaseHookData<E, "before">,
           ctx,
         );
         if (result === false) {
@@ -45,7 +58,7 @@ export function createDatabaseDispatchers(
       ) as DatabaseHookResult<E, "before">;
     };
     const after = async (
-      ...[data, ctx]: Parameters<DatabaseHookMethod<E, "after">>
+      ...[data, ctx]: Parameters<DbHookFn<E, "after">>
     ): Promise<void> => {
       const binding = getBinding();
       if (!binding) {
@@ -53,7 +66,7 @@ export function createDatabaseDispatchers(
         return;
       }
       for (const hook of binding.database[target].after) {
-        await hook(data, ctx);
+        await hook(data as DatabaseHookData<E, "after">, ctx);
       }
     };
     return { before, after };

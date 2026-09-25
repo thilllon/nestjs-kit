@@ -111,7 +111,8 @@ export type AuthAfterHookContext<P extends string = string> =
 type DbHooks = NonNullable<
   import("better-auth").BetterAuthOptions["databaseHooks"]
 >;
-type DbHookFn<
+/** The SDK's own hook signature for a target, independent of the registered instance. Internal to the dispatcher. */
+export type DbHookFn<
   E extends DatabaseHookTarget,
   Ph extends "before" | "after",
 > = E extends `${infer M extends keyof DbHooks & string}.${infer O extends "create" | "update" | "delete"}`
