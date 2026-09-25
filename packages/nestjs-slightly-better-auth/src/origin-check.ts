@@ -120,7 +120,12 @@ export class OriginCheck {
     mode: "cookie" | "form",
   ): Promise<AuthFailure | null> {
     const origins = this.scope.stateFor(browser.key).origins;
-    const key = memoKey(this.init.instance, mode);
+    // Operations of one batched GraphQL request share a leg key but not enforcement, and only the advisory verdict
+    // infers a same-origin leg without Origin and Referer.
+    const key = memoKey(
+      this.init.instance,
+      mode === "cookie" && !browser.enforce ? "cookie-advisory" : mode,
+    );
     const existing = origins.get(key);
     if (existing) {
       return existing;
@@ -270,10 +275,14 @@ export class OriginCheck {
     const origin = headers.get("origin");
     const referer = headers.get("referer");
     const site = headers.get("sec-fetch-site");
-    const value =
-      origin === "null" && site === "same-origin"
-        ? new URL(browser.url).origin
-        : origin || referer;
+    // A browser sends no Origin on a same-origin GET, and a no-referrer policy removes Referer. On a non-enforcing
+    // (advisory) cookie leg, the browser-controlled Sec-Fetch-Site: same-origin then stands for the leg's own origin,
+    // as Origin: null does on every leg. Enforcing legs keep better-auth's rule.
+    const inferred =
+      site === "same-origin" &&
+      (origin === "null" ||
+        (mode === "cookie" && !browser.enforce && !origin && !referer));
+    const value = inferred ? new URL(browser.url).origin : origin || referer;
     if (!value || value === "null") {
       if (
         this.init.options?.missingOrigin === "allow-non-browser" &&

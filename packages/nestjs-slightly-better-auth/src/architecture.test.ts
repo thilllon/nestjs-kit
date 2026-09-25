@@ -127,6 +127,13 @@ const kernelLiteralExceptions = [
     reason:
       "better-auth core model name in DatabaseHookTarget (design v7 §10.6).",
   },
+  {
+    file: "trusted-origins.ts",
+    literal: "http",
+    count: 1,
+    reason:
+      "better-auth's dynamic baseURL protocol value, mirrored from getTrustedOrigins() (design v7 §7.10).",
+  },
 ];
 
 const requiredPeers = [

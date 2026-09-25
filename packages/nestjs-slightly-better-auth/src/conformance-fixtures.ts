@@ -455,12 +455,24 @@ export async function probeOf(auth: AuthLike): Promise<ProbeState> {
 
 /**
  * A memory-adapter Better Auth instance with the settings the kits assume: origin checks explicitly on
- * (advanced.disableOriginCheck: false, which vitest's TEST=true would otherwise switch off), session.updateAge 0 so
+ * (advanced.disableOriginCheck: false, which vitest's TEST=true would otherwise switch off, and
+ * advanced.disableCSRFCheck: false, which would otherwise switch every origin check off), session.updateAge 0 so
  * every session read refreshes, testUtils(), bearer(), conformanceProbePlugin() and nestjs() last. The kit settings
  * win over the same options in `options`.
  */
 export function createConformanceAuth(
   options: Omit<BetterAuthOptions, "database"> = {},
+): AuthLike {
+  return conformanceAuth(options);
+}
+
+/**
+ * Internal: createConformanceAuth() with the kits' own opt-out rows. Only a kit switches Better Auth's
+ * advanced.disableCSRFCheck on, for the case that proves the kernel honors it; a caller's option never does.
+ */
+export function conformanceAuth(
+  options: Omit<BetterAuthOptions, "database">,
+  kit: { readonly disableCSRFCheck?: boolean } = {},
 ): AuthLike {
   // The probe creates a table for every model of the resolved schema when Better Auth initializes it.
   const tables: Record<string, unknown[]> = {};
@@ -471,7 +483,11 @@ export function createConformanceAuth(
     logger: { disabled: true },
     ...options,
     session: { ...options.session, updateAge: 0 },
-    advanced: { ...options.advanced, disableOriginCheck: false },
+    advanced: {
+      ...options.advanced,
+      disableOriginCheck: false,
+      disableCSRFCheck: kit.disableCSRFCheck === true,
+    },
     plugins: [
       testUtils(),
       bearer(),

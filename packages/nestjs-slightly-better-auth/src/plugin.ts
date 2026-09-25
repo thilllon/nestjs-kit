@@ -162,14 +162,14 @@ export function nestjs(
             // Access capabilities before testing credentials: extraction errors
             // must fail even a credential-free direct endpoint call.
             const check = current.checkCallerSession;
-            const inbound = current.inbound?.();
+            current.inbound?.();
             const browser = current.browserHeaders?.();
             const token = sessionToken(ctx.headers, ctx);
+            // Only the browser leg's own cookie is ambient. A session cookie that a
+            // transport mapped in-band (graphql-ws connectionParams, socket
+            // credentials) cannot ride a cross-site request.
             return (
-              !!check &&
-              token !== "" &&
-              (token === sessionToken(inbound, ctx) ||
-                token === sessionToken(browser, ctx))
+              !!check && token !== "" && token === sessionToken(browser, ctx)
             );
           },
           handler: createAuthMiddleware(async (ctx) => {
