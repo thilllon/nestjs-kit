@@ -31,7 +31,11 @@ import type {
   TransportCall,
   TransportValidationContext,
 } from "./auth-contracts.js";
-import { type AuthFailure, AuthFailures } from "./auth-errors.js";
+import {
+  type AuthFailure,
+  AuthFailures,
+  BetterAuthConfigurationError,
+} from "./auth-errors.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
@@ -65,6 +69,8 @@ interface ReferenceOperation {
   readonly setCookies: string[];
   /** The connection that carries the operation, when the transport describes a connection-shaped browser leg. */
   readonly connection: object;
+  /** Set by the harness once every invocation of the operation has answered. */
+  completed: boolean;
 }
 interface ReferenceMessage {
   readonly input: Record<string, unknown>;
@@ -81,7 +87,8 @@ class ReferenceDenial extends IntrinsicException {
  * An in-process transport with a custom context type: one operation (the logical request) carries one or more
  * invocations, like aliased fields. `sharedInvocation` reproduces the defect of reusing the operation as the invocation;
  * `readsWithoutBrowserLeg` the defect of describing no browser leg for safe operations. `connectionLeg` describes the
- * operation's connection as its browser leg, like a WebSocket handshake.
+ * operation's connection as its browser leg, like a WebSocket handshake. `failsClosedWhenComplete` rejects reading the
+ * browser leg of a completed operation, as the GraphQL transports reject a completed request.
  */
 class ReferenceTransport implements AuthTransport {
   readonly id = "reference";
@@ -91,6 +98,7 @@ class ReferenceTransport implements AuthTransport {
       sharedInvocation?: boolean;
       readsWithoutBrowserLeg?: boolean;
       connectionLeg?: boolean;
+      failsClosedWhenComplete?: boolean;
     } = {},
   ) {}
 
@@ -105,6 +113,7 @@ class ReferenceTransport implements AuthTransport {
     ];
     const url = "http://localhost:3000/reference";
     const readsWithoutBrowserLeg = this.defects.readsWithoutBrowserLeg;
+    const failsClosedWhenComplete = this.defects.failsClosedWhenComplete;
     const leg = this.defects.connectionLeg ? operation.connection : operation;
     return {
       key: operation,
@@ -127,6 +136,12 @@ class ReferenceTransport implements AuthTransport {
       },
       param: (name) => message.input[name],
       get browser() {
+        if (failsClosedWhenComplete && operation.completed) {
+          throw BetterAuthConfigurationError.atRequest(
+            "REFERENCE_OPERATION_COMPLETED",
+            "The reference operation has completed",
+          );
+        }
         if (readsWithoutBrowserLeg && message.operation === "read") {
           return undefined;
         }
@@ -361,6 +376,7 @@ function referenceHarness(
         headers: new Headers(headers),
         setCookies: [],
         connection: {},
+        completed: false,
       };
       const { fixtures } = dispatchers.get(app)!;
       const results = await Promise.all(
@@ -375,6 +391,7 @@ function referenceHarness(
           ),
         ),
       );
+      operation.completed = true;
       const failed = results.find((result) => !result.ok);
       return {
         ...(failed ?? results[0]!),
@@ -386,12 +403,14 @@ function referenceHarness(
         headers: new Headers(headers),
         setCookies: [],
         connection: {},
+        completed: false,
       };
       const [first, second] = await Promise.all(
         inputs.map((input) =>
           settle(call(app, "org", { input, operation: "read" }, operation)),
         ),
       );
+      operation.completed = true;
       return [first!, second!];
     },
   };
@@ -467,6 +486,45 @@ describe("transport kit mutations", () => {
       caseById(
         transportConformance({
           ...referenceHarness(new ReferenceTransport()),
+          expectBrowserLeg: false,
+        }),
+        "T-selection",
+      ).run(),
+    ).rejects.toThrow(
+      /describes a browser leg, so expectBrowserLeg must be true/,
+    );
+  });
+
+  it("reads browser legs while each invocation runs, for a transport that fails closed on completed operations", async () => {
+    for (const connectionLeg of [false, true]) {
+      const cases = transportConformance(
+        referenceHarness(
+          new ReferenceTransport({
+            connectionLeg,
+            failsClosedWhenComplete: true,
+          }),
+        ),
+      );
+      await expect(
+        caseById(cases, "T-selection").run(),
+      ).resolves.toBeUndefined();
+      await expect(
+        caseById(
+          cases,
+          connectionLeg ? "T-csrf-http-unsafe" : "T-ws-origin-untrusted",
+        ).run(),
+      ).resolves.toEqual({
+        skipped: connectionLeg
+          ? "the browser leg is the connection's handshake, enforced on every message (T-ws-origin-* cover it)"
+          : "the browser leg follows each operation (T-csrf-* cover it)",
+      });
+    }
+    await expect(
+      caseById(
+        transportConformance({
+          ...referenceHarness(
+            new ReferenceTransport({ failsClosedWhenComplete: true }),
+          ),
           expectBrowserLeg: false,
         }),
         "T-selection",
