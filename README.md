@@ -31,6 +31,8 @@ Each package README covers installation and usage.
   - Mail Send and Web API calls through isolated Twilio SendGrid accounts.
 - [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md) [![npm version of nestjs-slightly-better-auth](https://img.shields.io/npm/v/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth) [![Monthly npm downloads of nestjs-slightly-better-auth](https://img.shields.io/npm/dm/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth)
   - Better Auth sessions, guards and authorization for NestJS applications.
+- [`nestjs-strategy`](packages/nestjs-strategy/README.md) [![npm version of nestjs-strategy](https://img.shields.io/npm/v/nestjs-strategy)](https://www.npmjs.com/package/nestjs-strategy) [![Monthly npm downloads of nestjs-strategy](https://img.shields.io/npm/dm/nestjs-strategy)](https://www.npmjs.com/package/nestjs-strategy)
+  - Strategy-pattern registries that select Nest providers by key.
 
 ## Shared approach
 
