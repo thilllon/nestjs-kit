@@ -75,6 +75,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
 - `packages/nestjskit__*`: packages published under `@nestjs-kit/*`.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
+- `packages/nestjs-pubnub`: the PubNub realtime messaging adapter.
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
 - `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
