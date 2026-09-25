@@ -841,16 +841,16 @@ export function principalSourceConformance(
       async (harness) => {
         const { resolve, probe } = harness;
         const headers = await valid(harness);
-        const calls = probe.calls.length;
         const storage = probe.storage.length;
         probe.storageFault = () => new Error("conformance storage outage");
         const result = await settle(() =>
           resolve(headers, new RecordingSink()),
         );
         probe.storageFault = undefined;
-        if (probe.calls.length === calls && probe.storage.length === storage) {
+        // The fault fires only inside a storage operation; an endpoint served without storage sees no outage.
+        if (probe.storage.length === storage) {
           return conformanceSkip(
-            "the source read no storage and called no Better Auth endpoint for a valid credential",
+            "the source ran no storage operation for a valid credential",
           );
         }
         assert.equal(
@@ -1792,17 +1792,14 @@ function httpRouteCases(
       () =>
         withRoute(async (boot, _source, probe) => {
           const headers = await options.credentials.valid(options.auth);
-          const calls = probe.calls.length;
           const storage = probe.storage.length;
           probe.storageFault = () => new Error("conformance storage outage");
           const response = await boot.post("principal", headers);
           probe.storageFault = undefined;
-          if (
-            probe.calls.length === calls &&
-            probe.storage.length === storage
-          ) {
+          // The fault fires only inside a storage operation; an endpoint served without storage sees no outage.
+          if (probe.storage.length === storage) {
             return conformanceSkip(
-              "the source read no storage and called no Better Auth endpoint for a valid credential",
+              "the source ran no storage operation for a valid credential",
             );
           }
           assert.ok(
