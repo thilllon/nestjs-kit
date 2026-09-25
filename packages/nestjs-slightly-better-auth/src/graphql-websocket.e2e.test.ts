@@ -105,6 +105,15 @@ interface Result {
     extensions?: Readonly<Record<string, unknown>>;
   }[];
 }
+/** Resolves on the client's next close event, which follows the server's close frame. */
+function closed(client: Client): Promise<void> {
+  return new Promise((resolve) => {
+    const off = client.on("closed", () => {
+      off();
+      resolve();
+    });
+  });
+}
 function execute(client: Client, query: string): Promise<Result> {
   return new Promise((resolve, reject) => {
     let result: Result | undefined;
@@ -146,10 +155,14 @@ async function fixture(
   mode: Mode,
   transportOptions: GraphqlTransportOptions = {},
   dynamicBaseURL = false,
-  context?: (context: {
-    extra?: { request?: unknown };
-    connectionParams?: unknown;
-  }) => object,
+  context?: (
+    context: {
+      req?: unknown;
+      extra?: { request?: unknown };
+      connectionParams?: unknown;
+    },
+    reply?: unknown,
+  ) => object,
 ) {
   const database: Record<string, Record<string, unknown>[]> = {
     user: [],
@@ -289,6 +302,25 @@ async function fixture(
       bearer: `Bearer ${signup.response.token}`,
       errors,
       calls: () => module.get(SocketResolver).calls,
+      /** Signs up another user and returns its id and session cookie. */
+      async signUp() {
+        const other = await auth.api.signUpEmail({
+          headers: new Headers({ host: "localhost:3000" }),
+          body: {
+            name: "Later Caller",
+            email: `${crypto.randomUUID()}@example.com`,
+            password: "password-secure-123",
+          },
+          returnHeaders: true,
+        });
+        return {
+          userId: other.response.user.id,
+          cookie: other.headers
+            .getSetCookie()
+            .map((line) => line.split(";")[0])
+            .join("; "),
+        };
+      },
       /** Holds the next session read until release() is called. */
       holdSessionRead() {
         let started = () => {};
@@ -451,6 +483,82 @@ describe.each([
       await f.close();
     }
   });
+  it.each(["cached", "fresh"] as const)(
+    "answers a later connection under a %s context with its own principal or fails closed",
+    async (shape) => {
+      const mercurius = mode.startsWith("mercurius");
+      const custom =
+        mode === "apollo-custom" || mode === "apollo-fastify-custom";
+      let cached: object | undefined;
+      const build = (
+        context: {
+          req?: unknown;
+          extra?: { request?: unknown };
+          connectionParams?: unknown;
+        },
+        reply?: unknown,
+      ): object =>
+        mercurius
+          ? { req: context, reply }
+          : custom
+            ? {
+                req: context.req ?? context.extra?.request,
+                extra: context.extra,
+                connectionParams: context.connectionParams,
+              }
+            : { ...context };
+      const f = await fixture(
+        mode,
+        {},
+        false,
+        shape === "cached"
+          ? (context, reply) => (cached ??= build(context, reply))
+          : build,
+      );
+      try {
+        const later = await f.signUp();
+        const origin = "http://localhost:3000";
+        const first = f.client({ cookie: f.cookie, origin });
+        const firstClosed = closed(first);
+        expect(await execute(first, "{ who }")).toEqual({
+          data: { who: f.userId },
+        });
+        await first.dispose();
+        await firstClosed;
+        const second = f.client({ cookie: later.cookie, origin });
+        const results = [
+          await execute(second, "{ who optionalWho }"),
+          await execute(second, "subscription { notice }"),
+        ];
+        expect(inspect(results, { depth: Infinity })).not.toContain(f.userId);
+        if (shape === "fresh" || mercurius) {
+          // Mercurius builds every socket operation's context from its per-connection subscription context.
+          expect(results).toEqual([
+            { data: { who: later.userId, optionalWho: later.userId } },
+            { data: { notice: later.userId } },
+          ]);
+          expect(f.errors).toEqual([]);
+          return;
+        }
+        expect(results[0]!.data).toEqual({ who: null, optionalWho: null });
+        for (const error of results.flatMap((result) => result.errors ?? [])) {
+          expect(error.extensions).toMatchObject({
+            code: "INTERNAL_SERVER_ERROR",
+            reason: "AUTH_MISCONFIGURED",
+          });
+        }
+        expect(results[0]!.errors).toHaveLength(2);
+        expect(results[1]!.errors).toHaveLength(1);
+        expect(inspect(f.errors, { depth: Infinity })).toContain(
+          "GRAPHQL_CONTEXT_STALE_REQUEST",
+        );
+        // The first connection's operation alone reached a resolver.
+        expect(f.calls()).toBe(1);
+      } finally {
+        await f.close();
+      }
+    },
+  );
   it("authenticates queries, mutations and subscriptions independently and never refreshes", async () => {
     const f = await fixture(mode);
     try {

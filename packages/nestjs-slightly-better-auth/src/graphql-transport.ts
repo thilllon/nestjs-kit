@@ -41,6 +41,7 @@ import {
   REQUIREMENTS_METADATA,
 } from "./auth-tokens.js";
 import {
+  type GraphInfo,
   graphqlArgs,
   graphqlInvocation,
   graphqlLineage,
@@ -134,21 +135,38 @@ function upgrade(value: unknown): Upgrade | undefined {
     ? (candidate as unknown as Upgrade)
     : undefined;
 }
+/** The WebSocket of a graphql-ws `extra` ({ socket, request }): a socket with function-typed send and close. */
+function graphqlWsSocket(
+  value: unknown,
+): Record<PropertyKey, unknown> | undefined {
+  const socket = record(record(value)?.socket);
+  return socket &&
+    typeof socket.send === "function" &&
+    typeof socket.close === "function"
+    ? socket
+    : undefined;
+}
 /**
  * The upgrade request of a graphql-ws `extra` ({ socket, request }) whose socket is a
  * WebSocket. Only the graphql-ws server creates that pair; parsed request data cannot carry
  * functions, so a client-sent header or field never selects the socket path. The socket's
- * state is deliberately ignored: a connection closing during authentication stays a socket
- * operation instead of turning into an unrecognized context.
+ * state does not change this recognition: the transport classifies it once per operation
+ * (GraphqlTransport.openAtStart).
  */
 function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
-  const extra = record(value);
-  const socket = record(extra?.socket);
-  return socket &&
-    typeof socket.send === "function" &&
-    typeof socket.close === "function"
-    ? upgrade(extra?.request)
-    : undefined;
+  return graphqlWsSocket(value) ? upgrade(record(value)?.request) : undefined;
+}
+/** WebSocket.OPEN of the `ws` sockets that Nest's graphql-ws server creates. */
+const WEBSOCKET_OPEN = 1;
+/**
+ * The identity of one GraphQL execution, shared by every resolver of that execution. graphql-js
+ * coerces the variable values into a fresh object for every execution, including one
+ * subscription and its events; a parsed operation can be cached across executions, so it
+ * serves only as the fallback.
+ */
+function executionOf(info: GraphInfo | undefined): object | undefined {
+  const value = record(info);
+  return record(value?.variableValues) ?? record(value?.operation);
 }
 function ambientHeaders(request: unknown): Headers {
   const value = record(request);
@@ -204,10 +222,16 @@ function carrierDetails(
     driver === "apollo" && !httpRequest && graphqlWsUpgrade(req?.extra)
       ? req
       : undefined;
+  const wsExtra =
+    driver === "apollo" && !httpRequest
+      ? wsContext
+        ? wsContext.extra
+        : extra
+      : undefined;
   const socket = httpRequest
     ? undefined
     : driver === "apollo"
-      ? graphqlWsUpgrade(wsContext ? wsContext.extra : extra)
+      ? graphqlWsUpgrade(wsExtra)
       : (upgrade(carrier[MERCURIUS_UPGRADE]) ??
         ("_connectionInit" in carrier
           ? (upgrade(carrier.request) ??
@@ -228,7 +252,9 @@ function carrierDetails(
     carrier[MERCURIUS_AMBIENT] instanceof Headers
       ? new Headers(carrier[MERCURIUS_AMBIENT])
       : ambientHeaders(socket);
-  return { carrier, socket, connection, params, request, ambient };
+  // Mercurius socket contexts carry no graphql-ws extra: its subscription context is per connection.
+  const webSocket = socket ? graphqlWsSocket(wsExtra) : undefined;
+  return { carrier, socket, webSocket, connection, params, request, ambient };
 }
 class GraphqlTransport implements AuthTransport {
   readonly requires = { hostlessCalls: false };
@@ -243,6 +269,8 @@ class GraphqlTransport implements AuthTransport {
   }[] = [];
   private enhancerAdvice?: BootAdvice;
   private filterAdvice?: BootAdvice;
+  /** Whether each execution's graphql-ws socket was open when the execution first reached the transport. */
+  private readonly socketsAtStart = new WeakMap<object, boolean>();
 
   constructor(
     readonly id: "apollo" | "mercurius",
@@ -291,13 +319,45 @@ class GraphqlTransport implements AuthTransport {
     };
   }
 
+  /**
+   * Whether the operation's graphql-ws socket was open when the operation started. The first
+   * classification of an execution holds for every later reader of it, so a connection that
+   * closes during authentication stays a socket operation. A socket that is already closed
+   * when an operation starts belongs to an earlier connection: a cached context carries it.
+   */
+  private openAtStart(
+    webSocket: Record<PropertyKey, unknown> | undefined,
+    info: GraphInfo | undefined,
+  ): boolean {
+    if (!webSocket) {
+      return true;
+    }
+    const execution = executionOf(info);
+    const known = execution ? this.socketsAtStart.get(execution) : undefined;
+    if (known !== undefined) {
+      return known;
+    }
+    const open = webSocket.readyState === WEBSOCKET_OPEN;
+    if (execution) {
+      this.socketsAtStart.set(execution, open);
+    }
+    return open;
+  }
+
   private assertRequest(args: readonly unknown[], kit: TransportKit) {
-    const details = carrierDetails(
-      graphqlArgs(args).context,
-      this.id,
-      kit.http,
-    );
+    const normalized = graphqlArgs(args);
+    const details = carrierDetails(normalized.context, this.id, kit.http);
     if (details.socket) {
+      if (!this.openAtStart(details.webSocket, normalized.info)) {
+        // Neither the upgrade request nor the connection's client data are consulted.
+        throw BetterAuthConfigurationError.atRequest(
+          "GRAPHQL_CONTEXT_STALE_REQUEST",
+          "GraphQL context contains the graphql-ws connection of a closed socket",
+          {
+            hint: "Return a fresh context object for every operation and every graphql-ws connection.",
+          },
+        );
+      }
       return details;
     }
     if (!kit.http?.isRequest(details.request)) {
@@ -313,7 +373,9 @@ class GraphqlTransport implements AuthTransport {
       throw BetterAuthConfigurationError.atRequest(
         "GRAPHQL_CONTEXT_STALE_REQUEST",
         "GraphQL context contains a completed request",
-        { hint: "Return a fresh context object for every operation." },
+        {
+          hint: "Return a fresh context object for every operation and every graphql-ws connection.",
+        },
       );
     }
     return details;
@@ -324,10 +386,15 @@ class GraphqlTransport implements AuthTransport {
     const args = context.getArgs();
     const normalized = graphqlArgs(args);
     const initial = carrierDetails(normalized.context, this.id, kit.http);
+    // Classified here, at the start of the operation; a stale socket keeps no key or connection
+    // of the cached context, so no memoized principal of the earlier connection answers it.
+    const open = this.openAtStart(initial.webSocket, normalized.info);
     const key =
       !initial.socket && kit.http?.isRequest(initial.request)
         ? kit.http.key(initial.request)
-        : normalized.context;
+        : open
+          ? normalized.context
+          : (executionOf(normalized.info) ?? args);
     const checked = () => this.assertRequest(args, kit);
     const headers = () => {
       const details = checked();
@@ -391,7 +458,7 @@ class GraphqlTransport implements AuthTransport {
       key,
       invocation: graphqlInvocation(args, this.reference(context)),
       lineage: this.lineage(context),
-      ...(initial.socket
+      ...(initial.socket && open
         ? { connection: initial.socket, principalTtlMs: this.connectionTtlMs }
         : {}),
       headers,

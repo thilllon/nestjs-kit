@@ -94,6 +94,20 @@ The reviewed v7 text stays unchanged. These published declarations differ from i
   update payloads are partial, delete hooks cannot return data, database hooks accept a
   missing endpoint context and multi-path hooks accept the path union
   ([issue #589](https://github.com/thilllon/nestjs-kit/issues/589)).
+- §9.2 and `T-stale-context` limit the runtime stale-context check to HTTP operations
+  (`isLive`). The Apollo transport also classifies a graphql-ws operation's socket once, when
+  the operation first reaches the transport: a context whose graphql-ws `extra` holds a socket
+  that is not `OPEN` (`readyState !== 1`) at that point fails closed with
+  `GRAPHQL_CONTEXT_STALE_REQUEST`, without reading the upgrade request, the connection
+  parameters or `subscriptionCredentials`, and its call carries neither the cached context as
+  its memo key nor a connection for principal reuse. The first classification of an execution
+  (its graphql-js variable-values object) holds for the execution's later readers, so a socket
+  that closes during authentication stays a socket operation. A cached context whose earlier
+  connection is still open remains undetectable, so the fresh-context rule covers every
+  graphql-ws connection. `T-stale-context` runs its cached-context row on connection-shaped legs
+  through `invokeConnection`, which resolves after the server observed the close. Mercurius
+  socket operations use its per-connection `subscription.context` and are unaffected
+  ([issue #625](https://github.com/thilllon/nestjs-kit/issues/625)).
 
 ## Paths in historical documents
 
