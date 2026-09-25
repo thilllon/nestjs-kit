@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { Controller, Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import {
-  ClientKafka,
   ClientProxyFactory,
   MessagePattern,
   MqttRecordBuilder,
@@ -12,6 +11,7 @@ import {
   Transport,
   type ClientProxy,
   type ClientOptions,
+  type KafkaOptions,
   type MicroserviceOptions,
 } from "@nestjs/microservices";
 import { headers as natsHeaders } from "@nats-io/transport-node";
@@ -21,6 +21,11 @@ import { firstValueFrom, timeout } from "rxjs";
 import { describe, expect, it } from "vitest";
 import { Public } from "./auth-decorators.js";
 import { BetterAuthModule } from "./auth-module.js";
+import {
+  kafkaTestConsumer,
+  ReadyClientKafka,
+  ReadyServerKafka,
+} from "./kafka-fixture.js";
 import {
   kafkaCarrier,
   mqttCarrier,
@@ -40,6 +45,17 @@ const carrierFactories = {
   redis: payloadCarrier,
 };
 type Family = keyof typeof carrierFactories;
+function kafkaOptions(id: string): Required<KafkaOptions>["options"] {
+  return {
+    client: {
+      brokers: [`127.0.0.1:${process.env.KAFKA_PORT ?? 59092}`],
+      clientId: id,
+      logLevel: logLevel.NOTHING,
+    },
+    consumer: { groupId: id, ...kafkaTestConsumer },
+    subscribe: { fromBeginning: false },
+  };
+}
 function options(family: Family, id: string): MicroserviceOptions {
   switch (family) {
     case "nats":
@@ -50,18 +66,7 @@ function options(family: Family, id: string): MicroserviceOptions {
         },
       };
     case "kafka":
-      return {
-        transport: Transport.KAFKA,
-        options: {
-          client: {
-            brokers: [`127.0.0.1:${process.env.KAFKA_PORT ?? 59092}`],
-            clientId: id,
-            logLevel: logLevel.NOTHING,
-          },
-          consumer: { groupId: id },
-          subscribe: { fromBeginning: false },
-        },
-      };
+      return { transport: Transport.KAFKA, options: kafkaOptions(id) };
     case "rmq":
       return {
         transport: Transport.RMQ,
@@ -198,18 +203,28 @@ describe("RPC real broker carriers", () => {
             })),
           });
         }
+        const server =
+          family === "kafka"
+            ? new ReadyServerKafka(kafkaOptions(id))
+            : undefined;
         app = await NestFactory.createMicroservice(Fixture, {
-          ...config,
+          ...(server ? { strategy: server } : config),
           logger: false,
           abortOnError: false,
         });
         await app.listen();
-        client = ClientProxyFactory.create(config as ClientOptions);
-        if (client instanceof ClientKafka) {
-          client.subscribeToResponseOf(protectedPattern);
-          client.subscribeToResponseOf(publicPattern);
+        if (server) {
+          const kafka = new ReadyClientKafka(kafkaOptions(id));
+          client = kafka as unknown as ClientProxy;
+          kafka.subscribeToResponseOf(protectedPattern);
+          kafka.subscribeToResponseOf(publicPattern);
+          await kafka.connect();
+          // Both consumer groups fix their start offsets after listen() and connect() resolve.
+          await Promise.all([server.ready(8000), kafka.ready(8000)]);
+        } else {
+          client = ClientProxyFactory.create(config as ClientOptions);
+          await client.connect();
         }
-        await client.connect();
         const send = (pattern: string, data: unknown) =>
           firstValueFrom(client!.send(pattern, data).pipe(timeout(8000)));
         await expect(

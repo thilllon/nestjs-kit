@@ -59,6 +59,7 @@ const pluginFiles = [
 /** Unpublished fixtures that only tests import. */
 const testSupport = [
   "jwt-extension-fixture.ts",
+  "kafka-fixture.ts",
   "policy-kit-fixtures.ts",
   "test-fixtures.ts",
 ];
