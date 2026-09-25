@@ -37,14 +37,21 @@ import { ExpressAdapter } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
 import { Kafka, logLevel } from "kafkajs";
 import { firstValueFrom, timeout } from "rxjs";
-import { afterAll, describe, it } from "vitest";
-import type { ConformanceCase } from "./auth-contracts.js";
+import { afterAll, describe, expect, it } from "vitest";
+import { adminPermissionPolicy } from "./admin.js";
+import type {
+  AuthTransport,
+  ConformanceCase,
+  ExtensionRef,
+} from "./auth-contracts.js";
 import { UseBetterAuth } from "./auth-decorators.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { BetterAuthService } from "./auth-service.js";
+import type { AuthLike } from "./auth-types.js";
 import { runConformance } from "./conformance-fixtures.js";
+import type { PolicyDelivery } from "./conformance-policy-harness.js";
 import {
   type FixtureHandler,
   type TransportConformanceOptions,
@@ -67,6 +74,11 @@ import {
   rmqCarrier,
   rpcTransport,
 } from "./microservices.js";
+import {
+  adminPolicyOptions,
+  organizationPolicyOptions,
+  policyDeliveryCases,
+} from "./policy-kit-fixtures.js";
 
 type FixtureName = Exclude<keyof TransportFixtures, "graph">;
 
@@ -655,6 +667,141 @@ function fixtureController(
   return RpcFixtureController;
 }
 
+type RpcAppOptions = Pick<
+  Parameters<TransportConformanceOptions["createApp"]>[2],
+  | "globalGuard"
+  | "override"
+  | "defaultRequirements"
+  | "principals"
+  | "globalScope"
+  | "appEnhancers"
+  | "logger"
+>;
+
+/** Boots a microservice (hybrid: an Express app with it connected) serving `handlers` as message patterns. */
+async function createRpcApp(
+  family: RpcFamily,
+  transport: ExtensionRef<AuthTransport>,
+  handlers: Map<string, FixtureHandler>,
+  auth: AuthLike,
+  options: RpcAppOptions,
+): Promise<INestApplication> {
+  const id = `nsba-${randomUUID()}`;
+  const server = await family.server(id, [...handlers.keys()]);
+  @Module({
+    imports: [
+      BetterAuthModule.forRoot({
+        auth,
+        platforms: family.hybrid ? [expressPlatform()] : [],
+        transports: [transport],
+        globalGuard: options.globalGuard,
+        principals: options.principals,
+        ...(options.defaultRequirements
+          ? { defaultRequirements: options.defaultRequirements }
+          : {}),
+        ...(options.globalScope === undefined
+          ? {}
+          : { globalScope: options.globalScope }),
+        logSummary: false,
+      } as never),
+    ],
+    controllers: [
+      fixtureController(
+        family,
+        id,
+        handlers,
+        !!family.hybrid && options.globalGuard,
+      ),
+    ],
+    providers: options.appEnhancers
+      ? [
+          { provide: APP_GUARD, useClass: BetterAuthGuard },
+          {
+            provide: APP_INTERCEPTOR,
+            useClass: BetterAuthScopeInterceptor,
+          },
+        ]
+      : [],
+  })
+  class RpcFixtureModule {}
+  let builder = Test.createTestingModule({ imports: [RpcFixtureModule] });
+  if (options.override) {
+    builder = options.override(builder);
+  }
+  const moduleRef = await builder.compile();
+  const logger = options.logger ?? false;
+  let app: INestApplication | INestMicroservice;
+  let microservice: INestMicroservice;
+  let start: () => Promise<void>;
+  if (family.hybrid) {
+    const http = moduleRef.createNestApplication(new ExpressAdapter(), {
+      logger,
+    });
+    microservice = http.connectMicroservice(server.options);
+    app = http;
+    start = async () => {
+      await http.startAllMicroservices();
+    };
+  } else {
+    microservice = moduleRef.createNestMicroservice({
+      ...server.options,
+      logger,
+    });
+    app = microservice;
+    start = async () => {
+      await microservice.listen();
+    };
+  }
+  try {
+    await app.init();
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
+  const state: Boot["state"] = { server };
+  const close = app.close.bind(app);
+  app.close = async () => {
+    try {
+      const connected = await state.client?.catch(() => undefined);
+      if (connected) {
+        await within(connected.close(), "closing the client");
+      }
+    } finally {
+      await within(close(), "closing the app");
+    }
+  };
+  const nest = app as unknown as INestApplication;
+  boots.set(nest, { id, handlers, microservice, start, state });
+  return nest;
+}
+
+/** The boot's client, started with its transport server on the first invocation. */
+function clientOf(
+  family: RpcFamily,
+  app: INestApplication,
+): Promise<RpcClient> {
+  const boot = boots.get(app)!;
+  boot.state.client ??= (async () => {
+    await within(boot.start(), "the transport server");
+    const connected = await within(
+      family.connect(boot),
+      "the client connection",
+    );
+    try {
+      // A broker consumer can join its group and fix its start offsets after listen() and connect() resolve.
+      await Promise.all([
+        boot.state.server?.ready?.(REPLY_TIMEOUT_MS),
+        connected.ready?.(REPLY_TIMEOUT_MS),
+      ]);
+    } catch (error) {
+      await connected.close();
+      throw error;
+    }
+    return connected;
+  })();
+  return boot.state.client;
+}
+
 /**
  * The built-in RPC transport, exposed through a real microservice: one message pattern per fixture, credentials in the
  * family's native carrier. A boot starts its server and client on its first invocation, so boots that serve no request
@@ -664,129 +811,43 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
   const transport = rpcTransport(
     family.carriers ? { carriers: family.carriers } : {},
   );
-  const client = (app: INestApplication): Promise<RpcClient> => {
-    const boot = boots.get(app)!;
-    boot.state.client ??= (async () => {
-      await within(boot.start(), "the transport server");
-      const connected = await within(
-        family.connect(boot),
-        "the client connection",
-      );
-      try {
-        // A broker consumer can join its group and fix its start offsets after listen() and connect() resolve.
-        await Promise.all([
-          boot.state.server?.ready?.(REPLY_TIMEOUT_MS),
-          connected.ready?.(REPLY_TIMEOUT_MS),
-        ]);
-      } catch (error) {
-        await connected.close();
-        throw error;
-      }
-      return connected;
-    })();
-    return boot.state.client;
-  };
   return {
     transport,
     expectCookieCapable: false,
     expectBrowserLeg: false,
-    async createApp(fixtures, auth, options) {
-      const id = `nsba-${randomUUID()}`;
-      const handlers = flatten(fixtures);
-      const server = await family.server(id, [...handlers.keys()]);
-      @Module({
-        imports: [
-          BetterAuthModule.forRoot({
-            auth,
-            platforms: family.hybrid ? [expressPlatform()] : [],
-            transports: [transport],
-            globalGuard: options.globalGuard,
-            principals: options.principals,
-            ...(options.defaultRequirements
-              ? { defaultRequirements: options.defaultRequirements }
-              : {}),
-            ...(options.globalScope === undefined
-              ? {}
-              : { globalScope: options.globalScope }),
-            logSummary: false,
-          } as never),
-        ],
-        controllers: [
-          fixtureController(
-            family,
-            id,
-            handlers,
-            !!family.hybrid && options.globalGuard,
-          ),
-        ],
-        providers: options.appEnhancers
-          ? [
-              { provide: APP_GUARD, useClass: BetterAuthGuard },
-              {
-                provide: APP_INTERCEPTOR,
-                useClass: BetterAuthScopeInterceptor,
-              },
-            ]
-          : [],
-      })
-      class RpcFixtureModule {}
-      let builder = Test.createTestingModule({ imports: [RpcFixtureModule] });
-      if (options.override) {
-        builder = options.override(builder);
-      }
-      const moduleRef = await builder.compile();
-      const logger = options.logger ?? false;
-      let app: INestApplication | INestMicroservice;
-      let microservice: INestMicroservice;
-      let start: () => Promise<void>;
-      if (family.hybrid) {
-        const http = moduleRef.createNestApplication(new ExpressAdapter(), {
-          logger,
-        });
-        microservice = http.connectMicroservice(server.options);
-        app = http;
-        start = async () => {
-          await http.startAllMicroservices();
-        };
-      } else {
-        microservice = moduleRef.createNestMicroservice({
-          ...server.options,
-          logger,
-        });
-        app = microservice;
-        start = async () => {
-          await microservice.listen();
-        };
-      }
-      try {
-        await app.init();
-      } catch (error) {
-        await app.close();
-        throw error;
-      }
-      const state: Boot["state"] = { server };
-      const close = app.close.bind(app);
-      app.close = async () => {
-        try {
-          const connected = await state.client?.catch(() => undefined);
-          if (connected) {
-            await within(connected.close(), "closing the client");
-          }
-        } finally {
-          await within(close(), "closing the app");
-        }
-      };
-      const nest = app as unknown as INestApplication;
-      boots.set(nest, { id, handlers, microservice, start, state });
-      return nest;
-    },
+    createApp: (fixtures, auth, options) =>
+      createRpcApp(family, transport, flatten(fixtures), auth, options),
     async invoke(app, handler, headers, input = {}) {
       const name: string =
         handler === "triple" || handler === "tripleMixed"
           ? `${handler}0`
           : (handler satisfies FixtureName);
-      return (await client(app)).send(name, input, new Headers(headers));
+      return (await clientOf(family, app)).send(
+        name,
+        input,
+        new Headers(headers),
+      );
     },
+  };
+}
+
+/**
+ * The policy kit's delivery over the built-in RPC transport: the kit's handlers as message patterns of a real
+ * microservice, credentials in the family's native carrier and the input in the payload.
+ */
+function rpcDelivery(name: string, family: RpcFamily): PolicyDelivery {
+  const transport = rpcTransport(
+    family.carriers ? { carriers: family.carriers } : {},
+  );
+  return {
+    name,
+    createApp: (handlers, auth, options) =>
+      createRpcApp(family, transport, new Map(Object.entries(handlers)), auth, {
+        globalGuard: true,
+        ...options,
+      }),
+    invoke: async (app, handler, headers, input = {}) =>
+      (await clientOf(family, app)).send(handler, input, new Headers(headers)),
   };
 }
 
@@ -849,4 +910,43 @@ describe("transport kit on the built-in RPC transport over Redis", () => {
 
 describe("transport kit on the built-in RPC transport over Kafka", () => {
   runFamily(kafka(), { timeoutMs: BROKER_TIMEOUT_MS });
+});
+
+describe("policy kit rows over the built-in RPC transport over TCP", async () => {
+  const delivery = rpcDelivery("RPC over TCP", tcp(false));
+  runConformance(
+    [
+      ...policyDeliveryCases(await adminPolicyOptions(), delivery),
+      ...policyDeliveryCases(await organizationPolicyOptions(), delivery),
+    ],
+    { describe, it },
+  );
+});
+
+describe("policy kit rows over the built-in RPC transport over TCP in a hybrid app", async () => {
+  const delivery = rpcDelivery("hybrid RPC over TCP", tcp(true));
+  runConformance(
+    [
+      ...policyDeliveryCases(await adminPolicyOptions(), delivery),
+      ...policyDeliveryCases(await organizationPolicyOptions(), delivery),
+    ],
+    { describe, it },
+  );
+});
+
+describe("RPC policy delivery mutations", () => {
+  it("fails Z-admin-rejects-api-key-session over RPC for an admin policy without fresh identity", async () => {
+    const cases = policyDeliveryCases(
+      await adminPolicyOptions({
+        ...adminPermissionPolicy,
+        requires: { ...adminPermissionPolicy.requires, freshIdentity: false },
+      }),
+      rpcDelivery("RPC over TCP", tcp(false)),
+    );
+    await expect(
+      cases
+        .find((item) => item.id === "Z-admin-rejects-api-key-session")!
+        .run(),
+    ).rejects.toThrow(/x-api-key alone on @RequirePermission.*: allowed/);
+  });
 });

@@ -1,6 +1,6 @@
 {
   "name": "nestjs-slightly-better-auth",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "A Better Auth integration for NestJS with Express and Fastify platforms, Socket.IO and ws gateways, microservice RPC transports, and admin, organization and API-key authorization",
   "license": "MIT",
   "author": "thilllon",
@@ -273,6 +273,7 @@
     "@as-integrations/express5": "1.1.2",
     "@as-integrations/fastify": "3.1.0",
     "@better-auth/api-key": "1.7.5",
+    "@electric-sql/pglite": "0.5.8",
     "@grpc/grpc-js": "1.14.5",
     "@grpc/proto-loader": "0.8.1",
     "@mercuriusjs/federation": "5.1.1",
