@@ -328,7 +328,10 @@ function probePlugin(
         "/probe/ip",
         { method: "GET", requireRequest: true },
         async (ctx) =>
-          ctx.json({ ip: getIP(ctx.request, ctx.context.options) }),
+          ctx.json({
+            ip: getIP(ctx.request, ctx.context.options),
+            resolved: resolvedIp(ctx.request, ctx.context.options),
+          }),
       ),
       probeThrowApiError: createAuthEndpoint(
         "/probe/throw-api-error",
@@ -394,6 +397,35 @@ function probePlugin(
   } satisfies BetterAuthPlugin;
   Object.defineProperty(plugin, PROBE_STATE, { value: state });
   return plugin;
+}
+
+/** A TEST-NET-2 address that no kit request sends and no kit configuration trusts. */
+const IP_SENTINEL = "198.51.100.254";
+const IP_SENTINEL_HEADER = "x-conformance-ip-sentinel";
+
+/**
+ * The client IP Better Auth resolves from the request's IP headers, without the localhost fallback getIP() returns
+ * under NODE_ENV=development/test or a truthy TEST (vitest sets it): the sentinel header is read last, so getIP()
+ * returns the sentinel exactly when the configured headers yield no trusted address.
+ */
+function resolvedIp(request: Request, options: BetterAuthOptions) {
+  const ipAddress = options.advanced?.ipAddress;
+  const headers = new Headers(request.headers);
+  headers.set(IP_SENTINEL_HEADER, IP_SENTINEL);
+  const ip = getIP(headers, {
+    ...options,
+    advanced: {
+      ...options.advanced,
+      ipAddress: {
+        ...ipAddress,
+        ipAddressHeaders: [
+          ...(ipAddress?.ipAddressHeaders ?? ["x-forwarded-for"]),
+          IP_SENTINEL_HEADER,
+        ],
+      },
+    },
+  });
+  return ip === IP_SENTINEL ? null : ip;
 }
 
 /** The probe state of an instance that includes conformanceProbePlugin(). */
