@@ -216,6 +216,7 @@ const entryPolicies: Readonly<Record<string, EntryPolicy>> = {
       "plugin",
       "unit:session",
       "unit:http",
+      "unit:admin",
       "unit:organization",
       "kit:testing",
       "kit:conformance",

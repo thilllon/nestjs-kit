@@ -263,6 +263,30 @@ async function withHarness(
   }
 }
 
+/**
+ * Judges one principal against a requirement through the real evaluator, as policyConformance does, and reports how
+ * many policy evaluations ran. The principal-source kit uses it for the policy rows of S-apikey-org-key.
+ */
+export async function judgePrincipal(
+  auth: AuthLike,
+  requirement: RequirementExpr,
+  principal: AuthPrincipal,
+): Promise<{ decision: AuthorizationDecision; evaluations: number }> {
+  const unused = async (): Promise<AuthPrincipal> => principal;
+  const value = await harness({
+    requirement,
+    auth,
+    allowingPrincipal: unused,
+    denyingPrincipal: unused,
+  });
+  try {
+    const decision = await value.decide(principal);
+    return { decision, evaluations: value.invocations.count };
+  } finally {
+    await value.close();
+  }
+}
+
 function betterAuthCalls(probe: ProbeState, from: number): string[] {
   return probe.calls.slice(from).filter((path) => path !== "/get-session");
 }

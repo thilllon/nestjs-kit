@@ -76,6 +76,10 @@ export interface ProbeState {
   fault: ((path: string) => unknown) | undefined;
   /** Returns a value to throw from a database adapter operation (a storage outage); undefined runs it. */
   storageFault: ((call: StorageCall) => unknown) | undefined;
+  /** Milliseconds a database adapter operation waits before it runs or throws its fault (a stalled storage). */
+  storageDelay: ((call: StorageCall) => number | undefined) | undefined;
+  /** Returns a value the before hook answers a path with instead of the endpoint (a short-circuit); undefined dispatches. */
+  respond: ((path: string) => unknown) | undefined;
   /** Milliseconds the before hook waits for a path, so that concurrent sources settle in a chosen order. */
   delay: ((path: string) => number | undefined) | undefined;
   streamCancelled: boolean;
@@ -91,6 +95,8 @@ export function createProbeState(): ProbeState {
     order: [],
     fault: undefined,
     storageFault: undefined,
+    storageDelay: undefined,
+    respond: undefined,
     delay: undefined,
     streamCancelled: false,
   };
@@ -137,6 +143,10 @@ function instrumentStorage(adapter: unknown, state: ProbeState): void {
         model: typeof model === "string" ? model : undefined,
       };
       state.storage.push(`${method}:${call.model ?? ""}`);
+      const stall = state.storageDelay?.(call);
+      if (stall) {
+        await new Promise((resolve) => setTimeout(resolve, stall));
+      }
       const fault = state.storageFault?.(call);
       if (fault !== undefined) {
         throw fault;
@@ -354,6 +364,8 @@ function probePlugin(
             if (fault !== undefined) {
               throw fault;
             }
+            // Better Auth returns a before hook's non-context object as the endpoint's answer.
+            return state.respond?.(ctx.path);
           }),
         },
       ],
