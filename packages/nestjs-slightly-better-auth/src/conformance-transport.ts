@@ -10,6 +10,7 @@ import {
 import { DiscoveryService, ModuleRef, Reflector } from "@nestjs/core";
 import type { TestingModuleBuilder } from "@nestjs/testing";
 import type { BetterAuthOptions } from "better-auth";
+import { organization } from "better-auth/plugins";
 import type {
   AuthorizationPolicy,
   AuthPrincipalBase,
@@ -67,6 +68,8 @@ import {
 import {
   ACTIVE_ORGANIZATION_ID,
   ActiveOrganizationId,
+  fromParam,
+  orgPermission,
 } from "./organization.js";
 import { absent, authenticated, rejected } from "./principal-resolver.js";
 import { CurrentSession } from "./session-principal.js";
@@ -365,8 +368,16 @@ const denyPolicy: AuthorizationPolicy<Record<string, never>> = {
   id: "nestjs-slightly-better-auth:conformance/deny",
   evaluate: () => deny({ reason: "CONFORMANCE_DENIED" }),
 };
-// The kit's own organization policy, not orgPermission(): it decides from the invocation's orgId input alone, so
-// every transport can run T-invocation-decisions without the organization plugin and its data.
+/**
+ * The 'org' fixture's requirement: the organization unit's permission check on the invocation's orgId input. The kit
+ * seeds org-a and org-a2, which the kit identity owns, and org-b, where it is a member without that permission.
+ */
+const orgFixturePermission = orgPermission(
+  { organization: ["update"] },
+  { organization: fromParam("orgId") },
+);
+// The kit's per-representation policy for federation reference resolvers: it decides from the representation's orgId
+// alone, so reference boots need no organization data per representation.
 const orgPolicy: AuthorizationPolicy<Record<string, never>> = {
   id: "nestjs-slightly-better-auth:conformance/organization",
   requires: { principals: [SESSION_KIND] },
@@ -584,7 +595,7 @@ function kitFixtures(
     org: withExtra(
       "org",
       handler(
-        [Require(requirement(orgPolicy, {}))],
+        [Require(orgFixturePermission)],
         [ActiveOrganizationId()],
         "read",
         ([organization], input) => {
@@ -796,13 +807,56 @@ interface KitEnv {
   sessionCookieName(): Promise<string>;
 }
 
+/** The organizations the 'org' fixture names: the identity owns org-a and org-a2 and is a plain member of org-b. */
+async function seedOrganizations(
+  auth: AuthLike,
+  userId: string,
+): Promise<void> {
+  const context = (await auth.$context) as {
+    adapter: {
+      create(input: {
+        model: string;
+        data: Record<string, unknown>;
+        forceAllowId?: boolean;
+      }): Promise<unknown>;
+    };
+  };
+  for (const [id, role] of [
+    ["org-a", "owner"],
+    ["org-a2", "owner"],
+    ["org-b", "member"],
+  ] as const) {
+    await context.adapter.create({
+      model: "organization",
+      data: {
+        id,
+        name: id,
+        slug: `${id}-${globalThis.crypto.randomUUID()}`,
+        createdAt: new Date(),
+      },
+      forceAllowId: true,
+    });
+    await context.adapter.create({
+      model: "member",
+      data: { organizationId: id, userId, role, createdAt: new Date() },
+    });
+  }
+}
+
 async function environment(
   authOptions: Omit<BetterAuthOptions, "database"> = {},
   connectionLeg = false,
 ): Promise<KitEnv> {
-  const auth = createConformanceAuth(authOptions);
+  const plugins = authOptions.plugins ?? [];
+  const auth = createConformanceAuth({
+    ...authOptions,
+    plugins: plugins.some((plugin) => plugin.id === "organization")
+      ? plugins
+      : [...plugins, organization()],
+  });
   const probe = await probeOf(auth);
   const identity = await kitIdentity(auth);
+  await seedOrganizations(auth, identity.userId);
   const keys: KitKeys = {
     valid: `key-${globalThis.crypto.randomUUID()}`,
     limited: `limited-${globalThis.crypto.randomUUID()}`,

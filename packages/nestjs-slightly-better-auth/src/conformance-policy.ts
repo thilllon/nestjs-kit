@@ -1,36 +1,19 @@
 import assert from "node:assert/strict";
-import { Controller, Get, type ExecutionContext } from "@nestjs/common";
-import { Test, type TestingModule } from "@nestjs/testing";
+import { Inject, Injectable, Scope } from "@nestjs/common";
 import { APIError } from "better-auth/api";
 import type {
+  AuthorizationContext,
   AuthorizationDecision,
   AuthorizationPolicy,
-  PolicyInvoker,
-  PrincipalResolver,
-  PrincipalSource,
   Requirement,
-  RequirementExpr,
-  RoutePlan,
-  TransportCall,
 } from "./auth-contracts.js";
 import { Require } from "./auth-decorators.js";
 import {
-  BetterAuthConfigurationError,
   isAuthFailure,
   isConfigurationError,
   isInfrastructureError,
 } from "./auth-errors.js";
-import { BetterAuthModule } from "./auth-module.js";
-import {
-  INSTANCE_REGISTRY,
-  POLICY_INVOKER,
-  POLICY_RESOLVER,
-  PRINCIPAL_RESOLVER,
-  REQUEST_SCOPE,
-  ROUTE_PLANNER,
-} from "./auth-tokens.js";
-import type { AuthLike, AuthPrincipal } from "./auth-types.js";
-import { AuthorizationEvaluator } from "./authorization-evaluator.js";
+import type { AuthPrincipal } from "./auth-types.js";
 import {
   bootIssueCodes,
   type ConformanceCase,
@@ -38,234 +21,25 @@ import {
   conformanceSkip,
   type ConformanceOutcome,
   createConformanceAuth,
-  probeOf,
-  type ProbeState,
   settle,
 } from "./conformance-fixtures.js";
-import type { InstanceRegistry } from "./instance-registry.js";
-import type { PolicyResolver } from "./policy-resolver.js";
-import type { RequestScope } from "./request-scope.js";
-import type { RoutePlanner } from "./route-planner.js";
-import { authHeadersFor } from "./testing.js";
+import {
+  betterAuthCalls,
+  boot,
+  type Harness,
+  hasPlugin,
+  KIT_ROUTE,
+  type PolicyConformanceOptions,
+  requirementsOf,
+  sdkContext,
+  sessionHeaders,
+  sessionReads,
+  staticPolicies,
+  withHarness,
+} from "./conformance-policy-harness.js";
+import { unitPolicyCases } from "./conformance-policy-units.js";
 
-export interface PolicyConformanceOptions {
-  /**
-   * The requirement to judge. Its policies must be policy objects: the kit boots no application providers, so a class
-   * or token reference cannot resolve. For a DI policy, pass an instance built with its dependencies (new MyPolicy(deps)).
-   */
-  requirement: RequirementExpr;
-  /**
-   * The Better Auth instance the principals belong to. It must include conformanceProbePlugin(), testUtils(), the
-   * policy's plugins and nestjs(): createConformanceAuth({ plugins }) builds one. Session principals are judged with
-   * real session headers for their user (testUtils().getAuthHeaders).
-   */
-  auth: AuthLike;
-  allowingPrincipal(): Promise<AuthPrincipal>;
-  denyingPrincipal(): Promise<AuthPrincipal>;
-  delegatedPrincipal?(): Promise<AuthPrincipal>;
-}
-
-function requirementsOf(expression: RequirementExpr): Requirement[] {
-  return "anyOf" in expression
-    ? expression.anyOf.flatMap(requirementsOf)
-    : "allOf" in expression
-      ? expression.allOf.flatMap(requirementsOf)
-      : [expression];
-}
-
-function isPolicyObject(value: unknown): value is AuthorizationPolicy<unknown> {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    typeof (value as AuthorizationPolicy<unknown>).evaluate === "function"
-  );
-}
-
-/** The policy objects of a requirement; the kit rejects class and token references up front. */
-function staticPolicies(
-  expression: RequirementExpr,
-): AuthorizationPolicy<unknown>[] {
-  return requirementsOf(expression).map((item) => {
-    if (!isPolicyObject(item.policy)) {
-      throw new BetterAuthConfigurationError(
-        "CONFORMANCE_POLICY_OBJECT_REQUIRED",
-        `policyConformance received a requirement whose policy is a class or injection token (${String((item.policy as { name?: unknown })?.name ?? item.policy)}); the kit registers no application providers to resolve it.`,
-        "Pass the policy object, e.g. requirement(new MyPolicy(dependencies), params).",
-      );
-    }
-    return item.policy;
-  });
-}
-
-function controllerFor(expression: RequirementExpr) {
-  @Controller()
-  class PolicyConformanceController {
-    @Get("nestjs-slightly-better-auth-policy-conformance")
-    handle(): void {}
-  }
-  Require(expression)(
-    PolicyConformanceController.prototype,
-    "handle",
-    Object.getOwnPropertyDescriptor(
-      PolicyConformanceController.prototype,
-      "handle",
-    )!,
-  );
-  return PolicyConformanceController;
-}
-
-interface Harness {
-  readonly probe: ProbeState;
-  readonly invocations: { count: number };
-  readonly policies: PolicyResolver;
-  decide(
-    principal: AuthPrincipal,
-    call?: {
-      key?: object;
-      invocation?: object;
-      /** Runs after the principal's session headers exist, right before evaluation. */
-      beforeEvaluate?: () => void;
-    },
-  ): Promise<AuthorizationDecision>;
-  close(): Promise<void>;
-}
-
-/**
- * Placeholder sources for the non-session kinds a requirement names, so boot validation (B15) sees producers of
- * every judged kind. They never resolve anything: the kit hands principals to the evaluator directly.
- */
-function kindSources(expression: RequirementExpr): PrincipalSource[] {
-  const kinds = new Set<string>();
-  const policies = staticPolicies(expression);
-  requirementsOf(expression).forEach((item, index) => {
-    for (const kind of item.principals ??
-      policies[index]?.requires?.principals ??
-      []) {
-      kinds.add(kind);
-    }
-  });
-  kinds.delete("session");
-  return [...kinds].map((kind) => ({
-    id: `nestjs-slightly-better-auth:conformance-kind:${kind}`,
-    kinds: [kind] as PrincipalSource["kinds"],
-    acceptance: "explicit",
-    delegates: true,
-    resolve: async () => ({ outcome: "absent" }) as const,
-  }));
-}
-
-async function boot(
-  auth: AuthLike,
-  expression: RequirementExpr,
-): Promise<{
-  moduleRef: TestingModule;
-  controller: ReturnType<typeof controllerFor>;
-}> {
-  const controller = controllerFor(expression);
-  const moduleRef = await Test.createTestingModule({
-    imports: [
-      BetterAuthModule.forRoot({
-        auth,
-        principals: kindSources(expression),
-        http: { mount: false },
-        logSummary: false,
-      } as never),
-    ],
-    controllers: [controller],
-  }).compile();
-  moduleRef.useLogger(false);
-  try {
-    await moduleRef.init();
-  } catch (error) {
-    await moduleRef.close().catch(() => undefined);
-    throw error;
-  }
-  return { moduleRef, controller };
-}
-
-async function harness(options: PolicyConformanceOptions): Promise<Harness> {
-  const probe = await probeOf(options.auth);
-  const { moduleRef, controller } = await boot(
-    options.auth,
-    options.requirement,
-  );
-  const real = moduleRef.get<PolicyInvoker>(POLICY_INVOKER);
-  const invocations = { count: 0 };
-  const counting: PolicyInvoker = {
-    invoke(policy, params, context) {
-      invocations.count++;
-      return real.invoke(policy, params, context);
-    },
-  };
-  const policies = moduleRef.get<PolicyResolver>(POLICY_RESOLVER);
-  const evaluator = new AuthorizationEvaluator(
-    policies,
-    counting,
-    moduleRef.get<PrincipalResolver>(PRINCIPAL_RESOLVER),
-    moduleRef.get<RequestScope>(REQUEST_SCOPE),
-  );
-  const plan: RoutePlan = moduleRef
-    .get<RoutePlanner>(ROUTE_PLANNER)
-    .plan(controller, "handle");
-  const entry = moduleRef
-    .get<InstanceRegistry>(INSTANCE_REGISTRY)
-    .get("default");
-  const execution = {
-    getClass: () => controller,
-    getHandler: () => controller.prototype.handle,
-    getArgs: () => [],
-    getArgByIndex: () => undefined,
-    getType: () => "nestjs-slightly-better-auth:conformance",
-  } as unknown as ExecutionContext;
-  return {
-    probe,
-    invocations,
-    policies,
-    async decide(principal, ids = {}) {
-      const headers =
-        principal.userId && !principal.delegation
-          ? await authHeadersFor(options.auth, principal.userId)
-          : new Headers();
-      const key = ids.key ?? {};
-      const call: TransportCall = {
-        key,
-        invocation: ids.invocation ?? key,
-        headers: () => new Headers(headers),
-        clientIp: null,
-        cookies: null,
-        param: () => undefined,
-      };
-      ids.beforeEvaluate?.();
-      return evaluator.evaluate(
-        plan,
-        principal,
-        call,
-        entry,
-        execution,
-        "conformance",
-      );
-    },
-    close: () => moduleRef.close(),
-  };
-}
-
-async function withHarness(
-  options: PolicyConformanceOptions,
-  fn: (harness: Harness) => Promise<ConformanceOutcome>,
-): Promise<ConformanceOutcome> {
-  const value = await harness(options);
-  try {
-    return await fn(value);
-  } finally {
-    value.probe.fault = undefined;
-    value.probe.storageFault = undefined;
-    await value.close();
-  }
-}
-
-function betterAuthCalls(probe: ProbeState, from: number): string[] {
-  return probe.calls.slice(from).filter((path) => path !== "/get-session");
-}
+export type { PolicyConformanceOptions } from "./conformance-policy-harness.js";
 
 const noGrant = {
   description: "conformance: no grant",
@@ -273,11 +47,61 @@ const noGrant = {
 };
 
 /**
- * The authorization-policy kit (invariants Z1–Z6). Each principal is judged through the real AuthorizationEvaluator,
- * so the delegation gate, error normalization and the per-invocation decision memo apply exactly as in the guard; an
- * infrastructure error thrown here is the guard's 5xx. Storage outages are injected into the instance's database
- * adapter, so an endpoint that swallows a storage error into a 401 is exercised; APIError mapping uses the probe
- * plugin's before hook. Requirements must name policy objects (see PolicyConformanceOptions.requirement).
+ * The evaluator's answer to a session that ended between the guard's read and the policy's call: 401 (the guard's
+ * UNAUTHENTICATED) with Better Auth's generic code as `reason`, or UNAUTHENTICATED when the 401 carried no code.
+ */
+function isSessionLoss(decision: AuthorizationDecision): boolean {
+  return (
+    decision.effect === "deny" &&
+    decision.status === 401 &&
+    (decision.reason === "UNAUTHORIZED" ||
+      decision.reason === "UNAUTHENTICATED")
+  );
+}
+
+/** Storage operations on the session model since `from` (database reads and writes of sessions). */
+function sessionStorage(storage: readonly string[], from: number): number {
+  return storage.slice(from).filter((entry) => entry.endsWith(":session"))
+    .length;
+}
+
+const SCOPED_DEPENDENCY =
+  "nestjs-slightly-better-auth:conformance/request-scoped-dependency";
+
+/**
+ * The unit's first policy as a DI class policy with one injected dependency, whose provider scope the case chooses:
+ * the same requirement then boots with a singleton dependency and fails B11 with a request-scoped one.
+ */
+function classPolicyFor(policy: AuthorizationPolicy<unknown>) {
+  @Injectable()
+  class ConformanceClassPolicy implements AuthorizationPolicy<unknown> {
+    readonly id = `${policy.id}#conformance-class`;
+    readonly requires = policy.requires;
+
+    constructor(
+      @Inject(SCOPED_DEPENDENCY)
+      readonly dependency: { readonly scope: string },
+    ) {}
+
+    evaluate(
+      params: unknown,
+      context: AuthorizationContext,
+    ): AuthorizationDecision | Promise<AuthorizationDecision> {
+      return policy.evaluate(params, context as never);
+    }
+  }
+  return ConformanceClassPolicy;
+}
+
+/**
+ * The authorization-policy kit (invariants Z1–Z6 and the unit-specific rows of design §14.1). Each principal is judged
+ * through the real AuthorizationEvaluator, so the delegation gate, error normalization and the per-invocation
+ * decision memo apply exactly as in the guard; an infrastructure error thrown here is the guard's 5xx. Cases that
+ * need route planning, acceptance or principal resolution send an in-process request through the real
+ * BetterAuthGuard. Storage outages are injected into the instance's database adapter, so an endpoint that swallows a
+ * storage error into a 401 is exercised; APIError mapping uses the probe plugin's before hook. Requirements must name
+ * policy objects (see PolicyConformanceOptions.requirement). Unit-specific cases run when the requirement contains
+ * the built-in admin, organization or API-key policy and skip with the reason otherwise.
  */
 export function policyConformance(
   options: PolicyConformanceOptions,
@@ -298,6 +122,59 @@ export function policyConformance(
   const plugins = [
     ...new Set(known.flatMap((policy) => policy.requires?.plugins ?? [])),
   ];
+  const infraThrows =
+    (warmCache: boolean) =>
+    async ({ decide, probe, auth }: Harness): Promise<ConformanceOutcome> => {
+      const principal = await options.allowingPrincipal();
+      if (warmCache && (!principal.userId || principal.delegation)) {
+        return conformanceSkip(
+          "the allowing principal carries no session cookie for a cookie cache",
+        );
+      }
+      const headers = warmCache
+        ? await sessionHeaders(auth, principal.userId!, { warmCache: true })
+        : undefined;
+      if (headers === null) {
+        return conformanceSkip(
+          "the instance's session.cookieCache is off; run the kit on an instance with session.cookieCache.enabled for this variant",
+        );
+      }
+      const customSession = await hasPlugin(auth, "custom-session");
+      let calls = probe.calls.length;
+      let storage = probe.storage.length;
+      const result = await settle(() =>
+        decide(principal, {
+          ...(headers ? { headers } : {}),
+          beforeEvaluate: () => {
+            calls = probe.calls.length;
+            storage = probe.storage.length;
+            probe.storageFault = () => new Error("conformance storage outage");
+          },
+        }),
+      );
+      probe.storageFault = undefined;
+      if (
+        betterAuthCalls(probe, calls).length === 0 &&
+        probe.storage.length === storage
+      ) {
+        return conformanceSkip(
+          "the policy read no storage and called no Better Auth endpoint for the allowing principal",
+        );
+      }
+      if (customSession && result.ok && isSessionLoss(result.value)) {
+        // RK2: customSession swallows the failure of its inner session read, the re-classification read included.
+        return;
+      }
+      assert.equal(
+        result.ok,
+        false,
+        `a storage outage was decided: ${JSON.stringify(result.ok && result.value)}`,
+      );
+      assert.ok(
+        isInfrastructureError(!result.ok && result.error),
+        String(!result.ok && result.error),
+      );
+    };
   return [
     add(
       "Z-deny-decision",
@@ -327,40 +204,13 @@ export function policyConformance(
     ),
     add(
       "Z-infra-throws",
-      "a storage outage after the session read is infrastructure, never a denial",
-      async ({ decide, probe }) => {
-        const principal = await options.allowingPrincipal();
-        let calls = probe.calls.length;
-        let storage = probe.storage.length;
-        const result = await settle(() =>
-          decide(principal, {
-            beforeEvaluate: () => {
-              calls = probe.calls.length;
-              storage = probe.storage.length;
-              probe.storageFault = () =>
-                new Error("conformance storage outage");
-            },
-          }),
-        );
-        probe.storageFault = undefined;
-        if (
-          betterAuthCalls(probe, calls).length === 0 &&
-          probe.storage.length === storage
-        ) {
-          return conformanceSkip(
-            "the policy read no storage and called no Better Auth endpoint for the allowing principal",
-          );
-        }
-        assert.equal(
-          result.ok,
-          false,
-          `a storage outage was decided: ${JSON.stringify(result.ok && result.value)}`,
-        );
-        assert.ok(
-          isInfrastructureError(!result.ok && result.error),
-          String(!result.ok && result.error),
-        );
-      },
+      "a storage outage after the session read is infrastructure, never a denial (cookie cache off)",
+      infraThrows(false),
+    ),
+    add(
+      "Z-infra-throws",
+      "a storage outage after the session read is infrastructure, never a denial (warm cookie cache)",
+      infraThrows(true),
     ),
     add(
       "Z-apierror-mapping",
@@ -477,6 +327,105 @@ export function policyConformance(
       },
     ),
     add(
+      "Z-policy-session-lost",
+      "a session lost before the policy's call is 401, a storage failure there is 5xx, each with one re-read per request",
+      async ({ decide, probe, auth }) => {
+        const principal = await options.allowingPrincipal();
+        if (principal.source !== "better-auth:session" || !principal.userId) {
+          return conformanceSkip(
+            "the allowing principal is not a session principal of the built-in session source",
+          );
+        }
+        const userId = principal.userId;
+        const sdk = await sdkContext(auth);
+        const customSession = await hasPlugin(auth, "custom-session");
+        // Revoked: both invocations of one request answer 401 and share one re-classification read.
+        const revoked = {
+          key: {},
+          headers: await sessionHeaders(auth, userId),
+        };
+        let reads = probe.calls.length;
+        let storage = probe.storage.length;
+        const first = await decide(principal, {
+          key: revoked.key,
+          invocation: {},
+          headers: revoked.headers!,
+          beforeEvaluate: async () => {
+            await sdk.internalAdapter.deleteUserSessions(userId);
+            reads = probe.calls.length;
+            storage = probe.storage.length;
+          },
+        });
+        if (
+          first.effect === "allow" &&
+          sessionStorage(probe.storage, storage) === 0
+        ) {
+          return conformanceSkip(
+            "the policy's Better Auth calls do not read the principal's session",
+          );
+        }
+        const second = await decide(principal, {
+          key: revoked.key,
+          invocation: {},
+          headers: revoked.headers!,
+        });
+        for (const decision of [first, second]) {
+          assert.ok(
+            isSessionLoss(decision),
+            `a session revoked before the policy's call must deny 401 UNAUTHENTICATED: ${JSON.stringify(decision)}`,
+          );
+        }
+        assert.equal(
+          sessionReads(probe, reads),
+          1,
+          `two invocations of one request re-read the session ${sessionReads(probe, reads)} times`,
+        );
+        // Storage failure at the same point: infrastructure (customSession: the documented 401, RK2).
+        const failing = {
+          key: {},
+          headers: await sessionHeaders(auth, userId),
+        };
+        const outcomes = [];
+        for (const index of [0, 1]) {
+          outcomes.push(
+            await settle(() =>
+              decide(principal, {
+                key: failing.key,
+                invocation: {},
+                headers: failing.headers!,
+                beforeEvaluate: () => {
+                  if (index === 0) {
+                    reads = probe.calls.length;
+                  }
+                  probe.storageFault = () =>
+                    new Error("conformance storage outage");
+                },
+              }),
+            ),
+          );
+        }
+        probe.storageFault = undefined;
+        for (const outcome of outcomes) {
+          if (customSession) {
+            assert.ok(
+              outcome.ok && isSessionLoss(outcome.value),
+              `with customSession a storage failure must answer the documented 401: ${outcome.ok ? JSON.stringify(outcome.value) : String(outcome.error)}`,
+            );
+          } else {
+            assert.ok(
+              !outcome.ok && isInfrastructureError(outcome.error),
+              `a storage failure at the policy's call must be infrastructure: ${JSON.stringify(outcome.ok && outcome.value)}`,
+            );
+          }
+        }
+        assert.equal(
+          sessionReads(probe, reads),
+          1,
+          `two invocations of one request re-read the session ${sessionReads(probe, reads)} times during the outage`,
+        );
+      },
+    ),
+    add(
       "Z-delegation-scope",
       "a delegated principal is never allowed beyond its own grant",
       async ({ decide }) => {
@@ -551,6 +500,51 @@ export function policyConformance(
       },
     ),
     conformanceCase(
+      "Z-singleton",
+      "the policy as a class with a request-scoped dependency fails boot; with a singleton dependency it boots",
+      async () => {
+        const leaf = requirementsOf(options.requirement)[0]!;
+        const policy = known[0]!;
+        const bootWith = (scope: Scope) => {
+          const ClassPolicy = classPolicyFor(policy);
+          const requirement: Requirement = {
+            ...leaf,
+            policy: ClassPolicy as never,
+          };
+          return settle(() =>
+            boot(options.auth, leaf, {
+              routes: { [KIT_ROUTE]: [Require(requirement)] },
+              sources: options.sources,
+              providers: [
+                ClassPolicy,
+                {
+                  provide: SCOPED_DEPENDENCY,
+                  useFactory: () => ({ scope: String(scope) }),
+                  scope,
+                },
+              ],
+            }),
+          );
+        };
+        const singleton = await bootWith(Scope.DEFAULT);
+        if (!singleton.ok) {
+          assert.fail(
+            `the class policy with a singleton dependency failed boot: ${String(singleton.error)}`,
+          );
+        }
+        await singleton.value.moduleRef.close();
+        const scoped = await bootWith(Scope.REQUEST);
+        if (scoped.ok) {
+          await scoped.value.moduleRef.close();
+          assert.fail("a class policy with a request-scoped dependency booted");
+        }
+        assert.ok(
+          bootIssueCodes(scoped.error).includes("NON_SINGLETON_EXTENSION"),
+          `boot did not report NON_SINGLETON_EXTENSION (B11): ${String(scoped.error)}`,
+        );
+      },
+    ),
+    conformanceCase(
       "Z-boot-prerequisite",
       "an instance without the policy's plugin prerequisites fails boot",
       async () => {
@@ -570,5 +564,6 @@ export function policyConformance(
         ? undefined
         : "the policy declares no plugin prerequisites",
     ),
+    ...unitPolicyCases(options, known),
   ];
 }
