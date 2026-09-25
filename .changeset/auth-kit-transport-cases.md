@@ -1,7 +1,0 @@
----
-"nestjs-slightly-better-auth": minor
----
-
-The transport conformance kit adds `T-public-unclaimed-context`, `T-inherited-handler`, `T-metadata-canary`, `T-dynamic-base-url`, `T-stale-context`, `T-carrier`, `T-subscription-credentials`, `T-subscription-origin` and `T-subscription-origin-junk-connection-params`. It also adds the `@SkipOriginCheck()` and `disableCSRFCheck` rows of `T-csrf-http-unsafe`, direct caller-session rows to `T-csrf-safe-methods`, the inherited forwarding field to `T-csrf-login-proxy`, and the nested, session-reader and `forwardDirectCalls` boots to `T-stamp-per-plan`. `T-inherit-no-lookup` gains `W_FIELD_RESOLVER_INHERITS` and class-level acceptance boots, and `T-reference-resolver` gains the reference-omitted and class-level requirement boots. Harnesses can pass `invokeInherited`, `graphqlContexts` and `invokeConnection`'s `connectionParams` option, and `createApp` receives `forwardDirectCalls`, `fieldResolverCoverage` and `graphqlContext`. `TransportFixtures` adds `callerSession`, `publicCallerSession` and the `inherited` subclass decorators, and `GraphFixtures` adds `forwarding` and `classDecorators`.
-
-On Fastify, `@CurrentPrincipal()` and the other principal parameters now read the guard's result without the scope interceptor (`globalScope: false`), because the HTTP transport's invocation is the request object the handler receives. `I_CLASS_METADATA_OPERATIONS_ONLY` names the resolver class.
