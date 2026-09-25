@@ -76,6 +76,13 @@ export interface ProbeState {
   fault: ((path: string) => unknown) | undefined;
   /** Returns a value to throw from a database adapter operation (a storage outage); undefined runs it. */
   storageFault: ((call: StorageCall) => unknown) | undefined;
+  /**
+   * Returns a value the before hook answers with instead of dispatching the endpoint, as a plugin's hook that
+   * short-circuits an endpoint does (apiKey's session for /get-session); undefined dispatches normally.
+   */
+  respond:
+    | ((path: string, headers: Headers | undefined) => unknown)
+    | undefined;
   /** Milliseconds the before hook waits for a path, so that concurrent sources settle in a chosen order. */
   delay: ((path: string) => number | undefined) | undefined;
   streamCancelled: boolean;
@@ -91,6 +98,7 @@ export function createProbeState(): ProbeState {
     order: [],
     fault: undefined,
     storageFault: undefined,
+    respond: undefined,
     delay: undefined,
     streamCancelled: false,
   };
@@ -353,6 +361,10 @@ function probePlugin(
             const fault = state.fault?.(ctx.path);
             if (fault !== undefined) {
               throw fault;
+            }
+            const response = state.respond?.(ctx.path, ctx.headers);
+            if (response !== undefined) {
+              return response;
             }
           }),
         },

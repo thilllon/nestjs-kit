@@ -150,16 +150,14 @@ export function sessionPrincipal<S = AuthSession>(
           code: "W_API_KEY_FULL_SESSION",
           message: `${options.apiKeySessions ? "API-key sessions grant" : "If enableSessionForAPIKeys is enabled, API-key sessions grant"} full session access on ordinary authenticated routes.`,
         });
-        if (
-          context.policies.some(
-            (policy) => policy.requires?.presentsCredentials,
-          )
-        ) {
+        const presenting = context.policies
+          .filter((policy) => policy.requires?.presentsCredentials)
+          .map((policy) => policy.id);
+        if (presenting.length) {
           warnings.push({
             level: "warn",
             code: "W_API_KEY_SESSION_MULTIPLIER",
-            message:
-              "Policies presenting credentials can validate API-key sessions again and consume additional quota.",
+            message: `${options.apiKeySessions ? "Each" : "If enableSessionForAPIKeys is enabled, each"} check of these policies validates the API key again and spends its quota once more per request: ${presenting.join(", ")}.`,
           });
         }
       }
