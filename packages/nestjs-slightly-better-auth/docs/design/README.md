@@ -80,6 +80,21 @@ using their own file location. The prompt renderer locates this package independ
 of the current working directory; relative `--out` and `--scratch` paths resolve from
 the package directory. Absolute paths work for all three tools.
 
+## Declarations that differ from the reviewed text
+
+The reviewed v7 text stays unchanged. These published declarations differ from it:
+
+- §2.2.3 `HookMethodDecorator<P>` and `DbHookMethodDecorator<E, Ph>` infer the decorated
+  method type `M` and constrain it to `(ctx: AuthHookContext<P>) => unknown` or
+  `DatabaseHookMethod<E, Ph>`. The reviewed declarations fix the invariant
+  `TypedPropertyDescriptor` type instead, which rejects sound methods with fewer
+  parameters or narrower results, such as the one-parameter
+  `@BeforeDatabase("user.delete")` hook in §4.5.2.
+  The §11.3 and §11.4 hook type guarantees still hold: before-hook bodies are unvalidated,
+  update payloads are partial, delete hooks cannot return data, database hooks accept a
+  missing endpoint context and multi-path hooks accept the path union
+  ([issue #589](https://github.com/thilllon/nestjs-kit/issues/589)).
+
 ## Paths in historical documents
 
 `BA/` identifies the Better Auth monorepo at v1.7.4; `REF/` identifies

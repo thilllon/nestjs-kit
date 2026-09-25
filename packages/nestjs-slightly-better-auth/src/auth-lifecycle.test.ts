@@ -8,7 +8,7 @@ import { BetterAuthCoreModule } from "./auth-core-module.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthService } from "./auth-service.js";
 import { INSTANCE_REGISTRY, REQUEST_SCOPE } from "./auth-tokens.js";
-import type { AuthHookContext, DatabaseHookMethod } from "./auth-types.js";
+import type { AuthHookContext, DatabaseHookData } from "./auth-types.js";
 import { BRIDGE_HANDLE, type BridgeHandle } from "./bridge-protocol.js";
 import { InstanceRegistry } from "./instance-registry.js";
 import { MountCoordinator } from "./mount-coordinator.js";
@@ -228,8 +228,8 @@ describe("application lifecycle", () => {
     let result: unknown;
     class SecurityHooks {
       @BeforeDatabase("user.create") reject(
-        ...[data, _ctx]: Parameters<DatabaseHookMethod<"user.create", "before">>
-      ): ReturnType<DatabaseHookMethod<"user.create", "before">> {
+        data: DatabaseHookData<"user.create">,
+      ) {
         if (data.email === "blocked@example.com") {
           return false;
         }

@@ -345,18 +345,25 @@ export interface DbHookOptions {
   instance?: string;
 }
 export type HookPredicate = (ctx: AuthHookContext) => boolean;
-export type HookMethodDecorator<P extends string> = <T>(
+/**
+ * The decorated method type M is inferred and constrained rather than fixed: TypedPropertyDescriptor is invariant, so a fixed
+ * descriptor type would reject sound methods that declare fewer parameters or return a narrower result.
+ */
+export type HookMethodDecorator<P extends string> = <
+  M extends (ctx: AuthHookContext<P>) => unknown,
+>(
   target: object,
   key: string | symbol,
-  descriptor: TypedPropertyDescriptor<(ctx: AuthHookContext<P>) => T>,
+  descriptor: TypedPropertyDescriptor<M>,
 ) => void;
+/** Constrains the decorated method like HookMethodDecorator; the SDK's payload, context and result types still apply. */
 export type DbHookMethodDecorator<
   E extends DatabaseHookTarget,
   Ph extends "before" | "after",
-> = (
+> = <M extends DatabaseHookMethod<E, Ph>>(
   target: object,
   key: string | symbol,
-  descriptor: TypedPropertyDescriptor<DatabaseHookMethod<E, Ph>>,
+  descriptor: TypedPropertyDescriptor<M>,
 ) => void;
 export type DatabaseHookTarget =
   `${"user" | "session" | "account" | "verification"}.${"create" | "update" | "delete"}`;

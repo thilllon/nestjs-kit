@@ -404,7 +404,6 @@ void scoped;
     ).toBe("");
   });
 
-  // Hook methods spell out the complete SDK signature; #589 tracks narrower compatible signatures.
   it("keeps hook bodies raw and database hook payloads and results SDK-typed", {
     timeout: 30_000,
   }, async () => {
@@ -417,7 +416,6 @@ import {
   BeforeDatabase,
   type AuthHookContext,
   type DatabaseHookData,
-  type DatabaseHookMethod,
 } from "nestjs-slightly-better-auth";
 
 const primary = betterAuth({ emailAndPassword: { enabled: true }, user: { additionalFields: { department: { type: "string", required: true } } } });
@@ -427,10 +425,6 @@ declare module "nestjs-slightly-better-auth" {
     auth: typeof primary;
   }
 }
-
-type Context = GenericEndpointContext | null | undefined;
-type UpdateResult = ReturnType<DatabaseHookMethod<"user.update", "before">>;
-type DeleteResult = ReturnType<DatabaseHookMethod<"user.delete", "before">>;
 
 export class Hooks {
   @BeforeAuth("/sign-up/email")
@@ -449,31 +443,28 @@ export class Hooks {
   }
 
   @BeforeDatabase("user.update")
-  update(data: DatabaseHookData<"user.update">, ctx: Context): UpdateResult {
+  update(data: DatabaseHookData<"user.update">) {
     const department: string | undefined = data.department;
     // @ts-expect-error Update payloads contain only the changed fields.
     const required: string = data.department;
-    void ctx;
     void department;
     void required;
     return { data: { department: "engineering" } };
   }
 
   @BeforeDatabase("user.delete")
-  veto(user: DatabaseHookData<"user.delete">, ctx: Context): DeleteResult {
-    void ctx;
+  veto(user: DatabaseHookData<"user.delete">) {
     return user.email !== "owner@example.com";
   }
 
+  // @ts-expect-error Delete hooks can only abort; the SDK ignores replacement data.
   @BeforeDatabase("user.delete")
-  replace(user: DatabaseHookData<"user.delete">, ctx: Context): DeleteResult {
-    void ctx;
-    // @ts-expect-error Delete hooks can only abort; the SDK ignores replacement data.
+  replace(user: DatabaseHookData<"user.delete">) {
     return { data: { id: user.id } };
   }
 
   @AfterDatabase("session.create")
-  audit(session: DatabaseHookData<"session.create", "after">, ctx: Context): void {
+  audit(session: DatabaseHookData<"session.create", "after">, ctx: GenericEndpointContext | null | undefined): void {
     void session.userId;
     void ctx?.path;
   }
@@ -483,6 +474,89 @@ export class Hooks {
   assumesEndpoint(session: DatabaseHookData<"session.create", "after">, ctx: GenericEndpointContext): void {
     void session.userId;
     void ctx.path;
+  }
+}
+`),
+    ).toBe("");
+  });
+
+  it("accepts hook methods that declare fewer parameters or wider contexts", {
+    timeout: 30_000,
+  }, async () => {
+    expect(
+      await diagnostics(`
+import { Inject, Injectable } from "@nestjs/common";
+import { betterAuth } from "better-auth";
+import {
+  AfterAuth,
+  BeforeAuth,
+  BeforeDatabase,
+  type AuthAfterHookContext,
+  type AuthHookContext,
+  type DatabaseHookData,
+} from "nestjs-slightly-better-auth";
+
+const primary = betterAuth({ emailAndPassword: { enabled: true } });
+
+declare module "nestjs-slightly-better-auth" {
+  interface Register {
+    auth: typeof primary;
+  }
+}
+
+export abstract class AuditSink {
+  abstract write(event: string, id: string): Promise<void>;
+}
+
+// The design v7 §4.5.2 audit-log package.
+@Injectable()
+export class AuditHooks {
+  constructor(@Inject(AuditSink) private readonly sink: AuditSink) {}
+
+  @AfterAuth(["/sign-in/email", "/sign-in/social", "/callback/:id"], {
+    calls: "http",
+  })
+  async signedIn(
+    ctx: AuthAfterHookContext<"/sign-in/email" | "/sign-in/social" | "/callback/:id">,
+  ) {
+    if (ctx.context.newSession) {
+      await this.sink.write("sign-in", ctx.context.newSession.user.id);
+    }
+  }
+
+  @BeforeDatabase("user.delete")
+  async beforeUserDelete(user: DatabaseHookData<"user.delete", "before">) {
+    await this.sink.write("user-delete-requested", user.id);
+  }
+}
+
+export class CompatibleHooks {
+  @AfterAuth()
+  audit() {}
+
+  @BeforeAuth("/sign-in/email")
+  wide(ctx: AuthHookContext) {
+    void ctx.path;
+  }
+
+  // @ts-expect-error A multi-path hook must accept every matched path.
+  @AfterAuth(["/sign-in/email", "/sign-up/email"])
+  singlePath(ctx: AuthAfterHookContext<"/sign-in/email">) {
+    void ctx;
+  }
+
+  // @ts-expect-error A hook for one endpoint cannot require another endpoint's context.
+  @BeforeAuth("/sign-in/email")
+  otherEndpoint(ctx: AuthHookContext<"/sign-up/email">) {
+    void ctx;
+  }
+
+  // @ts-expect-error The SDK passes a database hook only its payload and endpoint context.
+  @BeforeDatabase("user.create")
+  extraParameter(data: DatabaseHookData<"user.create">, ctx: unknown, reason: string) {
+    void data;
+    void ctx;
+    void reason;
   }
 }
 `),
