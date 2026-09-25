@@ -116,3 +116,7 @@ export const READER_CONTEXT = Symbol.for(
 export const INVOCATION_VALUES = Symbol.for(
   "nestjs-slightly-better-auth:invocation",
 );
+/** Stored in place of an invocation value that two contributing policy runs published differently. */
+export const AMBIGUOUS_INVOCATION_VALUE = Symbol.for(
+  "nestjs-slightly-better-auth:ambiguous-invocation-value",
+);

@@ -189,6 +189,26 @@ describe("route planning", () => {
       expect.objectContaining({ code: "UNKNOWN_INSTANCE" }),
     );
   });
+  it("rejects empty requirement groups, including in defaults", () => {
+    const generic = requirement(policy("generic"), {});
+    class Controller {
+      @AcceptPrincipals("machine") @Require(allOf()) all() {}
+      @Require(anyOf()) any() {}
+      @Require(anyOf(allOf(), generic)) nested() {}
+      @Require(generic) plain() {}
+    }
+    const { planner } = fixture();
+    for (const method of ["all", "any", "nested"]) {
+      expect(() => planner.plan(Controller, method)).toThrowError(
+        expect.objectContaining({ code: "EMPTY_REQUIREMENT_GROUP" }),
+      );
+    }
+    expect(planner.plan(Controller, "plain").requirements).toHaveLength(1);
+    const defaults = fixture([allOf() as ReturnType<typeof requirement>]);
+    expect(() => defaults.planner.plan(Controller, "plain")).toThrowError(
+      expect.objectContaining({ code: "EMPTY_REQUIREMENT_GROUP" }),
+    );
+  });
   it("rejects public parameter reads and mixed-kind constrained readers", () => {
     class PublicReader {
       @Public() run(@CurrentPrincipal() _principal: unknown) {}

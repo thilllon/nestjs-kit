@@ -3,6 +3,7 @@ import type {
   AuthHandle,
   ScopeInit,
 } from "./auth-contracts.js";
+import { BetterAuthConfigurationError } from "./auth-errors.js";
 import type { AuthLike } from "./auth-types.js";
 import type { BridgeBinding, ScopeView } from "./bridge-protocol.js";
 import type { InstanceEntry } from "./instance-registry.js";
@@ -93,6 +94,16 @@ export class BridgeClient {
   }
 
   bootstrap(): void {
+    const displaced = this.#registrations.filter(
+      ({ binding }) => binding.state === "displaced",
+    );
+    if (displaced.length) {
+      throw new BetterAuthConfigurationError(
+        "INSTANCE_ALREADY_BOUND",
+        `Another application bound ${displaced.map(({ binding }) => `'${binding.instance}'`).join(", ")} while this application initialized.`,
+        "Initialize applications that share a Better Auth instance one after another, and close one before the next binds.",
+      );
+    }
     for (const { binding } of this.#registrations) {
       binding.state = "bootstrapped";
     }

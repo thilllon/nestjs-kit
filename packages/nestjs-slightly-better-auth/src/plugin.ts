@@ -98,10 +98,12 @@ export function nestjs(
           `INSTANCE_ALREADY_BOUND: bound to ${binding.owner.description}`,
         );
       }
-      const tookOverFrom =
-        binding?.state === "initialized"
-          ? binding.owner.description
-          : undefined;
+      let tookOverFrom: string | undefined;
+      if (binding?.state === "initialized") {
+        tookOverFrom = binding.owner.description;
+        // Its application may still be initializing: its bootstrap must fail rather than run without hooks.
+        binding.state = "displaced";
+      }
       binding = next;
       unboundDispatches = 0;
       registration = {

@@ -68,6 +68,19 @@ class AuthorizedController {
   manage(@ActiveOrganizationId() organizationId: string) {
     return { organizationId };
   }
+
+  @Get("organizations/:orgId/members/remove")
+  @RequireOrgMember()
+  @RequireOrgPermission(
+    { member: ["delete"] },
+    { organization: fromParam("orgId") },
+  )
+  remove(
+    @ActiveOrganizationId() organizationId: string,
+    @ActiveMemberRole() role: string,
+  ) {
+    return { organizationId, role };
+  }
 }
 async function fixture(syntheticSessions = false) {
   const database: Record<string, Record<string, unknown>[]> = {
@@ -248,6 +261,48 @@ describe("native Express authorization", () => {
       expect(
         (await f.get(`/organizations/${b.id}/manage`, f.headers)).status,
       ).toBe(403);
+      const activate = async (organizationId: string) => {
+        const result = await f.auth.api.setActiveOrganization({
+          headers: f.headers,
+          body: { organizationId },
+          returnHeaders: true,
+        });
+        const cookies = new Map(
+          f.headers
+            .get("cookie")!
+            .split("; ")
+            .map((line) => [line.split("=")[0], line]),
+        );
+        for (const line of result.headers.getSetCookie()) {
+          const cookie = line.split(";")[0]!;
+          cookies.set(cookie.split("=")[0]!, cookie);
+        }
+        f.headers.set("cookie", [...cookies.values()].join("; "));
+      };
+      // The active organization is A (role member); the route names B.
+      await activate(a.id);
+      f.database.member.find((member) => member.organizationId === a.id)!.role =
+        "member";
+      f.database.member.find((member) => member.organizationId === b.id)!.role =
+        "owner";
+      const ambiguous = await f.get(
+        `/organizations/${b.id}/members/remove`,
+        f.headers,
+      );
+      expect(ambiguous.status).toBe(500);
+      expect(
+        (await f.get(`/organizations/${a.id}/members/remove`, f.headers))
+          .status,
+      ).toBe(403);
+      await activate(b.id);
+      const consistent = await f.get(
+        `/organizations/${b.id}/members/remove`,
+        f.headers,
+      );
+      expect(await consistent.json()).toEqual({
+        organizationId: b.id,
+        role: "owner",
+      });
       f.database.member.splice(0);
       const removed = await f.get(`/organizations/${a.id}`, f.headers);
       expect(removed.status).toBe(403);
