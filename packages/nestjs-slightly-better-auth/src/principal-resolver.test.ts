@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AuthContextView,
@@ -218,6 +218,59 @@ describe("session source against the actual SDK", () => {
       registration.close();
     }
   });
+});
+
+it("forwards cleanup cookies a native before-hook attaches to a thrown APIError", async () => {
+  // Direct callers keep the headers attached to a thrown APIError although the router drops them. [R7:BA-r7-02]
+  const plugin = nestjs();
+  const auth = betterAuth({
+    baseURL: "http://localhost:3000",
+    secret: "private-test-secret-with-at-least-thirty-two-characters",
+    plugins: [plugin],
+    advanced: { disableOriginCheck: false },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/get-session") {
+          ctx.setCookie("cleanup", "", { maxAge: 0 });
+          throw new APIError("UNAUTHORIZED", {
+            code: "HOOK_DENIED",
+            message: "denied by hook",
+          });
+        }
+      }),
+    },
+  });
+  const context = await auth.$context;
+  const bridge = (plugin as unknown as Record<symbol, BridgeHandle>)[
+    BRIDGE_HANDLE
+  ]!;
+  const handle: AuthHandle = {
+    name: "default",
+    instance: auth,
+    api: auth.api,
+    context: async () => context as unknown as AuthContextView,
+    hasPlugin: async (id) => context.hasPlugin(id),
+    run: async (_init, fn) => fn(),
+    producedByEndpoint: (value) => bridge.producedByEndpoint(value),
+    checkOrigin: async () => null,
+    isTrustedOrigin: async () => true,
+  };
+  const append = vi.fn();
+  const result = await sessionPrincipal().resolve({
+    auth: handle,
+    headers: new Headers(),
+    cookies: { append },
+    freshness: "default",
+    transport: "test",
+    memo: async (_key, fn) => fn(),
+  });
+  expect(result).toMatchObject({
+    outcome: "rejected",
+    failure: { status: 401, reason: "HOOK_DENIED" },
+  });
+  expect(append).toHaveBeenCalledExactlyOnceWith([
+    expect.stringMatching(/^cleanup=; Max-Age=0/),
+  ]);
 });
 
 it("scopes symbol/object identity numbering to collectible request owners", () => {

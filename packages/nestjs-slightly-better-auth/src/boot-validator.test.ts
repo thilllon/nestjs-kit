@@ -294,17 +294,34 @@ describe("aggregated boot validation", () => {
 describe("coverage and global scope", () => {
   it("accepts global guard-only coverage and warns for globalScope:false (B16/B31)", async () => {
     const warn = vi.spyOn(Logger.prototype, "warn");
+    const log = vi.spyOn(Logger.prototype, "log");
     @Controller("protected")
     class Protected {
       @Get() @RequireAuth() run() {}
     }
+    const summary = () =>
+      log.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.includes("global guards:"));
+    const codes = () =>
+      warn.mock.calls.flatMap(
+        (call) => String(call[0]).match(/\bW_[A-Z_]+/g) ?? [],
+      );
     await boot(
       { auth: createTestAuth(), globalScope: false },
       { controllers: [Protected] },
     );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("W_NO_GLOBAL_SCOPE"),
-    );
+    // globalGuard: true with globalScope: false covers every global claim; the only report is B31's
+    // warning and the summary's scope line. [R6:SEC-r6-03, NEST-r6-01]
+    expect(codes()).toEqual(["W_NO_GLOBAL_SCOPE"]);
+    expect(summary()).toEqual([
+      expect.stringContaining("scope: off — see W_NO_GLOBAL_SCOPE"),
+    ]);
+    warn.mockClear();
+    log.mockClear();
+    await boot({ auth: createTestAuth() }, { controllers: [Protected] });
+    expect(codes()).toEqual([]);
+    expect(summary()).toEqual([expect.stringContaining("scope: global;")]);
   });
   it("recognizes an actual overridden global guard by provider identity", async () => {
     @Controller("protected")
@@ -347,15 +364,18 @@ describe("coverage and global scope", () => {
     class Gateway {
       @RequireAuth() run() {}
     }
-    await expect(
-      boot(
-        { auth: createTestAuth() },
-        {
-          providers: [Gateway],
-          transports: [claimTransport("explicit", Gateway)],
-        },
-      ),
-    ).rejects.toThrow("FIXTURE_UNGUARDED");
+    // Global guard-only coverage never extends to explicit reach, whatever globalScope says. [R6:NEST-r6-01]
+    for (const globalScope of [true, false]) {
+      await expect(
+        boot(
+          { auth: createTestAuth(), globalScope },
+          {
+            providers: [Gateway],
+            transports: [claimTransport("explicit", Gateway)],
+          },
+        ),
+      ).rejects.toThrow("FIXTURE_UNGUARDED");
+    }
     @UseGuards(BetterAuthGuard)
     @UseInterceptors(BetterAuthScopeInterceptor)
     class Covered {

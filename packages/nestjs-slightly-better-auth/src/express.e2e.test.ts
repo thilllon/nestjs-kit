@@ -19,6 +19,8 @@ import { ExpressAdapter } from "@nestjs/platform-express";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
+import { betterAuth } from "better-auth";
+import { memoryAdapter } from "better-auth/adapters/memory";
 import { APIError } from "better-auth/api";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +40,7 @@ import {
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthService } from "./auth-service.js";
 import { expressPlatform } from "./express.js";
+import { nestjs } from "./plugin.js";
 import { CurrentUser } from "./session-principal.js";
 import { createTestAuth, startHttpFixture } from "./test-fixtures.js";
 
@@ -1376,6 +1379,161 @@ describe("ExpressPlatform", () => {
           })
         ).status,
       ).toBe(401);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("preserves sessions behind image-shaped cross-site GET logout proxies for every access level", async () => {
+    // A guard's session read is not origin evidence: a direct caller-session call on a safe method needs a passing
+    // advisory verdict, which a cross-site image request never has and a public plan never computes. [R6:SEC-r6-01]
+    const auth = createTestAuth();
+    @Controller("logout")
+    class LogoutController {
+      constructor(private readonly service: BetterAuthService<typeof auth>) {}
+
+      @Public()
+      @Get("public")
+      publicLogout(@Req() request: IncomingMessage) {
+        return this.service.api.signOut({
+          headers: this.service.headersFrom(request),
+        });
+      }
+
+      @OptionalAuth()
+      @Get("optional")
+      optionalLogout(@Req() request: IncomingMessage) {
+        return this.service.api.signOut({
+          headers: this.service.headersFrom(request),
+        });
+      }
+
+      @RequireAuth()
+      @Get("required")
+      requiredLogout(@Req() request: IncomingMessage) {
+        return this.service.api.signOut({
+          headers: this.service.headersFrom(request),
+        });
+      }
+    }
+    const fixture = await startHttpFixture({
+      auth,
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [LogoutController],
+      // The denied calls are expected configuration errors; keep them out of the test output.
+      configure: (app) => {
+        app.useLogger(false);
+      },
+    });
+    const signedIn = async (cookie: string) =>
+      (await auth.api.getSession({ headers: new Headers({ cookie }) })) !==
+      null;
+    try {
+      for (const access of ["public", "optional", "required"] as const) {
+        const cookie = cookieHeader(
+          await signUp(fixture.url, {
+            name: `${access} user`,
+            email: `${access}-logout@example.com`,
+            password: "logout password long enough",
+          }),
+        );
+        // What a browser sends for <img src> on another site: the cookie, no Origin, cross-site fetch metadata.
+        const image = await sendNodeRequest(`${fixture.url}/logout/${access}`, {
+          headers: {
+            cookie,
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "no-cors",
+            "sec-fetch-dest": "image",
+          },
+        });
+        expect(image.status, `${access}: cross-site image`).toBe(500);
+        expect(await signedIn(cookie), `${access}: cross-site image`).toBe(
+          true,
+        );
+        const trusted = await sendNodeRequest(
+          `${fixture.url}/logout/${access}`,
+          { headers: { cookie, origin: "http://localhost:3000" } },
+        );
+        expect(trusted.status, `${access}: trusted Origin`).toBe(
+          access === "public" ? 500 : 200,
+        );
+        expect(await signedIn(cookie), `${access}: trusted Origin`).toBe(
+          access === "public",
+        );
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps app-route origin checks on when Better Auth's boolean origin skip opens its own routes", async () => {
+    // disableOriginCheck: true skips Better Auth's own origin validation whatever disableCSRFCheck says; the kernel
+    // keeps the stricter predicate for app routes, a documented divergence. [R6:BA-r6-01]
+    const auth = betterAuth({
+      secret: crypto.randomUUID() + crypto.randomUUID(),
+      baseURL: "http://localhost:3000",
+      logger: { disabled: true },
+      emailAndPassword: { enabled: true },
+      advanced: { disableOriginCheck: true, disableCSRFCheck: false },
+      database: memoryAdapter({
+        user: [],
+        session: [],
+        account: [],
+        verification: [],
+      }),
+      plugins: [nestjs()],
+    });
+    @Controller("app")
+    class AppController {
+      @RequireAuth()
+      @Post("update")
+      update(@CurrentPrincipal() principal: AuthPrincipal | null) {
+        return { userId: principal?.userId };
+      }
+    }
+    const warn = vi.spyOn(Logger.prototype, "warn");
+    const fixture = await startHttpFixture({
+      auth,
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [AppController],
+    });
+    try {
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("app-route checks remain on"),
+      );
+      const cookie = cookieHeader(
+        await signUp(fixture.url, {
+          name: "Skip User",
+          email: "skip@example.com",
+          password: "skip password long enough",
+        }),
+      );
+      const untrusted = {
+        cookie,
+        origin: "https://evil.example",
+        "content-type": "application/json",
+      };
+      const authRoute = await fetch(`${fixture.url}/api/auth/update-user`, {
+        method: "POST",
+        headers: untrusted,
+        body: JSON.stringify({ name: "Renamed" }),
+      });
+      expect(authRoute.status).toBe(200);
+      const appRoute = await fetch(`${fixture.url}/app/update`, {
+        method: "POST",
+        headers: untrusted,
+        body: "{}",
+      });
+      expect(appRoute.status).toBe(403);
+      expect(await appRoute.json()).toMatchObject({ reason: "INVALID_ORIGIN" });
+      const trusted = await fetch(`${fixture.url}/app/update`, {
+        method: "POST",
+        headers: { ...untrusted, origin: "http://localhost:3000" },
+        body: "{}",
+      });
+      expect(trusted.status).toBe(201);
     } finally {
       await fixture.close();
     }
