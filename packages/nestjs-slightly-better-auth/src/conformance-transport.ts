@@ -7,7 +7,13 @@ import {
   type Type,
   UseGuards,
 } from "@nestjs/common";
-import { DiscoveryService, ModuleRef, Reflector } from "@nestjs/core";
+import {
+  DiscoveryService,
+  ExternalContextCreator,
+  MetadataScanner,
+  ModuleRef,
+  Reflector,
+} from "@nestjs/core";
 import type { TestingModuleBuilder } from "@nestjs/testing";
 import type { BetterAuthOptions } from "better-auth";
 import { organization } from "better-auth/plugins";
@@ -33,6 +39,7 @@ import {
   RequireAuth,
   requirement,
   SkipDefaultRequirements,
+  SkipOriginCheck,
   UseBetterAuth,
 } from "./auth-decorators.js";
 import { AuthFailures, BetterAuthConfigurationError } from "./auth-errors.js";
@@ -106,7 +113,23 @@ export interface FixtureContext {
   readonly service: BetterAuthService;
 }
 
-/** GraphQL shapes only: one object type FixtureNode, returned by three root fields and carrying the field resolvers below. */
+/**
+ * One method of an abstract base class, exposed through two subclasses that carry `subclasses.public` and
+ * `subclasses.denied` as class decorators (T-inherited-handler). A harness without invokeInherited exposes it as a
+ * plain handler.
+ */
+export interface InheritedFixture extends FixtureHandler {
+  readonly subclasses: {
+    readonly public: readonly ClassDecorator[];
+    readonly denied: readonly ClassDecorator[];
+  };
+}
+
+/**
+ * GraphQL shapes only: one object type FixtureNode, returned by three root fields and carrying the field resolvers
+ * below. invokeGraph selects `publicNested` as `publicNested { id reader }` and `guarded` as
+ * `guarded { id principal nestedReader }`, so `reader` and `nestedReader` read the reading of their enclosing field.
+ */
 export interface GraphFixtures {
   readonly roots: {
     readonly public: FixtureHandler;
@@ -120,9 +143,13 @@ export interface GraphFixtures {
     readonly guarded?: FixtureHandler;
     readonly nestedReader?: FixtureHandler;
     readonly sessionReader: FixtureHandler;
+    /** @ForwardAuthCookies() without access metadata: an inheriting form-mode field that signs a kit user in (T-csrf-login-proxy). */
+    readonly forwarding?: FixtureHandler;
   };
   /** Federation shapes only: @ResolveReference() of FixtureNode, with the kit's per-representation requirement on `orgId`. */
   readonly reference?: FixtureHandler;
+  /** Class decorators of the resolver class that serves the roots, the fields and the reference resolver. */
+  readonly classDecorators?: readonly ClassDecorator[];
 }
 
 export interface GraphSelection {
@@ -158,8 +185,15 @@ export interface TransportFixtures {
   readonly publicService: FixtureHandler;
   readonly acceptsApiKey: FixtureHandler;
   readonly org: FixtureHandler;
-  readonly inherited: FixtureHandler;
+  readonly inherited: InheritedFixture;
   readonly unguarded: FixtureHandler;
+  /**
+   * Default access, operation 'read': a direct auth.api.getSession() call presenting the invocation's `cookie` input,
+   * the caller's own session cookie (T-csrf-safe-methods).
+   */
+  readonly callerSession: FixtureHandler;
+  /** Like callerSession, with @Public(). */
+  readonly publicCallerSession: FixtureHandler;
   /** GraphQL shapes only; other harnesses ignore it. */
   readonly graph: GraphFixtures;
 }
@@ -215,6 +249,12 @@ export interface TransportConformanceOptions {
       appEnhancers?: boolean;
       /** The logger the app uses from boot on (e.g. createNestApplication(adapter, { logger }) or moduleRef.useLogger(logger)): cases assert boot warnings. */
       logger?: LoggerService;
+      /** BetterAuthModule's cookies.forwardDirectCalls (T-stamp-per-plan). */
+      forwardDirectCalls?: boolean;
+      /** GraphQL shapes: the fieldResolverCoverage of the transport this boot registers (T-stamp-per-plan). */
+      fieldResolverCoverage?: "warn";
+      /** GraphQL shapes: the GraphQL module's `context` option, one of `graphqlContexts` (T-stale-context, T-subscription-origin). */
+      graphqlContext?: GraphqlContextShape;
     },
   ): Promise<INestApplication>;
   /** Invokes a fixture handler with given credentials and browser headers; returns the transport-native outcome. */
@@ -277,7 +317,30 @@ export interface TransportConformanceOptions {
     app: INestApplication,
     handlers: readonly Exclude<keyof TransportFixtures, "graph">[],
     headers: HeadersInit,
+    options?: {
+      /**
+       * Values the connection sends in its init payload (graphql-ws connection_init) instead of the handshake's credential
+       * headers; given only when `invocationShapes` includes 'subscriptions'.
+       */
+      readonly connectionParams?: Readonly<Record<string, string>>;
+    },
   ): Promise<TransportInvocationResult[]>;
+  /**
+   * Invokes `fixtures.inherited` through the subclass that carries `subclasses[subclass]`. Without it T-inherited-handler
+   * is skipped with a reason: a transport that addresses handlers by a name that one inherited method shares across
+   * subclasses (an RPC pattern, a GraphQL root field) cannot expose it twice.
+   */
+  invokeInherited?(
+    app: INestApplication,
+    subclass: "public" | "denied",
+    headers: HeadersInit,
+  ): Promise<TransportInvocationResult>;
+  /**
+   * GraphQL shapes: the `graphqlContext` values createApp honours. T-stale-context needs 'static' and 'cached' and fails
+   * without them when the transport nests handlers; the custom-context rows of T-subscription-origin run for 'fresh' and
+   * 'plain-request' when listed.
+   */
+  graphqlContexts?: readonly GraphqlContextShape[];
   /**
    * Connection shapes: authenticates one connection whose handshake carries `headers` through the app's connection-time
    * authentication (WS_CONNECTION_AUTH), requiring a principal: `ok` when one authenticates, otherwise the failure
@@ -296,6 +359,18 @@ export interface TransportConformanceOptions {
    */
   expectBrowserLeg: boolean;
 }
+
+/**
+ * The GraphQL module's `context` option of a boot: 'fresh' is a function returning a new object that keeps what the driver
+ * passes it (the native request, the graphql-ws context); 'plain-request' a function returning a new object whose `req` is a
+ * plain object holding only the native request's cookie header; 'cached' a function returning the object it built on its
+ * first call; 'static' an object.
+ */
+export type GraphqlContextShape =
+  | "fresh"
+  | "plain-request"
+  | "cached"
+  | "static";
 
 /** The outcome of connection-time authentication (authenticateConnection). */
 export interface ConnectionAuthenticationResult {
@@ -463,9 +538,16 @@ type FixtureName = Exclude<keyof TransportFixtures, "graph">;
 interface GraphBoot {
   /** Include `guarded` and `nestedReader` (the ['guards', 'interceptors'] boots only). */
   readonly guarded?: boolean;
-  /** Include the federation `reference` fixture. */
-  readonly reference?: boolean;
+  /** Include the federation `reference` fixture; 'bare' leaves out its method-level requirement. */
+  readonly reference?: boolean | "bare";
+  /** Include the `forwarding` field, signing in with these credentials. */
+  readonly forwarding?: { readonly email: string; readonly password: string };
+  /** Class decorators of the graph resolver class. */
+  readonly classDecorators?: readonly ClassDecorator[];
 }
+
+/** The fixture marker of a graph handler, for claims and plans of GraphQL boots. */
+const graphMarker = (name: string) => `graph.${name}`;
 
 /**
  * The kit's fixture handlers; `extra` appends decorators to named handlers and `everyHandler` to all of them for boot
@@ -477,11 +559,11 @@ function kitFixtures(
   everyHandler: MethodDecorator[] = [],
   graph: GraphBoot = {},
 ): TransportFixtures {
-  const withExtra = (
+  const withExtra = <F extends FixtureHandler>(
     name: FixtureName,
-    fixture: FixtureHandler,
+    fixture: F,
     marker: string = name,
-  ): FixtureHandler => ({
+  ): F => ({
     ...fixture,
     decorators: [
       SetMetadata(FIXTURE_METADATA, marker),
@@ -491,9 +573,30 @@ function kitFixtures(
     ],
   });
   const plain = () => handler([], [], "read", () => ({ ok: true }));
-  const reader = handler([], [CurrentPrincipal()], "read", ([principal]) => ({
-    principal: view(principal),
-  }));
+  const marked = (name: string, fixture: FixtureHandler): FixtureHandler => ({
+    ...fixture,
+    decorators: [
+      SetMetadata(FIXTURE_METADATA, graphMarker(name)),
+      ...fixture.decorators,
+    ],
+  });
+  const reader = () =>
+    handler([], [CurrentPrincipal()], "read", ([principal]) => ({
+      principal: view(principal),
+    }));
+  // A direct call presenting the caller's own session cookie, which the invocation passes as its `cookie` input.
+  const callerSession = (decorators: MethodDecorator[]) =>
+    handler(decorators, [], "read", async (_params, input, { service }) => {
+      const session = (await (
+        service.api as unknown as {
+          getSession(input: { headers: Headers }): Promise<unknown>;
+        }
+      ).getSession({
+        headers: new Headers({ cookie: String(input.cookie ?? "") }),
+      })) as { user?: { id?: string } } | null;
+      return { userId: session?.user?.id ?? null };
+    });
+  const forwarding = graph.forwarding;
   const loginProxy = (operation: "read" | "unsafe") =>
     handler(
       [Public(), ForwardAuthCookies()],
@@ -608,7 +711,18 @@ function kitFixtures(
         },
       ),
     ),
-    inherited: withExtra("inherited", plain()),
+    inherited: withExtra("inherited", {
+      ...plain(),
+      subclasses: {
+        public: [Public()],
+        denied: [Require(requirement(denyPolicy, {}))],
+      },
+    }),
+    callerSession: withExtra("callerSession", callerSession([])),
+    publicCallerSession: withExtra(
+      "publicCallerSession",
+      callerSession([Public()]),
+    ),
     unguarded: withExtra(
       "unguarded",
       handler([], [CurrentSession(), ActiveOrganizationId()], "read", () => ({
@@ -617,55 +731,95 @@ function kitFixtures(
     ),
     graph: {
       roots: {
-        public: handler([Public()], [], "read", () => ({ id: "public" })),
-        sessionOnly: handler([], [CurrentPrincipal()], "read", ([p]) => ({
-          id: "session",
-          principal: view(p),
-        })),
-        mixed: handler(
-          [AcceptPrincipals(SESSION_KIND, API_KEY_KIND)],
-          [CurrentPrincipal()],
-          "read",
-          ([p]) => ({ id: "mixed", principal: view(p) }),
+        public: marked(
+          "public",
+          handler([Public()], [], "read", () => ({ id: "public" })),
+        ),
+        sessionOnly: marked(
+          "sessionOnly",
+          handler([], [CurrentPrincipal()], "read", ([p]) => ({
+            id: "session",
+            principal: view(p),
+          })),
+        ),
+        mixed: marked(
+          "mixed",
+          handler(
+            [AcceptPrincipals(SESSION_KIND, API_KEY_KIND)],
+            [CurrentPrincipal()],
+            "read",
+            ([p]) => ({ id: "mixed", principal: view(p) }),
+          ),
         ),
       },
       fields: {
-        plain: handler([], [], "read", () => "plain"),
-        publicNested: handler([Public()], [], "read", () => ({
-          id: "nested",
-        })),
-        reader,
+        plain: marked(
+          "plain",
+          handler([], [], "read", () => "plain"),
+        ),
+        publicNested: marked(
+          "publicNested",
+          handler([Public()], [], "read", () => ({ id: "nested" })),
+        ),
+        reader: marked("reader", reader()),
         ...(graph.guarded
           ? {
-              guarded: handler(
-                [RequireAuth()],
-                [CurrentPrincipal()],
-                "read",
-                ([p]) => ({ id: "guarded", principal: view(p) }),
+              guarded: marked(
+                "guarded",
+                handler(
+                  [RequireAuth()],
+                  [CurrentPrincipal()],
+                  "read",
+                  ([p]) => ({ id: "guarded", principal: view(p) }),
+                ),
               ),
-              nestedReader: reader,
+              nestedReader: marked("nestedReader", reader()),
             }
           : {}),
-        sessionReader: handler(
-          [],
-          [CurrentSession()],
-          "read",
-          ([session]) =>
-            (session as { user?: { id?: string } } | null)?.user?.id ?? null,
+        sessionReader: marked(
+          "sessionReader",
+          handler(
+            [],
+            [CurrentSession()],
+            "read",
+            ([session]) =>
+              (session as { user?: { id?: string } } | null)?.user?.id ?? null,
+          ),
         ),
+        ...(forwarding
+          ? {
+              forwarding: marked(
+                "forwarding",
+                handler(
+                  [ForwardAuthCookies()],
+                  [],
+                  "read",
+                  async (_params, _input, { service }) => {
+                    await signIn(service, forwarding);
+                    return "forwarded";
+                  },
+                ),
+              ),
+            }
+          : {}),
       },
       ...(graph.reference
         ? {
             reference: handler(
               [
                 SetMetadata(FIXTURE_METADATA, "reference"),
-                Require(requirement(orgPolicy, {})),
+                ...(graph.reference === "bare"
+                  ? []
+                  : [Require(requirement(orgPolicy, {}))]),
               ],
               [],
               "read",
               (_params, input) => ({ id: input.id, orgId: input.orgId }),
             ),
           }
+        : {}),
+      ...(graph.classDecorators
+        ? { classDecorators: graph.classDecorators }
         : {}),
     },
   };
@@ -880,6 +1034,25 @@ async function environment(
   };
 }
 
+/** An organization the kit identity of `env` owns (instances with the organization plugin); returns its id. */
+async function createKitOrganization(env: KitEnv): Promise<string> {
+  const created = (await (
+    env.auth.api as unknown as {
+      createOrganization(input: {
+        headers: Headers;
+        body: { name: string; slug: string };
+      }): Promise<{ id: string }>;
+    }
+  ).createOrganization({
+    headers: new Headers({ cookie: env.identity.cookie }),
+    body: {
+      name: "Conformance",
+      slug: `conformance-${globalThis.crypto.randomUUID()}`,
+    },
+  })) as { id: string };
+  return created.id;
+}
+
 interface Booted {
   readonly app: INestApplication;
   /** Everything the app logged, from boot on when the harness applies the `logger` option. */
@@ -891,6 +1064,9 @@ type GraphEnhancers = readonly ("guards" | "interceptors")[];
 
 interface BootOptions {
   fixtures?: TransportFixtures;
+  forwardDirectCalls?: boolean;
+  fieldResolverCoverage?: "warn";
+  graphqlContext?: GraphqlContextShape;
   globalGuard?: boolean;
   override?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
   defaultRequirements?: readonly RequirementExpr[];
@@ -926,6 +1102,11 @@ async function withApp(
         ? {}
         : { globalScope: boot.globalScope }),
       ...(boot.appEnhancers ? { appEnhancers: true } : {}),
+      ...(boot.forwardDirectCalls ? { forwardDirectCalls: true } : {}),
+      ...(boot.fieldResolverCoverage
+        ? { fieldResolverCoverage: boot.fieldResolverCoverage }
+        : {}),
+      ...(boot.graphqlContext ? { graphqlContext: boot.graphqlContext } : {}),
     },
   );
   app.useLogger(logger);
@@ -985,38 +1166,128 @@ interface RecordedClaim {
   readonly fixture: string | undefined;
 }
 
+/** Suffix the kit gives every Nest metadata key written while it runs validate() with renamed metadata (T-metadata-canary). */
+const RENAMED_METADATA = ":nestjs-slightly-better-auth-conformance-renamed";
+
+interface ClaimRecording {
+  /** Classes the validation context's discovery lists besides the app's controllers and providers. */
+  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  readonly classes?: readonly Function[];
+  /**
+   * Write every string metadata key under another name while validate() runs, as if the installed Nest wrote its
+   * decorators' metadata under keys the transport does not read.
+   */
+  readonly renameMetadata?: boolean;
+}
+
 /** The claims the transport makes for a booted app, recorded by running its validate() once more. */
 async function recordClaims(
   app: INestApplication,
   ref: ExtensionRef<AuthTransport>,
+  recording: ClaimRecording = {},
 ): Promise<RecordedClaim[]> {
   const transport = resolvedTransport(app, ref);
   const claims: RecordedClaim[] = [];
   const planner = app.get<RoutePlanner>(ROUTE_PLANNER, { strict: false });
-  await transport.validate?.({
-    discovery: app.get(DiscoveryService, { strict: false }),
-    reflector: app.get(Reflector, { strict: false }),
-    moduleRef: app.get(ModuleRef, { strict: false }),
-    hasHttpAdapter:
-      app.get<MountCoordinator>(MOUNT_COORDINATOR, { strict: false })
-        .adapter !== null,
-    planOf: (target, method) => planner.plan(target as Type, method),
-    claim: (target, method, reach, options) => {
-      const handler: unknown =
-        method === undefined
-          ? undefined
-          : Reflect.get(target.prototype as object, method);
-      const fixture =
-        typeof handler === "function"
-          ? (Reflect.getMetadata(FIXTURE_METADATA, handler) as
-              | string
-              | undefined)
-          : undefined;
-      claims.push({ target, method, reach, options, fixture });
-    },
-    logger: new CapturingLogger(),
-  });
+  const discovery = app.get(DiscoveryService, { strict: false });
+  const extra = (recording.classes ?? []).map(
+    (metatype) =>
+      ({
+        metatype,
+        isAlias: false,
+        name: metatype.name,
+      }) as unknown as ReturnType<DiscoveryService["getProviders"]>[number],
+  );
+  const define = Reflect.defineMetadata;
+  if (recording.renameMetadata) {
+    Reflect.defineMetadata = (
+      key: unknown,
+      value: unknown,
+      target: object,
+      property?: string | symbol,
+    ) =>
+      define(
+        typeof key === "string" && !key.startsWith("design:")
+          ? `${key}${RENAMED_METADATA}`
+          : key,
+        value,
+        target,
+        property as string | symbol,
+      );
+  }
+  try {
+    await transport.validate?.({
+      discovery: {
+        getControllers: () => [...discovery.getControllers(), ...extra],
+        getProviders: () => [...discovery.getProviders(), ...extra],
+      } as unknown as DiscoveryService,
+      reflector: app.get(Reflector, { strict: false }),
+      moduleRef: app.get(ModuleRef, { strict: false }),
+      hasHttpAdapter:
+        app.get<MountCoordinator>(MOUNT_COORDINATOR, { strict: false })
+          .adapter !== null,
+      planOf: (target, method) => planner.plan(target as Type, method),
+      claim: (target, method, reach, options) => {
+        const handler: unknown =
+          method === undefined
+            ? undefined
+            : Reflect.get(target.prototype as object, method);
+        const fixture =
+          typeof handler === "function"
+            ? (Reflect.getMetadata(FIXTURE_METADATA, handler) as
+                | string
+                | undefined)
+            : undefined;
+        claims.push({ target, method, reach, options, fixture });
+      },
+      logger: new CapturingLogger(),
+    });
+  } finally {
+    Reflect.defineMetadata = define;
+  }
   return claims;
+}
+
+/** A class with the own class-level metadata of `target` and no methods: a push-only gateway, a controller without routes. */
+// biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+function withoutHandlers(target: Function): Function {
+  const clone = { [`${target.name}WithoutHandlers`]: class {} }[
+    `${target.name}WithoutHandlers`
+  ]!;
+  for (const key of Reflect.getOwnMetadataKeys(target)) {
+    Reflect.defineMetadata(key, Reflect.getOwnMetadata(key, target), clone);
+  }
+  return clone;
+}
+
+/** The booted instance and method name that serve a kit fixture, found by its SetMetadata() marker. */
+function fixtureInstance(
+  app: INestApplication,
+  fixture: string,
+): { instance: object; method: string } {
+  const discovery = app.get(DiscoveryService, { strict: false });
+  const scanner = new MetadataScanner();
+  for (const wrapper of [
+    ...discovery.getControllers(),
+    ...discovery.getProviders(),
+  ]) {
+    const instance: unknown = wrapper.instance;
+    if (!instance || typeof instance !== "object") {
+      continue;
+    }
+    for (const method of scanner.getAllMethodNames(
+      Object.getPrototypeOf(instance) as object,
+    )) {
+      const handler: unknown = Reflect.get(instance, method);
+      if (
+        typeof handler === "function" &&
+        Reflect.getMetadata(FIXTURE_METADATA, handler) === fixture
+      ) {
+        return { instance, method };
+      }
+    }
+  }
+  assert.fail(`no booted controller or provider serves the ${fixture} fixture`);
 }
 
 /**
@@ -1123,6 +1394,9 @@ function principalOf(result: TransportInvocationResult) {
   return (result.body as { principal?: { kind?: string; userId?: string } })
     ?.principal;
 }
+
+/** A context type no built-in transport handles (T-public-unclaimed-context). */
+const UNCLAIMED_CONTEXT = "nestjs-slightly-better-auth:conformance-unclaimed";
 
 const foreignContext = {
   getType: () => "nestjs-slightly-better-auth:conformance-foreign",
@@ -1236,6 +1510,17 @@ export function transportConformance(
     [],
     ["guards", "interceptors"],
   ];
+  const graphOf = (result: GraphResult, root: string, field?: string) => {
+    const node = (result.data as Record<string, unknown> | null | undefined)?.[
+      root
+    ] as Record<string, unknown> | null | undefined;
+    return field === undefined ? node : node?.[field];
+  };
+  const userOf = (value: unknown) =>
+    (value as { principal?: { userId?: string } | null } | null | undefined)
+      ?.principal?.userId ?? null;
+  const host = new URL(KIT_BASE_URL).host;
+  const dynamicBaseURL = { allowedHosts: [host], fallback: KIT_BASE_URL };
   const cookie = (env: KitEnv) => ({
     cookie: env.identity.cookie,
     ...(env.connectionLeg ? { origin: KIT_BASE_URL } : {}),
@@ -1274,6 +1559,53 @@ export function transportConformance(
           );
         }
         assert.equal(transport.handles(foreignContext), false);
+      }),
+  );
+  add(
+    "T-public-unclaimed-context",
+    "in a context type no registered transport handles, a public handler runs without auth work and a required one answers NO_TRANSPORT",
+    (env) =>
+      withApp(options, env, async ({ app, instrumentation }) => {
+        const creator = app.get(ExternalContextCreator, { strict: false });
+        const run = (fixture: FixtureName) => {
+          const { instance, method } = fixtureInstance(app, fixture);
+          const callback = Reflect.get(instance, method) as (
+            ...args: unknown[]
+          ) => unknown;
+          const handler = creator.create(
+            instance as Record<string, (...args: unknown[]) => unknown>,
+            callback,
+            method,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            { guards: true, interceptors: true, filters: false },
+            UNCLAIMED_CONTEXT,
+          );
+          return settle(async () => handler({}));
+        };
+        const from = env.probe.calls.length;
+        const described = instrumentation.contexts.length;
+        const reached = await run("public");
+        assert.ok(
+          reached.ok,
+          `the public handler did not run: ${String(!reached.ok && reached.error)}`,
+        );
+        assert.equal(
+          instrumentation.contexts.length,
+          described,
+          "the guard described a context no transport handles",
+        );
+        assert.equal(sessionReads(env.probe, from), 0, "the session was read");
+        const required = await run("required");
+        assert.equal(required.ok, false, "the required handler ran");
+        assert.deepEqual(
+          bootIssueCodes(!required.ok && required.error),
+          ["NO_TRANSPORT"],
+          `expected NO_TRANSPORT, got ${String(!required.ok && required.error)}`,
+        );
+        assert.equal(sessionReads(env.probe, from), 0, "the session was read");
       }),
   );
   add(
@@ -1481,10 +1813,13 @@ export function transportConformance(
   );
   add(
     "T-csrf-http-unsafe",
-    "an unsafe cookie operation needs a trusted origin, checked before any session read",
-    async (env) =>
-      (await operationLeg()) ??
-      withApp(options, env, async ({ app }) => {
+    "an unsafe cookie operation needs a trusted origin, checked before any session read, unless an explicit opt-out applies",
+    async (env) => {
+      const skip = await operationLeg();
+      if (skip) {
+        return skip;
+      }
+      await withApp(options, env, async ({ app }) => {
         const from = env.probe.calls.length;
         denied(
           await options.invoke(app, "unsafe", {
@@ -1523,7 +1858,33 @@ export function transportConformance(
           }),
           "a bearer token without a cookie",
         );
-      }),
+      });
+      // Explicit opt-outs: @SkipOriginCheck() on the handler, and Better Auth's own advanced.disableCSRFCheck.
+      const untrusted = async (
+        app: INestApplication,
+        kit: KitEnv,
+        label: string,
+      ) => {
+        const result = await options.invoke(app, "unsafe", {
+          ...cookie(kit),
+          origin: UNTRUSTED_ORIGIN,
+        });
+        succeeded(result, `${label}: a cookie from an untrusted Origin`);
+        assert.equal(principalOf(result)?.userId, kit.identity.userId, label);
+      };
+      await withApp(
+        options,
+        env,
+        ({ app }) => untrusted(app, env, "@SkipOriginCheck()"),
+        { fixtures: kitFixtures({ unsafe: [SkipOriginCheck()] }) },
+      );
+      const disabled = await kitEnvironment({
+        advanced: { disableCSRFCheck: true },
+      });
+      await withApp(options, disabled, ({ app }) =>
+        untrusted(app, disabled, "advanced.disableCSRFCheck"),
+      );
+    },
     noBrowser,
   );
   add(
@@ -1555,7 +1916,7 @@ export function transportConformance(
         return skip;
       }
       const user = await kitIdentity(env.auth, { password: true });
-      const credentials = { email: user.email, password: user.password };
+      const credentials = { email: user.email, password: user.password! };
       await withApp(options, env, async ({ app }) => {
         const name = await env.sessionCookieName();
         let signIns = env.probe.calls.filter(
@@ -1670,6 +2031,76 @@ export function transportConformance(
           "forwardForeignCookies ran its callback without a declaration",
         );
       });
+      // An inheriting forwarding field under a safe query is in form mode: boot needs field guards to reach it, and a
+      // cross-site request is denied before the field calls Better Auth. [R7:SEC-r7-01]
+      if (await graphReady(env)) {
+        return;
+      }
+      const forwarding = (guarded: boolean) =>
+        kitFixtures({}, [], { guarded, forwarding: credentials });
+      await expectBootFailure(
+        options,
+        env,
+        { fieldResolverEnhancers: [], fixtures: forwarding(false) },
+        "FIELD_RESOLVER_UNGUARDED",
+      );
+      await withApp(
+        options,
+        env,
+        async ({ app }) => {
+          const signIns = env.probe.calls.filter(
+            (path) => path === "/sign-in/email",
+          ).length;
+          const writes = env.probe.writes.length;
+          const selection: GraphSelection[] = [
+            { root: "public", fields: ["forwarding", "reader"] },
+          ];
+          const navigation = await options.invokeGraph!(app, selection, {
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document",
+          });
+          assert.ok(
+            navigation.errors.some(
+              (error) =>
+                error.path.includes("forwarding") &&
+                error.reason === "CROSS_SITE_NAVIGATION_LOGIN_BLOCKED",
+            ),
+            `a cross-site navigation reached the inherited forwarding field: ${JSON.stringify(navigation)}`,
+          );
+          assert.equal(
+            env.probe.calls.filter((path) => path === "/sign-in/email").length,
+            signIns,
+            "a cross-site navigation reached Better Auth through the inherited forwarding field",
+          );
+          assert.deepEqual(
+            env.probe.writes.slice(writes),
+            [],
+            "a cross-site navigation wrote a session through the inherited forwarding field",
+          );
+          for (const [headers, label] of [
+            [{ origin: KIT_BASE_URL }, "a trusted fetch"],
+            [{}, "a headerless non-browser request"],
+          ] as const) {
+            const result = await options.invokeGraph!(app, selection, headers);
+            assert.deepEqual(
+              result.errors,
+              [],
+              `${label} of the inherited forwarding field: ${JSON.stringify(result.errors)}`,
+            );
+            assert.equal(graphOf(result, "public", "forwarding"), "forwarded");
+            assert.equal(
+              userOf(graphOf(result, "public", "reader")),
+              null,
+              `${label}: the forwarding field changed the inherited reading`,
+            );
+          }
+        },
+        {
+          fieldResolverEnhancers: ["guards", "interceptors"],
+          fixtures: forwarding(true),
+        },
+      );
     },
     noBrowser,
   );
@@ -1682,7 +2113,7 @@ export function transportConformance(
         return skip;
       }
       const user = await kitIdentity(env.auth, { password: true });
-      await withApp(options, env, async ({ app }) => {
+      await withApp(options, env, async ({ app, logger }) => {
         for (const headers of [
           { ...cookie(env), origin: UNTRUSTED_ORIGIN },
           cookie(env),
@@ -1714,6 +2145,48 @@ export function transportConformance(
           signIns,
           "a cross-site safe operation of a forwarding handler reached Better Auth",
         );
+        // A direct call presenting the caller's session needs a passing verdict for this leg: the guarded safe
+        // operation computes an advisory one, a public handler none. [R5:SEC-r5-01]
+        const direct = { cookie: env.identity.cookie };
+        const callerSession = async (
+          handler: "callerSession" | "publicCallerSession",
+          origin: string | undefined,
+        ) =>
+          options.invoke(
+            app,
+            handler,
+            { ...cookie(env), ...(origin === undefined ? {} : { origin }) },
+            direct,
+          );
+        for (const origin of [UNTRUSTED_ORIGIN, undefined]) {
+          const label = `a guarded safe operation's direct caller-session call ${origin ? "from an untrusted Origin" : "without Origin"}`;
+          const errors = logger.errors().length;
+          internal(await callerSession("callerSession", origin), label);
+          assert.match(
+            logger
+              .errors()
+              .slice(errors)
+              .map((entry) => entry.text)
+              .join("\n"),
+            /PUBLIC_HANDLER_USED_CALLER_SESSION/,
+            label,
+          );
+        }
+        const trusted = await callerSession("callerSession", KIT_BASE_URL);
+        succeeded(
+          trusted,
+          "a guarded safe operation's direct caller-session call from a trusted Origin",
+        );
+        assert.equal(
+          (trusted.body as { userId?: string }).userId,
+          env.identity.userId,
+        );
+        for (const origin of [KIT_BASE_URL, UNTRUSTED_ORIGIN]) {
+          internal(
+            await callerSession("publicCallerSession", origin),
+            `a public handler's direct caller-session call from ${origin}`,
+          );
+        }
       });
     },
     noBrowser,
@@ -1888,8 +2361,6 @@ export function transportConformance(
       }),
     noBrowser,
   );
-  const host = new URL(KIT_BASE_URL).host;
-  const dynamicBaseURL = { allowedHosts: [host], fallback: KIT_BASE_URL };
   addRun(
     "T-ws-origin-dynamic-baseurl",
     "with a dynamic baseURL, a same-origin cookie handshake is allowed without a 500 and a cross-site one is denied",
@@ -2041,6 +2512,178 @@ export function transportConformance(
       });
     },
     noBrowser,
+  );
+  const subscriptions = options.invocationShapes?.includes("subscriptions")
+    ? undefined
+    : "the harness serves no subscriptions (invocationShapes lacks 'subscriptions')";
+  const subscribe = (app: INestApplication, headers: HeadersInit) =>
+    options.invokeTwice!(
+      app,
+      "subscriptions",
+      [{ orgId: "org-a" }, { orgId: "org-a2" }],
+      headers,
+    );
+  const subscriptionDenied = async (
+    app: INestApplication,
+    headers: Record<string, string>,
+    label: string,
+    connectionParams?: Record<string, string>,
+  ) => {
+    for (const [index, result] of (await subscribe(app, headers)).entries()) {
+      assert.equal(result.ok, false, `${label}, subscription ${index + 1}`);
+      assert.equal(
+        result.error?.reason,
+        "INVALID_ORIGIN",
+        `${label}, subscription ${index + 1}: ${JSON.stringify(result.error)}`,
+      );
+    }
+    const messages: FixtureName[] = ["required", "unsafe"];
+    const results = await options.invokeConnection!(
+      app,
+      messages,
+      headers,
+      connectionParams ? { connectionParams } : undefined,
+    );
+    for (const [index, result] of results.entries()) {
+      denied(result, 403, "INVALID_ORIGIN", `${label}, ${messages[index]}`);
+    }
+  };
+  add(
+    "T-subscription-credentials",
+    "subscriptions extract credentials from the upgrade cookie and from connectionParams, and deny anonymous connections",
+    async (env) => {
+      assert.ok(
+        options.invokeConnection,
+        "the harness serves subscriptions, so invokeConnection is required",
+      );
+      const other = await kitIdentity(env.auth);
+      await withApp(options, env, async ({ app }) => {
+        for (const [headers, label] of [
+          [cookie(env), "an upgrade cookie"],
+          [
+            { authorization: `Bearer ${env.identity.token}` },
+            "a connectionParams bearer token",
+          ],
+        ] as const) {
+          assert.deepEqual(
+            (await subscribe(app, headers)).map((result) => result.ok),
+            [true, true],
+            `${label} did not authenticate its subscriptions`,
+          );
+        }
+        assert.deepEqual(
+          (await subscribe(app, {})).map((result) => result.ok),
+          [false, false],
+          "an anonymous connection's subscriptions were allowed",
+        );
+        // A connectionParams cookie replaces the upgrade cookie in the credentials.
+        const [replaced] = await options.invokeConnection!(
+          app,
+          ["required"],
+          cookie(env),
+          { connectionParams: { cookie: other.cookie } },
+        );
+        succeeded(replaced!, "a connectionParams cookie");
+        assert.equal(
+          principalOf(replaced!)?.userId,
+          other.userId,
+          "the connectionParams cookie did not replace the upgrade cookie in the credentials",
+        );
+      });
+    },
+    subscriptions,
+  );
+  add(
+    "T-subscription-origin",
+    "subscriptions, queries and mutations on a socket whose upgrade carries a cookie and an untrusted Origin are denied, whatever connectionParams carry",
+    async (env) => {
+      assert.ok(
+        options.invokeConnection,
+        "the harness serves subscriptions, so invokeConnection is required",
+      );
+      const other = await kitIdentity(env.auth);
+      const hostile = { cookie: env.identity.cookie, origin: UNTRUSTED_ORIGIN };
+      const contexts = options.graphqlContexts ?? [];
+      for (const graphqlContext of [
+        undefined,
+        ...(contexts.includes("fresh") ? (["fresh"] as const) : []),
+      ]) {
+        const label = graphqlContext
+          ? `a ${graphqlContext} GraphQL context`
+          : "the driver's context";
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            await subscriptionDenied(
+              app,
+              hostile,
+              `${label}: an untrusted Origin`,
+            );
+            // The browser leg keeps the upgrade cookie when connectionParams replace it in the credentials.
+            await subscriptionDenied(
+              app,
+              hostile,
+              `${label}: an untrusted Origin with a connectionParams cookie`,
+              { cookie: other.cookie },
+            );
+            await allowedOnConnection(
+              app,
+              cookie(env),
+              env.identity.userId,
+              `${label}: a trusted Origin`,
+            );
+          },
+          graphqlContext ? { graphqlContext } : {},
+        );
+      }
+      if (contexts.includes("plain-request")) {
+        await withApp(
+          options,
+          env,
+          async ({ app, logger }) => {
+            const results = await options.invokeConnection!(
+              app,
+              ["required", "unsafe"],
+              cookie(env),
+            );
+            for (const result of results) {
+              internal(
+                result,
+                "a context holding only the cookie in a plain req",
+              );
+            }
+            assert.match(logger.text(), /GRAPHQL_CONTEXT_UNRECOGNIZED/);
+          },
+          { graphqlContext: "plain-request" },
+        );
+      }
+    },
+    subscriptions,
+  );
+  add(
+    "T-subscription-origin-junk-connection-params",
+    "a junk connectionParams bearer token beside the victim's upgrade cookie from an untrusted Origin is denied for subscriptions and queries",
+    async (env) => {
+      assert.ok(
+        options.invokeConnection,
+        "the harness serves subscriptions, so invokeConnection is required",
+      );
+      await withApp(options, env, async ({ app }) => {
+        // The harness carries a bearer token of a connection in connectionParams, where graphql-ws clients put it.
+        await subscriptionDenied(
+          app,
+          {
+            cookie: env.identity.cookie,
+            origin: UNTRUSTED_ORIGIN,
+            authorization: "Bearer a.b",
+          },
+          "a junk connectionParams bearer token",
+          { authorization: "Bearer a.b" },
+        );
+      });
+    },
+    subscriptions,
   );
   add("T-error-shape", "401, 403 and 429 carry code and reason", (env) =>
     withApp(options, env, async ({ app }) => {
@@ -2229,6 +2872,54 @@ export function transportConformance(
       }),
   );
   add(
+    "T-carrier",
+    "param decorators read the guard's reading with and without the scope interceptor, one value per invocation",
+    async (env) => {
+      for (const globalScope of [true, false]) {
+        const label = globalScope
+          ? "with the scope interceptor"
+          : "with globalScope: false";
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            const byCookie = await options.invoke(app, "required", cookie(env));
+            succeeded(byCookie, `${label}: a cookie`);
+            assert.deepEqual(principalOf(byCookie), {
+              kind: "session",
+              userId: env.identity.userId,
+            });
+            const byKey = await options.invoke(app, "acceptsApiKey", {
+              "x-api-key": env.keys.valid,
+            });
+            succeeded(byKey, `${label}: an API key`);
+            assert.equal(principalOf(byKey)?.kind, "api-key", label);
+            const org = await options.invoke(app, "org", cookie(env), {
+              orgId: "org-a",
+            });
+            succeeded(org, `${label}: @ActiveOrganizationId()`);
+            assert.deepEqual(org.body, { organization: "org-a" }, label);
+            // The org fixture fails when @ActiveOrganizationId() answers another invocation's organization.
+            for (const shape of options.invocationShapes ?? []) {
+              const values = await options.invokeTwice!(
+                app,
+                shape,
+                [{ orgId: "org-a" }, { orgId: "org-a2" }],
+                cookie(env),
+              );
+              assert.deepEqual(
+                values.map((value) => value.ok),
+                [true, true],
+                `${label}, ${shape}: ${JSON.stringify(values)}`,
+              );
+            }
+          },
+          globalScope ? {} : { globalScope: false },
+        );
+      }
+    },
+  );
+  add(
     "T-coverage-claims",
     "unguarded boots report exactly the claimed fixtures, and explicit enhancers, app enhancers, global stand-ins and globalScope: false boot",
     async (env) => {
@@ -2381,6 +3072,46 @@ export function transportConformance(
     },
   );
   add(
+    "T-metadata-canary",
+    "validate() fails NEST_METADATA_KEY_CHANGED when Nest writes its metadata under other keys, and claims no class without handlers",
+    (env) =>
+      withApp(options, env, async ({ app }) => {
+        // The boot ran the transport's canaries against the installed Nest.
+        const claims = await recordClaims(app, options.transport);
+        assert.ok(
+          claims.some((claim) => claim.fixture),
+          "the transport claimed none of the kit's fixture handlers",
+        );
+        const clones = [...new Set(claims.map((claim) => claim.target))].map(
+          withoutHandlers,
+        );
+        const extra = await recordClaims(app, options.transport, {
+          classes: clones,
+        });
+        assert.deepEqual(
+          extra
+            .filter((claim) => clones.includes(claim.target))
+            .map((claim) => `${claim.target.name}.${String(claim.method)}`),
+          [],
+          "the transport claimed a class without handlers",
+        );
+        const renamed = await settle(() =>
+          recordClaims(app, options.transport, { renameMetadata: true }),
+        );
+        assert.equal(
+          renamed.ok,
+          false,
+          "validate() passed while Nest wrote its metadata under other keys: the transport runs no metadata canary",
+        );
+        assert.ok(
+          bootIssueCodes(!renamed.ok && renamed.error).includes(
+            "NEST_METADATA_KEY_CHANGED",
+          ),
+          `expected NEST_METADATA_KEY_CHANGED, got ${String(!renamed.ok && renamed.error)}`,
+        );
+      }),
+  );
+  add(
     "T-unsatisfiable-kinds",
     "default requirements that admit no common kind fail boot unless skipped",
     async (env) => {
@@ -2436,6 +3167,53 @@ export function transportConformance(
         assert.equal(sessionReads(env.probe, from), 0);
       }),
   );
+  addRun(
+    "T-dynamic-base-url",
+    "with a dynamic baseURL without fallback, a transport with hostless calls fails boot and any other resolves every credential shape",
+    async () => {
+      let hostless = false;
+      await withApp(
+        options,
+        await kitEnvironment({ baseURL: dynamicBaseURL }),
+        async ({ app }) => {
+          hostless =
+            resolvedTransport(app, options.transport).requires
+              ?.hostlessCalls === true;
+        },
+      );
+      const env = await kitEnvironment({ baseURL: { allowedHosts: [host] } });
+      if (hostless) {
+        await expectBootFailure(
+          options,
+          env,
+          {},
+          "DYNAMIC_BASE_URL_WITHOUT_FALLBACK",
+        );
+        return;
+      }
+      await withApp(options, env, async ({ app }) => {
+        for (const [handler, headers, kind] of [
+          ["required", cookie(env), "session"],
+          [
+            "required",
+            { authorization: `Bearer ${env.identity.token}` },
+            "session",
+          ],
+          ["acceptsApiKey", { "x-api-key": env.keys.valid }, "api-key"],
+        ] as const) {
+          const result = await options.invoke(app, handler, {
+            ...headers,
+            host,
+          });
+          succeeded(result, `a ${kind} credential (${Object.keys(headers)})`);
+          assert.deepEqual(principalOf(result), {
+            kind,
+            userId: env.identity.userId,
+          });
+        }
+      });
+    },
+  );
   add(
     "T-public-direct-invalid-context",
     "public work runs without extraction; guarded and forwarding work fails closed before side effects",
@@ -2473,18 +3251,142 @@ export function transportConformance(
       });
     },
   );
-  const graphOf = (result: GraphResult, root: string, field?: string) => {
-    const node = (result.data as Record<string, unknown> | null | undefined)?.[
-      root
-    ] as Record<string, unknown> | null | undefined;
-    return field === undefined ? node : node?.[field];
+  const noInherited =
+    "the harness exposes no inherited handler through two subclasses (invokeInherited)";
+  addRun(
+    "T-inherited-handler",
+    "one inherited method answers per subclass, public then protected and the other way round",
+    async () => {
+      for (const order of [
+        ["public", "denied"],
+        ["denied", "public"],
+      ] as const) {
+        // A fresh boot per order: the first request of a boot fills the plan cache.
+        const env = await kitEnvironment();
+        await withApp(options, env, async ({ app }) => {
+          for (let round = 0; round < 2; round++) {
+            for (const subclass of order) {
+              const label = `${order.join(" first, then ")}, round ${round + 1}: the ${subclass} subclass`;
+              const result = await options.invokeInherited!(
+                app,
+                subclass,
+                cookie(env),
+              );
+              if (subclass === "public") {
+                succeeded(result, label);
+              } else {
+                denied(result, 403, "CONFORMANCE_DENIED", label);
+              }
+            }
+          }
+        });
+      }
+    },
+    options.invokeInherited ? undefined : noInherited,
+  );
+  addRun(
+    "T-stale-context",
+    "a static GraphQL context fails boot, and a cached one never answers a later caller with an earlier caller's principal",
+    async () => {
+      const env = await kitEnvironment();
+      if (!(await transportHas(options, env, "defaultAccessFor"))) {
+        return conformanceSkip(
+          "the transport nests no handlers, so it serves no GraphQL context",
+        );
+      }
+      const contexts = options.graphqlContexts ?? [];
+      assert.ok(
+        contexts.includes("static") && contexts.includes("cached"),
+        "the transport nests handlers, so graphqlContexts must include 'static' and 'cached'",
+      );
+      await expectBootFailure(
+        options,
+        env,
+        { graphqlContext: "static" },
+        "GRAPHQL_STATIC_CONTEXT",
+      );
+      // A cached context of a connection-shaped leg still holds a connection that may be open, so only a completed
+      // per-operation request is detectable as stale.
+      if (await connectionLeg()) {
+        return;
+      }
+      const later = await kitIdentity(env.auth);
+      const laterCookie = { ...cookie(env), cookie: later.cookie };
+      await withApp(
+        options,
+        env,
+        async ({ app, logger }) => {
+          const first = await options.invoke(app, "required", cookie(env));
+          succeeded(first, "the first caller of a cached context");
+          assert.equal(principalOf(first)?.userId, env.identity.userId);
+          for (const handler of ["required", "optional"] as const) {
+            const result = await options.invoke(app, handler, laterCookie);
+            const label = `a later caller of ${handler}`;
+            // A driver that rebuilds its context around the cached object answers with the later caller's own principal.
+            if (result.ok) {
+              assert.equal(
+                principalOf(result)?.userId,
+                later.userId,
+                `${label} did not read its own principal`,
+              );
+            } else {
+              internal(result, label);
+              assert.match(logger.text(), /GRAPHQL_CONTEXT_STALE_REQUEST/);
+            }
+          }
+          // Public work reads no credential of the completed request.
+          succeeded(
+            await options.invoke(app, "public", laterCookie),
+            "a later caller of a public handler",
+          );
+          const service = await options.invoke(
+            app,
+            "publicService",
+            laterCookie,
+          );
+          succeeded(service, "a later caller of a public service read");
+          assert.deepEqual(service.body, { session: null });
+        },
+        { graphqlContext: "cached" },
+      );
+    },
+  );
+  /** The claimed site of each graph fixture handler of a booted app, by fixture name. */
+  const graphSites = async (app: INestApplication) => {
+    const sites = new Map<string, { target: Type; method: string }>();
+    for (const claim of await recordClaims(app, options.transport)) {
+      if (claim.fixture?.startsWith("graph.") && claim.method !== undefined) {
+        sites.set(claim.fixture.slice("graph.".length), {
+          target: claim.target as Type,
+          method: claim.method,
+        });
+      }
+    }
+    return sites;
   };
-  const userOf = (value: unknown) =>
-    (value as { principal?: { userId?: string } | null } | null | undefined)
-      ?.principal?.userId ?? null;
+  const graphSite = (
+    sites: Map<string, { target: Type; method: string }>,
+    name: string,
+  ) => {
+    const site = sites.get(name);
+    assert.ok(site, `the transport claimed no ${name} graph handler`);
+    return site;
+  };
+  const planAt = (
+    app: INestApplication,
+    site: { target: Type; method: string },
+  ): RoutePlan =>
+    app
+      .get<RoutePlanner>(ROUTE_PLANNER, { strict: false })
+      .plan(site.target, site.method);
+  /** The boot advice lines a logger captured for one code. */
+  const adviceLines = (logger: CapturingLogger, code: string) =>
+    logger.entries
+      .map((entry) => entry.text)
+      .filter((text) => text.startsWith(`${code}:`));
   add(
     "T-inherit-no-lookup",
-    "an anonymous public operation with an inheriting field reads no session, and a guarded field is still enforced",
+    "an anonymous public operation with an inheriting field reads no session, a guarded field is still enforced, and class-level metadata reaches operations only",
     async (env) => {
       const skip = await graphReady(env);
       if (skip) {
@@ -2492,6 +3394,7 @@ export function transportConformance(
       }
       for (const enhancers of enhancerBoots) {
         const guarded = enhancers.length > 0;
+        const logger = new CapturingLogger();
         await withApp(
           options,
           env,
@@ -2526,11 +3429,88 @@ export function transportConformance(
                 `a guarded field under a public root was not denied: ${JSON.stringify(field.errors)}`,
               );
             }
+            const sites = await graphSites(app);
+            const [warning] = adviceLines(logger, "W_FIELD_RESOLVER_INHERITS");
+            assert.ok(
+              warning,
+              `[${enhancers.join(", ")}]: boot did not warn W_FIELD_RESOLVER_INHERITS`,
+            );
+            const inheriting = warning.slice(
+              0,
+              warning.indexOf(" inherit readings"),
+            );
+            for (const field of ["plain", "reader"]) {
+              const site = graphSite(sites, field);
+              assert.ok(
+                inheriting.includes(`${site.target.name}.${site.method}`),
+                `W_FIELD_RESOLVER_INHERITS does not list ${field}: ${warning}`,
+              );
+            }
           },
           {
             fieldResolverEnhancers: enhancers,
             fixtures: kitFixtures({}, [], { guarded }),
           },
+          logger,
+        );
+      }
+      // Class-level acceptance reaches the operations of the resolver class, never its field resolvers. [R3:NEST-r3-05]
+      for (const enhancers of enhancerBoots) {
+        const logger = new CapturingLogger();
+        const label = `class-level @AcceptPrincipals, [${enhancers.join(", ")}]`;
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            const sites = await graphSites(app);
+            for (const field of ["plain", "reader", "sessionReader"]) {
+              assert.equal(
+                planAt(app, graphSite(sites, field)).access,
+                "inherit",
+                `${label}: the ${field} field resolver lost its inherit plan`,
+              );
+            }
+            const root = graphSite(sites, "sessionOnly");
+            assert.deepEqual(
+              [...planAt(app, root).accepts].sort(),
+              [API_KEY_KIND, SESSION_KIND],
+              `${label}: the class-level acceptance did not reach the root field`,
+            );
+            const from = env.probe.calls.length;
+            const result = await options.invokeGraph!(
+              app,
+              [{ root: "public", fields: ["plain", "reader"] }],
+              {},
+            );
+            assert.deepEqual(
+              result.errors,
+              [],
+              `${label}: ${JSON.stringify(result.errors)}`,
+            );
+            assert.equal(sessionReads(env.probe, from), 0, label);
+            const [info] = adviceLines(
+              logger,
+              "I_CLASS_METADATA_OPERATIONS_ONLY",
+            );
+            assert.ok(
+              info?.includes(root.target.name),
+              `${label}: I_CLASS_METADATA_OPERATIONS_ONLY does not name ${root.target.name}: ${info}`,
+            );
+            for (const field of ["plain", "reader"]) {
+              assert.ok(
+                info.includes(graphSite(sites, field).method),
+                `${label}: I_CLASS_METADATA_OPERATIONS_ONLY does not name the ${field} field: ${info}`,
+              );
+            }
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            fixtures: kitFixtures({}, [], {
+              guarded: enhancers.length > 0,
+              classDecorators: [AcceptPrincipals(SESSION_KIND, API_KEY_KIND)],
+            }),
+          },
+          logger,
         );
       }
     },
@@ -2538,7 +3518,7 @@ export function transportConformance(
   );
   add(
     "T-stamp-per-plan",
-    "a nested reader reads its own enclosing root field's reading, whichever source settles first",
+    "a nested reader reads its own enclosing field's reading, whichever source settles first",
     async (env) => {
       const skip = await graphReady(env);
       if (skip) {
@@ -2546,8 +3526,11 @@ export function transportConformance(
       }
       // User Y's cookie and user X's key in one operation.
       env.keys.owner = (await kitIdentity(env.auth)).userId;
+      const userY = env.identity.userId;
       const headers = { ...cookie(env), "x-api-key": env.keys.valid };
       for (const enhancers of enhancerBoots) {
+        const guarded = enhancers.length > 0;
+        const logger = new CapturingLogger();
         await withApp(
           options,
           env,
@@ -2564,8 +3547,11 @@ export function transportConformance(
                 const result = await options.invokeGraph!(
                   app,
                   [
-                    { root: "sessionOnly", fields: ["reader"] },
-                    { root: "mixed", fields: ["reader"] },
+                    { root: "sessionOnly", fields: ["reader", "publicNested"] },
+                    {
+                      root: "mixed",
+                      fields: guarded ? ["reader", "guarded"] : ["reader"],
+                    },
                     { root: "public", fields: ["reader"] },
                   ],
                   headers,
@@ -2584,8 +3570,19 @@ export function transportConformance(
                 );
                 assert.equal(
                   userOf(graphOf(result, "sessionOnly", "reader")),
-                  env.identity.userId,
+                  userY,
                   `${label}: reader under sessionOnly`,
+                );
+                assert.equal(
+                  userOf(
+                    (
+                      graphOf(result, "sessionOnly", "publicNested") as {
+                        reader?: unknown;
+                      } | null
+                    )?.reader,
+                  ),
+                  userY,
+                  `${label}: reader under publicNested under sessionOnly`,
                 );
                 assert.equal(
                   userOf(graphOf(result, "mixed", "reader")),
@@ -2597,29 +3594,131 @@ export function transportConformance(
                   null,
                   `${label}: reader under public`,
                 );
+                if (guarded) {
+                  const node = graphOf(result, "mixed", "guarded") as {
+                    principal?: { userId?: string };
+                    nestedReader?: unknown;
+                  } | null;
+                  assert.equal(
+                    node?.principal?.userId,
+                    userY,
+                    `${label}: guarded under mixed accepts sessions only`,
+                  );
+                  assert.equal(
+                    userOf(node?.nestedReader),
+                    userY,
+                    `${label}: nestedReader under guarded must read guarded's own principal`,
+                  );
+                }
               } finally {
                 env.probe.delay = undefined;
                 env.keys.delayMs = 0;
               }
             }
+            const alone = await options.invokeGraph!(
+              app,
+              [{ root: "public", fields: ["reader"] }],
+              headers,
+            );
+            assert.deepEqual(alone.errors, [], JSON.stringify(alone.errors));
+            assert.equal(
+              userOf(graphOf(alone, "public", "reader")),
+              null,
+              "reader under a public root without a guarded sibling",
+            );
+            // A nested session reader under a root that accepts API keys. [R5:NEST-r5-03]
+            const sessionReader: GraphSelection[] = [
+              { root: "mixed", fields: ["sessionReader"] },
+            ];
+            const bySession = await options.invokeGraph!(
+              app,
+              sessionReader,
+              cookie(env),
+            );
+            assert.deepEqual(
+              bySession.errors,
+              [],
+              JSON.stringify(bySession.errors),
+            );
+            assert.equal(graphOf(bySession, "mixed", "sessionReader"), userY);
+            const byKey = await options.invokeGraph!(app, sessionReader, {
+              "x-api-key": env.keys.valid,
+            });
+            assert.ok(
+              byKey.errors.length === 1 &&
+                byKey.errors[0]!.path.includes("sessionReader"),
+              `an API key's nested session read did not fail at the field: ${JSON.stringify(byKey)}`,
+            );
+            assert.equal(graphOf(byKey, "mixed", "sessionReader"), null);
+            assert.match(logger.text(), /SESSION_REQUIRED/);
+            const sessionSite = graphSite(
+              await graphSites(app),
+              "sessionReader",
+            );
+            assert.ok(
+              adviceLines(logger, "W_NESTED_PRINCIPAL_PARAM").some((line) =>
+                line.includes(
+                  `${sessionSite.target.name}.${sessionSite.method}`,
+                ),
+              ),
+              "boot did not list sessionReader in W_NESTED_PRINCIPAL_PARAM",
+            );
           },
           {
             fieldResolverEnhancers: enhancers,
-            fixtures: kitFixtures({}, [], { guarded: enhancers.length > 0 }),
+            fixtures: kitFixtures({}, [], { guarded }),
+          },
+          logger,
+        );
+      }
+      // Instance-wide forwarding puts publicNested in form mode; the reading below it stays the root's. [R5:NEST-r5-05]
+      for (const enhancers of enhancerBoots) {
+        await withApp(
+          options,
+          env,
+          async ({ app }) => {
+            const result = await options.invokeGraph!(
+              app,
+              [{ root: "sessionOnly", fields: ["publicNested"] }],
+              { ...cookie(env), origin: KIT_BASE_URL },
+            );
+            const label = `cookies.forwardDirectCalls, [${enhancers.join(", ")}]`;
+            assert.deepEqual(
+              result.errors,
+              [],
+              `${label}: ${JSON.stringify(result.errors)}`,
+            );
+            assert.equal(
+              userOf(
+                (
+                  graphOf(result, "sessionOnly", "publicNested") as {
+                    reader?: unknown;
+                  } | null
+                )?.reader,
+              ),
+              userY,
+              `${label}: reader under publicNested under sessionOnly`,
+            );
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            forwardDirectCalls: true,
+            fieldResolverCoverage: "warn",
+            fixtures: kitFixtures(),
           },
         );
       }
     },
     graphSkip,
   );
-  const federation: BootOptions = {
+  const federation = (graph: GraphBoot = {}): BootOptions => ({
     federation: true,
     fieldResolverEnhancers: ["guards", "interceptors"],
-    fixtures: kitFixtures({}, [], { guarded: true, reference: true }),
-  };
+    fixtures: kitFixtures({}, [], { guarded: true, reference: true, ...graph }),
+  });
   add(
     "T-reference-resolver",
-    "federation reference resolvers need field guards and decide each entity",
+    "federation reference resolvers need field guards and decide each entity, and inheriting entity fields need one",
     async (env) => {
       if (!options.invokeEntities) {
         if (!(await transportHas(options, env, "defaultAccessFor"))) {
@@ -2636,7 +3735,7 @@ export function transportConformance(
               (claim) => claim.fixture === "reference",
             );
           },
-          federation,
+          federation(),
         );
         assert.equal(
           claimed,
@@ -2650,17 +3749,17 @@ export function transportConformance(
       await expectBootFailure(
         options,
         env,
-        { ...federation, fieldResolverEnhancers: undefined },
+        { ...federation(), fieldResolverEnhancers: undefined },
         ["REFERENCE_RESOLVER_UNGUARDED", "FEDERATION_FIELD_GUARDS_REQUIRED"],
       );
+      const representations = [
+        { __typename: "FixtureNode", id: "1", orgId: "org-a" },
+        { __typename: "FixtureNode", id: "2", orgId: "org-b" },
+      ];
       await withApp(
         options,
         env,
         async ({ app }) => {
-          const representations = [
-            { __typename: "FixtureNode", id: "1", orgId: "org-a" },
-            { __typename: "FixtureNode", id: "2", orgId: "org-b" },
-          ];
           const anonymous = await options.invokeEntities!(
             app,
             representations,
@@ -2677,7 +3776,7 @@ export function transportConformance(
           const decided = await options.invokeEntities!(
             app,
             representations,
-            ["plain"],
+            ["plain", "reader"],
             cookie(env),
           );
           assert.equal(
@@ -2690,8 +3789,120 @@ export function transportConformance(
             decided.errors[0]!.path.includes(1),
             JSON.stringify(decided.errors),
           );
+          const [entity] =
+            (decided.data as { _entities?: unknown[] } | null)?._entities ?? [];
+          assert.equal(
+            userOf((entity as { reader?: unknown } | undefined)?.reader),
+            env.identity.userId,
+            `reader under _entities.0 must read the reference resolver's reading: ${JSON.stringify(decided.data)}`,
+          );
         },
-        federation,
+        federation(),
+      );
+      // Without a reference resolver no guard decides the entity, so its inheriting fields answer the generic 500 of
+      // NO_ENCLOSING_DECISION.
+      await withApp(
+        options,
+        env,
+        async ({ app }) => {
+          const result = await options.invokeEntities!(
+            app,
+            representations.slice(0, 1),
+            ["plain", "reader"],
+            cookie(env),
+          );
+          const [entity] = ((result.data as { _entities?: unknown[] } | null)
+            ?._entities ?? []) as ({
+            plain?: unknown;
+            reader?: unknown;
+          } | null)[];
+          assert.ok(
+            entity?.plain == null && entity?.reader == null,
+            `an entity without a reference resolver answered data: ${JSON.stringify(result.data)}`,
+          );
+          for (const field of ["plain", "reader"]) {
+            assert.ok(
+              result.errors.some(
+                (error) =>
+                  error.path.includes(field) &&
+                  error.code !== "UNAUTHENTICATED" &&
+                  error.code !== "FORBIDDEN",
+              ),
+              `${field} did not answer the generic internal error: ${JSON.stringify(result.errors)}`,
+            );
+          }
+        },
+        federation({ reference: false }),
+      );
+      // A class-level organization requirement reaches the reference resolver, whose representation carries orgId.
+      // [R5:NEST-r5-02]
+      const orgEnv = await kitEnvironment({ plugins: [organization()] });
+      const member = await createKitOrganization(orgEnv);
+      await withApp(
+        options,
+        orgEnv,
+        async ({ app, logger }) => {
+          const reference = (await recordClaims(app, options.transport)).find(
+            (claim) => claim.fixture === "reference",
+          );
+          assert.ok(reference, "the transport claimed no reference resolver");
+          const site = `${reference.target.name}.${String(reference.method)}`;
+          assert.ok(
+            adviceLines(logger, "W_ORG_PARAM_MISSING").some((line) =>
+              line.includes(site),
+            ),
+            `boot did not name ${site} in W_ORG_PARAM_MISSING: ${logger.text().slice(0, 800)}`,
+          );
+          const [info] = adviceLines(
+            logger,
+            "I_CLASS_METADATA_OPERATIONS_ONLY",
+          );
+          assert.ok(
+            info?.includes(reference.target.name) &&
+              info.includes(String(reference.method)),
+            `I_CLASS_METADATA_OPERATIONS_ONLY does not name ${site} as reached: ${info}`,
+          );
+          const decided = await options.invokeEntities!(
+            app,
+            [
+              { __typename: "FixtureNode", id: "1", orgId: member },
+              { __typename: "FixtureNode", id: "2", orgId: "org-b" },
+            ],
+            ["plain"],
+            cookie(orgEnv),
+          );
+          assert.equal(
+            decided.errors.length,
+            1,
+            `the class-level requirement did not decide each representation: ${JSON.stringify(decided.errors)}`,
+          );
+          assert.equal(decided.errors[0]!.code, "FORBIDDEN");
+          assert.ok(
+            decided.errors[0]!.path.includes(1),
+            JSON.stringify(decided.errors),
+          );
+          const own = await options.invokeGraph!(
+            app,
+            [{ root: "public", fields: ["plain"] }],
+            {},
+          );
+          assert.deepEqual(
+            own.errors,
+            [],
+            `the class's own public query failed: ${JSON.stringify(own.errors)}`,
+          );
+        },
+        federation({
+          reference: "bare",
+          classDecorators: [
+            Require(
+              orgPermission(
+                { member: ["create"] },
+                { organization: fromParam("orgId") },
+              ),
+            ),
+          ],
+        }),
       );
     },
     staticMember(options.transport, "defaultAccessFor") === false &&
