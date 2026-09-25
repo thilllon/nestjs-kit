@@ -459,7 +459,7 @@ function referenceHarness(
               : { globalScope: options.globalScope }),
             transports: [transport],
             http: { mount: false },
-            logSummary: false,
+            logSummary: options.logSummary ?? false,
           } as never),
         ],
         providers: [
@@ -773,6 +773,39 @@ describe("transport kit mutations", () => {
       ).run(),
     ).rejects.toThrow(
       /@SkipOriginCheck\(\): a cookie from an untrusted Origin: expected success/,
+    );
+  });
+
+  it("fails the BA-r6-01 row of T-csrf-http-unsafe for a kernel that treats Better Auth's boolean origin skip as its own", async () => {
+    const harness = referenceHarness(new ReferenceTransport());
+    const cases = transportConformance({
+      ...harness,
+      async createApp(fixtures, auth, options) {
+        // The kernel then sees an unset disableCSRFCheck, as if it ignored the explicit false.
+        const context = (await auth.$context) as {
+          skipOriginCheck: unknown;
+          options: { advanced?: { disableCSRFCheck?: boolean } };
+        };
+        if (context.skipOriginCheck === true) {
+          delete context.options.advanced?.disableCSRFCheck;
+        }
+        return harness.createApp(fixtures, auth, options);
+      },
+    });
+    await expect(caseById(cases, "T-csrf-http-unsafe").run()).rejects.toThrow(
+      /expected a 403 denial/,
+    );
+  });
+
+  it("fails T-coverage-claims for a harness that boots without the summary it asks for", async () => {
+    const harness = referenceHarness(new ReferenceTransport());
+    const cases = transportConformance({
+      ...harness,
+      createApp: (fixtures, auth, options) =>
+        harness.createApp(fixtures, auth, { ...options, logSummary: false }),
+    });
+    await expect(caseById(cases, "T-coverage-claims").run()).rejects.toThrow(
+      /boot logged no summary/,
     );
   });
 

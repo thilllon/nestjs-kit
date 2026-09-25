@@ -640,10 +640,15 @@ import {
   policyConformance,
   principalSourceConformance,
   runConformance,
+  type ConformanceAuthSettings,
   type ConformanceCase,
 } from "nestjs-slightly-better-auth/testing/conformance";
 
 const auth = createConformanceAuth({ plugins: [admin(), apiKey()] });
+const sdkOriginSkip: ConformanceAuthSettings = { disableOriginCheck: true, disableCSRFCheck: false };
+createConformanceAuth({}, sdkOriginSkip);
+// @ts-expect-error The settings hold Better Auth's boolean origin-check flags only.
+createConformanceAuth({}, { disableOriginCheck: ["/sign-in/email"] });
 const credentials = {
   valid: async () => new Headers({ "x-api-key": "valid" }),
   invalid: () => new Headers({ "x-api-key": "invalid" }),

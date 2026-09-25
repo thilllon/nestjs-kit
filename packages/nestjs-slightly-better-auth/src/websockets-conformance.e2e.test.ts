@@ -592,7 +592,7 @@ function websocketHarness(
             ...(options.globalScope === undefined
               ? {}
               : { globalScope: options.globalScope }),
-            logSummary: false,
+            logSummary: options.logSummary ?? false,
           } as never),
         ],
         providers: [

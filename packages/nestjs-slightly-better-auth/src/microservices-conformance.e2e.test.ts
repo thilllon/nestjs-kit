@@ -660,7 +660,7 @@ function rpcHarness(family: RpcFamily): TransportConformanceOptions {
             ...(options.globalScope === undefined
               ? {}
               : { globalScope: options.globalScope }),
-            logSummary: false,
+            logSummary: options.logSummary ?? false,
           } as never),
         ],
         controllers: [

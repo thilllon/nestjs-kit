@@ -73,7 +73,7 @@ export interface ConformanceApiKey {
   readonly headers: Headers;
 }
 
-/** Real HTTP delivery for the cookie-bridge cases (S-bridge-*). */
+/** Real HTTP delivery for the HTTP-route rows of S-cookie-forwarded and S-infra-throws and the cookie-bridge cases (S-bridge-*). */
 export interface PrincipalHttpConformanceOptions {
   platform: ExtensionRef<HttpPlatform>;
   /** Fresh Nest HTTP adapter per app, e.g. () => new ExpressAdapter(). */
@@ -121,7 +121,10 @@ export interface PrincipalSourceConformanceOptions {
    * other than the kit's own; pass variant() when those plugin objects keep per-instance state.
    */
   variant?(overrides: Omit<BetterAuthOptions, "database">): AuthLike;
-  /** S-bridge-*: boots the cookie-bridge routes on this HTTP platform. The cases skip without it. */
+  /**
+   * Boots a guarded route and the cookie-bridge routes on this HTTP platform for the HTTP-route rows of
+   * S-cookie-forwarded and S-infra-throws and for S-bridge-*. Those cases skip without it.
+   */
   http?: PrincipalHttpConformanceOptions;
 }
 
@@ -612,6 +615,11 @@ function bridgeController(kinds: readonly string[]): Type {
     constructor(
       @Inject(BetterAuthService) private readonly service: BetterAuthService,
     ) {}
+
+    @Post("principal")
+    principal() {
+      return { ok: true };
+    }
 
     @Post("sign-up")
     signUp() {
@@ -1105,6 +1113,7 @@ export function principalSourceConformance(
       },
     ),
     ...bridgeCases(options),
+    ...httpRouteCases(options),
     ...logRedactionCases(options),
     ...jwtCases(options),
   ];
@@ -1734,6 +1743,109 @@ function bridgeCases(
             "forwardForeignCookies() ran outside a forwarding handler",
           );
           assert.deepEqual(linesWithToken(undeclared, foreign.token), []);
+        }),
+      skip,
+    ),
+  ];
+}
+
+/** A response header the probe sets on the source's own calls; it must never reach the client (S-cookie-forwarded). */
+const CALL_HEADER = "x-conformance-call-header";
+
+/** S-cookie-forwarded and S-infra-throws through a guarded route of the http harness. */
+function httpRouteCases(
+  options: PrincipalSourceConformanceOptions,
+): ConformanceCase[] {
+  const skip = options.http ? undefined : "the options give no http harness";
+  const withRoute = async (
+    fn: (
+      boot: BridgeBoot,
+      source: PrincipalSource,
+      probe: ProbeState,
+    ) => Promise<ConformanceOutcome>,
+  ): Promise<ConformanceOutcome> => {
+    const inspected = await harness(options);
+    const { source, probe } = inspected;
+    await inspected.close();
+    const boot = await bootBridge(options, options.http!, source.kinds);
+    try {
+      return await fn(boot, source, probe);
+    } finally {
+      probe.storageFault = undefined;
+      probe.responseHeader = undefined;
+      await boot.close();
+    }
+  };
+  return [
+    conformanceCase(
+      "S-infra-throws",
+      "through an HTTP route: a storage outage answers 5xx, never 401 or 403",
+      () =>
+        withRoute(async (boot, _source, probe) => {
+          const headers = await options.credentials.valid(options.auth);
+          const calls = probe.calls.length;
+          const storage = probe.storage.length;
+          probe.storageFault = () => new Error("conformance storage outage");
+          const response = await boot.post("principal", headers);
+          probe.storageFault = undefined;
+          if (
+            probe.calls.length === calls &&
+            probe.storage.length === storage
+          ) {
+            return conformanceSkip(
+              "the source read no storage and called no Better Auth endpoint for a valid credential",
+            );
+          }
+          assert.ok(
+            response.status >= 500 && response.status < 600,
+            `a guarded route answered ${response.status} for a storage outage instead of 5xx: ${response.body.toString("utf8")}`,
+          );
+        }),
+      skip,
+    ),
+    conformanceCase(
+      "S-cookie-forwarded",
+      "through an HTTP route: each Set-Cookie line of the source's own-credential calls reaches the client exactly once, and no other header of those calls does",
+      () =>
+        withRoute(async (boot, source, probe) => {
+          const headers = await options.credentials.valid(options.auth);
+          const from = probe.produced.length;
+          const calls = probe.calls.length;
+          probe.responseHeader = () => [CALL_HEADER, "leaked"];
+          const response = await boot.post("principal", headers);
+          probe.responseHeader = undefined;
+          assert.equal(
+            response.status,
+            201,
+            `the guarded route answered ${response.status}: ${response.body.toString("utf8")}`,
+          );
+          const produced = ownCookies(
+            probe,
+            from,
+            headers,
+            source.credentialHeaders ?? [],
+          );
+          const delivered = setCookieLines(response.headers);
+          for (const line of new Set(produced)) {
+            assert.equal(
+              occurrences(delivered, line),
+              1,
+              `the source's Better Auth calls produced ${names([line])[0]}, the client received it ${occurrences(delivered, line)} times (received: ${names(delivered).join(", ") || "nothing"})`,
+            );
+          }
+          for (const line of delivered) {
+            assert.ok(
+              produced.includes(line),
+              `the client received ${names([line])[0]}, which no call with the request's own credential produced`,
+            );
+          }
+          if (probe.calls.length > calls) {
+            assert.equal(
+              response.headers[CALL_HEADER],
+              undefined,
+              "a header other than Set-Cookie that the source's Better Auth calls set reached the client",
+            );
+          }
         }),
       skip,
     ),
