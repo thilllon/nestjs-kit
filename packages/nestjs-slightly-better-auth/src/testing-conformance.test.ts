@@ -4,8 +4,10 @@ import {
   Inject,
   Injectable,
   Module,
+  SetMetadata,
   type ExecutionContext,
   type INestApplication,
+  type Type,
 } from "@nestjs/common";
 import { ROUTE_ARGS_METADATA } from "@nestjs/common/constants.js";
 import { IntrinsicException } from "@nestjs/common/exceptions/intrinsic.exception.js";
@@ -30,6 +32,7 @@ import type {
   ConformanceCase,
   ExtensionRef,
   PrincipalSource,
+  RoutePlan,
   TransportCall,
   TransportValidationContext,
 } from "./auth-contracts.js";
@@ -60,6 +63,7 @@ import {
   type TransportInvocationResult,
   transportConformance,
 } from "./conformance-transport.js";
+import { ROUTE_PLANNER } from "./auth-tokens.js";
 import { BootValidator } from "./boot-validator.js";
 import { jwtPrincipal } from "./jwt-extension-fixture.js";
 import {
@@ -71,6 +75,7 @@ import {
 } from "./organization.js";
 import { PolicyResolver } from "./policy-resolver.js";
 import { authenticated, rejected } from "./principal-resolver.js";
+import type { RoutePlanner } from "./route-planner.js";
 import { freshSession, sessionPrincipal } from "./session-principal.js";
 
 const REFERENCE = "nestjs-slightly-better-auth:reference";
@@ -95,12 +100,17 @@ class ReferenceDenial extends IntrinsicException {
   }
 }
 
+/** The class (REFERENCE_HANDLERS) and handler (REFERENCE_HANDLER) markers the reference transport claims by. */
+const REFERENCE_HANDLER = "nestjs-slightly-better-auth:reference-handler";
+
 /**
  * An in-process transport with a custom context type: one operation (the logical request) carries one or more
  * invocations, like aliased fields. `sharedInvocation` reproduces the defect of reusing the operation as the invocation;
  * `readsWithoutBrowserLeg` the defect of describing no browser leg for safe operations. `connectionLeg` describes the
  * operation's connection as its browser leg, like a WebSocket handshake. `failsClosedWhenComplete` rejects reading the
- * browser leg of a completed operation, as the GraphQL transports reject a completed request.
+ * browser leg of a completed operation, as the GraphQL transports reject a completed request. `handlesEveryContext`
+ * claims contexts of every type; `noCanary` skips the metadata canary; `claimsClasses` also claims each handler class;
+ * `dropsHost` extracts credentials without the Host header while declaring no hostless calls.
  */
 class ReferenceTransport implements AuthTransport {
   readonly id = "reference";
@@ -111,11 +121,18 @@ class ReferenceTransport implements AuthTransport {
       readsWithoutBrowserLeg?: boolean;
       connectionLeg?: boolean;
       failsClosedWhenComplete?: boolean;
+      handlesEveryContext?: boolean;
+      noCanary?: boolean;
+      claimsClasses?: boolean;
+      dropsHost?: boolean;
     } = {},
   ) {}
 
   handles(context: ExecutionContext): boolean {
-    return context.getType<string>() === REFERENCE;
+    return (
+      this.defects.handlesEveryContext === true ||
+      context.getType<string>() === REFERENCE
+    );
   }
 
   describe(context: ExecutionContext): TransportCall {
@@ -127,10 +144,17 @@ class ReferenceTransport implements AuthTransport {
     const readsWithoutBrowserLeg = this.defects.readsWithoutBrowserLeg;
     const failsClosedWhenComplete = this.defects.failsClosedWhenComplete;
     const leg = this.defects.connectionLeg ? operation.connection : operation;
+    const dropsHost = this.defects.dropsHost;
     return {
       key: operation,
       invocation: this.defects.sharedInvocation ? operation : message,
-      headers: () => new Headers(operation.headers),
+      headers: () => {
+        const headers = new Headers(operation.headers);
+        if (dropsHost) {
+          headers.delete("host");
+        }
+        return headers;
+      },
       clientIp: null,
       get cookies() {
         return {
@@ -180,6 +204,24 @@ class ReferenceTransport implements AuthTransport {
   }
 
   validate(context: TransportValidationContext): void {
+    if (!this.defects.noCanary) {
+      class Probe {
+        handler(): void {}
+      }
+      SetMetadata(REFERENCE_HANDLER, true)(
+        Probe.prototype,
+        "handler",
+        Object.getOwnPropertyDescriptor(Probe.prototype, "handler")!,
+      );
+      if (
+        Reflect.getMetadata(REFERENCE_HANDLER, Probe.prototype.handler) !== true
+      ) {
+        throw new BetterAuthConfigurationError(
+          "NEST_METADATA_KEY_CHANGED",
+          "Reference handler metadata failed its canary",
+        );
+      }
+    }
     const scanner = new MetadataScanner();
     for (const wrapper of context.discovery.getProviders()) {
       const target = wrapper.metatype as
@@ -187,10 +229,25 @@ class ReferenceTransport implements AuthTransport {
             ...args: never[]
           ) => unknown)
         | undefined;
-      if (!target?.prototype || !Reflect.get(target, REFERENCE_HANDLERS)) {
+      if (
+        !target?.prototype ||
+        !Reflect.getMetadata(REFERENCE_HANDLERS, target)
+      ) {
         continue;
       }
+      if (this.defects.claimsClasses) {
+        context.claim(target, undefined, "global", {
+          code: "REFERENCE_UNGUARDED",
+          hint: "Register the global guard or add @UseBetterAuth().",
+        });
+      }
       for (const method of scanner.getAllMethodNames(target.prototype)) {
+        if (
+          Reflect.getMetadata(REFERENCE_HANDLER, target.prototype[method]) !==
+          true
+        ) {
+          continue;
+        }
         context.claim(target, method, "global", {
           code: "REFERENCE_UNGUARDED",
           hint: "Register the global guard or add @UseBetterAuth().",
@@ -225,9 +282,8 @@ function flatten(fixtures: TransportFixtures): Map<string, FixtureHandler> {
 
 function handlerClass(fixtures: TransportFixtures, federation = false) {
   @Injectable()
+  @SetMetadata(REFERENCE_HANDLERS, true)
   class ReferenceHandlers {
-    static readonly [REFERENCE_HANDLERS] = true;
-
     constructor(
       @Inject(BetterAuthService) readonly service: BetterAuthService,
     ) {}
@@ -262,17 +318,56 @@ function handlerClass(fixtures: TransportFixtures, federation = false) {
       param(ReferenceHandlers.prototype, name, index);
     }
     Input()(ReferenceHandlers.prototype, name, fixture.params.length);
-    for (const decorator of [...fixture.decorators].reverse()) {
+    for (const decorator of [
+      SetMetadata(REFERENCE_HANDLER, true),
+      ...fixture.decorators,
+    ].reverse()) {
       decorator(ReferenceHandlers.prototype, name, descriptor);
     }
   }
   return ReferenceHandlers;
 }
 
+/** The `inherited` fixture as one method of an abstract base class, served by two subclasses (T-inherited-handler). */
+function inheritedClasses(fixtures: TransportFixtures) {
+  const fixture = fixtures.inherited;
+  @SetMetadata(REFERENCE_HANDLERS, true)
+  abstract class InheritedBase {
+    inherited(...args: unknown[]): unknown {
+      return fixture.handle([], (args[0] ?? {}) as Record<string, unknown>, {
+        service: undefined as never,
+      });
+    }
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(
+    InheritedBase.prototype,
+    "inherited",
+  )!;
+  Input()(InheritedBase.prototype, "inherited", 0);
+  for (const decorator of [
+    SetMetadata(REFERENCE_HANDLER, true),
+    ...fixture.decorators,
+  ].reverse()) {
+    decorator(InheritedBase.prototype, "inherited", descriptor);
+  }
+  @Injectable()
+  class PublicInherited extends InheritedBase {}
+  @Injectable()
+  class DeniedInherited extends InheritedBase {}
+  for (const decorator of fixture.subclasses.public) {
+    decorator(PublicInherited);
+  }
+  for (const decorator of fixture.subclasses.denied) {
+    decorator(DeniedInherited);
+  }
+  return { public: PublicInherited, denied: DeniedInherited };
+}
+
 const dispatchers = new WeakMap<
   object,
   {
     handlers: object;
+    inherited: { public: object; denied: object };
     creator: ExternalContextCreator;
     fixtures: Map<string, FixtureHandler>;
   }
@@ -292,8 +387,13 @@ function referenceHarness(
     name: string,
     message: ReferenceMessage,
     operation: ReferenceOperation,
+    target?: "public" | "denied",
   ) => {
-    const { handlers, creator } = dispatchers.get(app)!;
+    const dispatcher = dispatchers.get(app)!;
+    const { creator } = dispatcher;
+    const handlers = target
+      ? dispatcher.inherited[target]
+      : dispatcher.handlers;
     const callback = Reflect.get(handlers, name) as (
       ...args: unknown[]
     ) => unknown;
@@ -344,6 +444,7 @@ function referenceHarness(
     invocationShapes: ["aliases"],
     async createApp(fixtures, auth, options) {
       const Handlers = handlerClass(fixtures, options.federation);
+      const inherited = inheritedClasses(fixtures);
       @Module({
         imports: [
           BetterAuthModule.forRoot({
@@ -361,7 +462,12 @@ function referenceHarness(
             logSummary: false,
           } as never),
         ],
-        providers: [Handlers, ...(options.appEnhancers ? appEnhancers : [])],
+        providers: [
+          Handlers,
+          inherited.public,
+          inherited.denied,
+          ...(options.appEnhancers ? appEnhancers : []),
+        ],
       })
       class ReferenceModule {}
       let builder = Test.createTestingModule({ imports: [ReferenceModule] });
@@ -378,6 +484,10 @@ function referenceHarness(
       }
       dispatchers.set(moduleRef, {
         handlers: moduleRef.get(Handlers),
+        inherited: {
+          public: moduleRef.get(inherited.public),
+          denied: moduleRef.get(inherited.denied),
+        },
         creator: moduleRef.get(ExternalContextCreator),
         fixtures: flatten(fixtures),
       });
@@ -410,6 +520,25 @@ function referenceHarness(
         setCookies: operation.setCookies,
       };
     },
+    async invokeInherited(app, subclass, headers) {
+      const operation: ReferenceOperation = {
+        headers: new Headers(headers),
+        setCookies: [],
+        connection: {},
+        completed: false,
+      };
+      const result = await settle(
+        call(
+          app,
+          "inherited",
+          { input: {}, operation: "read" },
+          operation,
+          subclass,
+        ),
+      );
+      operation.completed = true;
+      return { ...result, setCookies: operation.setCookies };
+    },
     async invokeTwice(app, _shape, inputs, headers) {
       const operation: ReferenceOperation = {
         headers: new Headers(headers),
@@ -424,6 +553,24 @@ function referenceHarness(
       );
       operation.completed = true;
       return [first!, second!];
+    },
+  };
+}
+
+/** A harness whose apps plan requests through `change`, a faulty planner, from the first request on. */
+function withPlans(
+  harness: TransportConformanceOptions,
+  change: (plan: RoutePlan, target: Type, method: string) => RoutePlan,
+): TransportConformanceOptions {
+  return {
+    ...harness,
+    async createApp(fixtures, auth, options) {
+      const app = await harness.createApp(fixtures, auth, options);
+      const planner = app.get<RoutePlanner>(ROUTE_PLANNER, { strict: false });
+      const plan = planner.plan.bind(planner);
+      planner.plan = (target, method) =>
+        change(plan(target, method), target, method);
+      return app;
     },
   };
 }
@@ -546,6 +693,117 @@ describe("transport kit mutations", () => {
     );
   });
 
+  it("fails T-public-unclaimed-context for a transport that claims contexts of every type", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          referenceHarness(
+            new ReferenceTransport({ handlesEveryContext: true }),
+          ),
+        ),
+        "T-public-unclaimed-context",
+      ).run(),
+    ).rejects.toThrow(/expected NO_TRANSPORT/);
+  });
+
+  it("fails T-metadata-canary for a transport without a canary and for one that claims classes", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          referenceHarness(new ReferenceTransport({ noCanary: true })),
+        ),
+        "T-metadata-canary",
+      ).run(),
+    ).rejects.toThrow(/the transport runs no metadata canary/);
+    await expect(
+      caseById(
+        transportConformance(
+          referenceHarness(new ReferenceTransport({ claimsClasses: true })),
+        ),
+        "T-metadata-canary",
+      ).run(),
+    ).rejects.toThrow(/claimed a class without handlers/);
+  });
+
+  it("fails T-dynamic-base-url for a transport that drops the Host header without declaring hostless calls", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          referenceHarness(new ReferenceTransport({ dropsHost: true })),
+        ),
+        "T-dynamic-base-url",
+      ).run(),
+    ).rejects.toThrow(/a session credential \(cookie\): expected success/);
+  });
+
+  it("fails T-inherited-handler for a planner that caches plans by handler function", async () => {
+    const byHandler = new Map<unknown, RoutePlan>();
+    await expect(
+      caseById(
+        transportConformance(
+          withPlans(
+            referenceHarness(new ReferenceTransport()),
+            (plan, target, method) => {
+              const handler = Reflect.get(target.prototype, method);
+              if (!byHandler.has(handler)) {
+                byHandler.set(handler, plan);
+              }
+              return byHandler.get(handler)!;
+            },
+          ),
+        ),
+        "T-inherited-handler",
+      ).run(),
+    ).rejects.toThrow(
+      /public first, then denied, round 1: the denied subclass: expected a 403 denial/,
+    );
+  });
+
+  it("fails the T-csrf-http-unsafe opt-out rows for a planner that ignores @SkipOriginCheck()", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          withPlans(referenceHarness(new ReferenceTransport()), (plan) =>
+            plan.originCheck === "off"
+              ? { ...plan, originCheck: "cookie" }
+              : plan,
+          ),
+        ),
+        "T-csrf-http-unsafe",
+      ).run(),
+    ).rejects.toThrow(
+      /@SkipOriginCheck\(\): a cookie from an untrusted Origin: expected success/,
+    );
+  });
+
+  it("fails the direct caller-session rows of T-csrf-safe-methods when safe operations skip the origin check", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          withPlans(referenceHarness(new ReferenceTransport()), (plan) =>
+            plan.originCheck === "cookie"
+              ? { ...plan, originCheck: "off" }
+              : plan,
+          ),
+        ),
+        "T-csrf-safe-methods",
+      ).run(),
+    ).rejects.toThrow(
+      /direct caller-session call from an untrusted Origin: expected a generic internal error/,
+    );
+  });
+
+  it("fails T-carrier when invocations of one request share their invocation object", async () => {
+    await expect(
+      caseById(
+        transportConformance(
+          referenceHarness(new ReferenceTransport({ sharedInvocation: true })),
+        ),
+        "T-carrier",
+      ).run(),
+    ).rejects.toThrow(/with the scope interceptor, aliases/);
+  });
+
   it("decides required capabilities from the transport a definition resolves, not from the helpers", async () => {
     class NestingTransport extends ReferenceTransport {
       // Instance fields: invisible on the prototype.
@@ -559,7 +817,7 @@ describe("transport kit mutations", () => {
           const target = wrapper.metatype as { prototype?: object } | undefined;
           if (
             target?.prototype &&
-            Reflect.get(target, REFERENCE_HANDLERS) &&
+            Reflect.getMetadata(REFERENCE_HANDLERS, target) &&
             typeof Reflect.get(target.prototype, "reference") === "function"
           ) {
             context.claim(target as never, "reference", "global", {
