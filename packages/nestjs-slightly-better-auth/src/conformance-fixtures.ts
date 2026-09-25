@@ -463,6 +463,17 @@ export async function probeOf(auth: AuthLike): Promise<ProbeState> {
 export function createConformanceAuth(
   options: Omit<BetterAuthOptions, "database"> = {},
 ): AuthLike {
+  return conformanceAuth(options);
+}
+
+/**
+ * Internal: createConformanceAuth() with the kits' own opt-out rows. Only a kit switches Better Auth's
+ * advanced.disableCSRFCheck on, for the case that proves the kernel honors it; a caller's option never does.
+ */
+export function conformanceAuth(
+  options: Omit<BetterAuthOptions, "database">,
+  kit: { readonly disableCSRFCheck?: boolean } = {},
+): AuthLike {
   // The probe creates a table for every model of the resolved schema when Better Auth initializes it.
   const tables: Record<string, unknown[]> = {};
   const resolved = {
@@ -475,7 +486,7 @@ export function createConformanceAuth(
     advanced: {
       ...options.advanced,
       disableOriginCheck: false,
-      disableCSRFCheck: false,
+      disableCSRFCheck: kit.disableCSRFCheck === true,
     },
     plugins: [
       testUtils(),
