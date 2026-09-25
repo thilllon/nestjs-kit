@@ -1227,7 +1227,7 @@ describe("principal source kit mutations for the unit-specific rows", () => {
     ).rejects.toThrow(/accepted a session no endpoint produced/);
   });
 
-  it("fails S-log-redaction for a source that wraps storage errors without the request's credentials", async () => {
+  it("passes S-log-redaction for a source that wraps storage errors itself, because the resolver redacts per request", async () => {
     const { auth, ...credentials } = sessionCredentials(
       createConformanceAuth(),
     );
@@ -1243,9 +1243,11 @@ describe("principal source kit mutations for the unit-specific rows", () => {
       auth,
       credentials,
     });
-    await expect(caseById(cases, "S-log-redaction").run()).rejects.toThrow(
-      /a credential reached the logs/,
-    );
+    // The source redacts none of the request's credentials; the resolver redacts them and keeps the raw cause
+    // only for errors.exposeRawCause, so neither run reaches the logs.
+    for (const item of cases.filter(({ id }) => id === "S-log-redaction")) {
+      await expect(item.run()).resolves.toBeUndefined();
+    }
   });
 
   it("fails S-jwt-claims for a JWT source that expects the basePath URL or denies a key-set outage", async () => {

@@ -13,6 +13,7 @@ import {
   createInfrastructureError,
   isConfigurationError,
   isInfrastructureError,
+  redactForRequest,
 } from "./auth-errors.js";
 import type { InstanceEntry, InstanceLookup } from "./instance-registry.js";
 import type { TransportRegistry } from "./transport-registry.js";
@@ -97,11 +98,16 @@ export function normalizeForRequest(
   try {
     return normalizeThrown(error, where, site, [], entry.options.errors);
   } catch (normalized) {
-    if (
-      isConfigurationError(normalized) ||
-      (isInfrastructureError(error) && normalized === error)
-    ) {
+    if (isConfigurationError(normalized)) {
       throw normalized;
+    }
+    if (isInfrastructureError(error) && normalized === error) {
+      // A source or policy classified this failure itself, redacting only what it knew.
+      throw redactForRequest(error, {
+        headers,
+        credentialHeaders: entry.credentialHeaders,
+        exposeRawCause: entry.options.errors?.exposeRawCause,
+      });
     }
     throw createInfrastructureError(error, {
       headers,

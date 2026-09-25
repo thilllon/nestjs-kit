@@ -10,6 +10,7 @@ import type {
   PlatformPrepareContext,
 } from "./auth-contracts.js";
 import { toWebHeaders } from "./platform.js";
+import { headerLines, setCookieAdditions } from "./set-cookies.js";
 
 interface RawReplyLike {
   headersSent?: boolean;
@@ -184,6 +185,18 @@ function abortOnDisconnect(
   return { signal: controller.signal, dispose };
 }
 
+function appendReplyCookies(
+  reply: FastifyReplyLike,
+  cookies: readonly string[],
+): void {
+  for (const cookie of setCookieAdditions(
+    headerLines(reply.getHeader("set-cookie")),
+    cookies,
+  )) {
+    reply.header("set-cookie", cookie);
+  }
+}
+
 async function sendWebResponse(
   reply: FastifyReplyLike,
   response: Response,
@@ -199,9 +212,7 @@ async function sendWebResponse(
       name === "vary" ? mergedVary(reply.getHeader(name), value) : value,
     );
   }
-  for (const cookie of response.headers.getSetCookie()) {
-    reply.header("set-cookie", cookie);
-  }
+  appendReplyCookies(reply, response.headers.getSetCookie());
   if (reply.request.raw.httpVersionMajor === 2) {
     for (const name of [
       "connection",
@@ -299,9 +310,7 @@ export class FastifyPlatform implements HttpPlatform {
             if (reply.sent || reply.raw.headersSent) {
               return false;
             }
-            for (const cookie of cookies) {
-              reply.header("set-cookie", cookie);
-            }
+            appendReplyCookies(reply, cookies);
             return true;
           },
         };

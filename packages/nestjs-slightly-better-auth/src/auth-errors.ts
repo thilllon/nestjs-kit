@@ -14,6 +14,8 @@ const CONFIGURATION_BRAND = Symbol.for(
   "nestjs-slightly-better-auth:configuration-error",
 );
 const RAW_CAUSE = Symbol.for("nestjs-slightly-better-auth:raw-cause");
+/** Unredacted causes stay module-private; only an instance's exposeRawCause opt-in attaches one (RAW_CAUSE). */
+const ORIGINAL_CAUSES = new WeakMap<object, unknown>();
 const SDK_HEADERS = Symbol.for("better-call:api-error-headers");
 
 export type AuthErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "RATE_LIMITED";
@@ -254,6 +256,7 @@ export class BetterAuthInfrastructureError extends Error {
     super("Authentication service unavailable");
     this.name = "BetterAuthInfrastructureError";
     this.cause = new ErrorRedactor(options).redact(cause);
+    ORIGINAL_CAUSES.set(this, cause);
     branded(this, INFRASTRUCTURE_BRAND);
   }
 }
@@ -272,6 +275,32 @@ export function createInfrastructureError(
     });
   }
   return error;
+}
+
+/**
+ * Internal: the form of an already-classified infrastructure error that one request delivers. The request's cookie,
+ * authorization and declared credential values are redacted on top of the thrower's own redaction, and the original
+ * cause is attached only when the instance opts in, as for errors the kernel classifies itself.
+ */
+export function redactForRequest(
+  error: BetterAuthInfrastructureError,
+  options: ErrorRedactorOptions & { exposeRawCause?: boolean },
+): BetterAuthInfrastructureError {
+  const original = ORIGINAL_CAUSES.has(error)
+    ? ORIGINAL_CAUSES.get(error)
+    : readErrorProperty(error, RAW_CAUSE);
+  const delivered = new BetterAuthInfrastructureError(
+    readErrorProperty(error, "cause"),
+    options,
+  );
+  ORIGINAL_CAUSES.set(delivered, original);
+  if (options.exposeRawCause === true && original !== undefined) {
+    Object.defineProperty(delivered, RAW_CAUSE, {
+      value: original,
+      enumerable: false,
+    });
+  }
+  return delivered;
 }
 
 export function getRawCause(error: BetterAuthInfrastructureError): unknown {

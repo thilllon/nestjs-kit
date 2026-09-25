@@ -573,3 +573,47 @@ it("does not confer permissions on a key with no grant", async () => {
     await f.module.close();
   }
 });
+
+it("redacts outage causes with the request's credentials and keeps the raw cause on opt-in", async () => {
+  const f = await keyFixture();
+  try {
+    const { vi } = await import("vitest");
+    const { normalizeForRequest } = await import("./principal-resolver.js");
+    const { getRawCause, isInfrastructureError } = await import(
+      "./auth-errors.js"
+    );
+    const { inspect } = await import("node:util");
+    const cookie = "SECRET_COOKIE_VALUE_1234567890";
+    const key = "invalid-key-long-enough";
+    const cause = new Error(
+      `connect ECONNREFUSED 10.0.0.5:5432 cookie=${cookie} key=${key}`,
+    );
+    const context = await f.handle.context();
+    vi.spyOn(context.adapter, "findOne").mockRejectedValue(cause);
+    const headers = new Headers({ cookie: `sid=${cookie}` });
+    const thrown = await apiKeyPrincipal()
+      .resolve(keyRequest(f.handle, key, headers))
+      .catch((error: unknown) => error);
+    expect(isInfrastructureError(thrown)).toBe(true);
+    for (const exposeRawCause of [true, false]) {
+      const entry = {
+        options: { errors: { exposeRawCause } },
+        credentialHeaders: ["x-api-key"],
+      } as unknown as Parameters<typeof normalizeForRequest>[3];
+      let error: unknown;
+      try {
+        normalizeForRequest(thrown, "source", "api-key", entry, headers);
+      } catch (normalized) {
+        error = normalized;
+      }
+      expect(isInfrastructureError(error)).toBe(true);
+      const delivered = error as Parameters<typeof getRawCause>[0];
+      expect(delivered.cause.message).toContain("ECONNREFUSED");
+      expect(inspect(delivered)).not.toContain(cookie);
+      expect(inspect(delivered)).not.toContain(key);
+      expect(getRawCause(delivered)).toBe(exposeRawCause ? cause : undefined);
+    }
+  } finally {
+    await f.module.close();
+  }
+});

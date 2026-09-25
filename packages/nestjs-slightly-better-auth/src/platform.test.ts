@@ -284,6 +284,28 @@ describe("appendSetCookie", () => {
     ]);
   });
 
+  it("skips a line identical to its cookie's latest line and keeps order-significant repeats", () => {
+    const response = new RecordingResponse();
+    const session = "better-auth.session_token=abc; Path=/; HttpOnly";
+    response.setHeader("set-cookie", session);
+    const res = asServerResponse(response);
+
+    expect(appendSetCookie(res, [session, "csrf=xyz; Path=/"])).toBe(true);
+    expect(appendSetCookie(res, [session])).toBe(true);
+    expect(response.getHeader("set-cookie")).toEqual([
+      session,
+      "csrf=xyz; Path=/",
+    ]);
+    const cleared = "better-auth.session_token=; Max-Age=0; Path=/";
+    appendSetCookie(res, [cleared, session, session]);
+    expect(response.getHeader("set-cookie")).toEqual([
+      session,
+      "csrf=xyz; Path=/",
+      cleared,
+      session,
+    ]);
+  });
+
   it("does not mutate a response whose headers were sent", () => {
     const response = new RecordingResponse();
     response.setHeader("set-cookie", "existing=1");
