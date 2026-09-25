@@ -1,5 +1,13 @@
 # nestjs-slightly-better-auth
 
+## 1.9.1
+
+### Patch Changes
+
+- 385ab01: Fail closed on ambiguous authorization state. When two requirements of one handler publish different values for an invocation parameter, such as a default `orgMember()` and an `orgPermission()` for a route organization, `@ActiveOrganizationId()` and `@ActiveMemberRole()` throw the request-time configuration error `AMBIGUOUS_INVOCATION_VALUE` instead of returning whichever policy ran last, and values published inside a denied requirement branch are discarded. Empty `anyOf()` and `allOf()` requirement groups fail planning with `EMPTY_REQUIREMENT_GROUP` instead of allowing every caller. An application whose `init()` is still running when another application binds the same Better Auth instance now fails at bootstrap with `INSTANCE_ALREADY_BOUND` instead of serving without its hooks.
+- a4f8f4b: Align app-surface origin checks with Better Auth's router and with in-band credentials. A function-valued `trustedOrigins` option is evaluated per request only, as the router does, so its no-request result no longer widens the origins that cookie-mode app routes, GraphQL mutations and WebSocket legs trust. A guarded safe cookie request with `Sec-Fetch-Site: same-origin` and neither `Origin` nor `Referer` (for example under `Referrer-Policy: no-referrer`) keeps a passing advisory verdict, so its caller-session `auth.api` calls succeed. A session cookie that graphql-ws connection parameters or a WebSocket `credentials` mapping supply no longer triggers the caller-session check. `createConformanceAuth()` also forces `advanced.disableCSRFCheck: false`.
+- 9153010: Deliver infrastructure errors that a principal source or policy classifies itself, such as API-key outage-probe failures, with the request's cookie, authorization and declared credential values redacted from the cause, and keep the original cause reachable through `getRawCause()` when `errors.exposeRawCause` is set. The Express and Fastify cookie sinks and auth-route responses skip a `Set-Cookie` line identical to the latest line already set for the same cookie, so a call's cookies that both the bridge and a source forward arrive once. The WebSocket README example lists `bearer()` before `nestjs()`.
+
 ## 1.9.0
 
 ### Minor Changes
