@@ -76,6 +76,8 @@ export interface ProbeState {
   fault: ((path: string) => unknown) | undefined;
   /** Returns a value to throw from a database adapter operation (a storage outage); undefined runs it. */
   storageFault: ((call: StorageCall) => unknown) | undefined;
+  /** Milliseconds a database adapter operation waits before it runs or throws its fault (a stalled storage). */
+  storageDelay: ((call: StorageCall) => number | undefined) | undefined;
   /**
    * Returns a value the before hook answers with instead of dispatching the endpoint, as a plugin's hook that
    * short-circuits an endpoint does (apiKey's session for /get-session); undefined dispatches normally.
@@ -98,6 +100,7 @@ export function createProbeState(): ProbeState {
     order: [],
     fault: undefined,
     storageFault: undefined,
+    storageDelay: undefined,
     respond: undefined,
     delay: undefined,
     streamCancelled: false,
@@ -145,6 +148,10 @@ function instrumentStorage(adapter: unknown, state: ProbeState): void {
         model: typeof model === "string" ? model : undefined,
       };
       state.storage.push(`${method}:${call.model ?? ""}`);
+      const stall = state.storageDelay?.(call);
+      if (stall) {
+        await new Promise((resolve) => setTimeout(resolve, stall));
+      }
       const fault = state.storageFault?.(call);
       if (fault !== undefined) {
         throw fault;
