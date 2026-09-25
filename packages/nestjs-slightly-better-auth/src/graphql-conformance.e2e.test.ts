@@ -572,6 +572,13 @@ function connect(
     // One socket for every operation of the connection: a lazy client otherwise closes it after each completed one.
     lazyCloseTimeout: KEEP_OPEN_MS,
   });
+  let socketOpen = false;
+  client.on("opened", () => {
+    socketOpen = true;
+  });
+  client.on("closed", () => {
+    socketOpen = false;
+  });
   return {
     execute: (operation) =>
       new Promise((resolve, reject) => {
@@ -606,7 +613,21 @@ function connect(
           },
         });
       }),
-    close: () => client.dispose() as Promise<void>,
+    // The client's close event follows the server's close frame, so the server has observed the close by then.
+    async close() {
+      if (!socketOpen) {
+        await client.dispose();
+        return;
+      }
+      const closed = new Promise<void>((resolve) => {
+        const off = client.on("closed", () => {
+          off();
+          resolve();
+        });
+      });
+      await client.dispose();
+      await closed;
+    },
   };
 }
 
@@ -1269,6 +1290,56 @@ function withPlans(
   };
 }
 
+/** `extra` with its graphql-ws socket reporting WebSocket.OPEN, or `extra` itself without a socket. */
+function openedExtra(extra: unknown): unknown {
+  const value = extra as { socket?: object } | undefined;
+  return value?.socket
+    ? {
+        ...value,
+        socket: new Proxy(value.socket, {
+          get: (target, key) =>
+            key === "readyState" ? 1 : Reflect.get(target, key),
+        }),
+      }
+    : extra;
+}
+
+/**
+ * A view of `context` whose GraphQL context reports every graphql-ws socket as open. One view per context object keeps
+ * the carrier's lineage state, which the view inherits.
+ */
+function withOpenSockets(
+  views: WeakMap<object, object>,
+  context: ExecutionContext,
+): ExecutionContext {
+  const args = [...context.getArgs()];
+  const index = args.length === 3 ? 1 : 2;
+  const carrier = args[index] as
+    | { extra?: { socket?: object }; req?: { extra?: { socket?: object } } }
+    | undefined;
+  if (!carrier?.extra?.socket && !carrier?.req?.extra?.socket) {
+    return context;
+  }
+  let view = views.get(carrier);
+  if (!view) {
+    const req = carrier.req?.extra?.socket
+      ? Object.create(carrier.req, {
+          extra: { value: openedExtra(carrier.req.extra) },
+        })
+      : carrier.req;
+    view = Object.create(carrier, {
+      extra: { value: openedExtra(carrier.extra) },
+      req: { value: req },
+    }) as object;
+    views.set(carrier, view);
+  }
+  args[index] = view;
+  return Object.create(context, {
+    getArgs: { value: () => args },
+    getArgByIndex: { value: (position: number) => args[position] },
+  }) as ExecutionContext;
+}
+
 /** The connectionParams of a graphql-ws operation served under Apollo's default context. */
 function connectionParamsOf(
   context: ExecutionContext,
@@ -1351,6 +1422,24 @@ describe("GraphQL transport kit mutations", () => {
       caseOf(apollo({ unit: live }), "T-stale-context").run(),
     ).rejects.toThrow(
       /a later caller of required did not read its own principal/,
+    );
+  });
+
+  it("fails T-stale-context for a transport that keeps using a closed connection's credentials", async () => {
+    const views = new WeakMap<object, object>();
+    const ignoring = faultyApollo((real) => ({
+      describe: (context, kit) =>
+        real.describe.call(ignoring, withOpenSockets(views, context), kit),
+      lineage: (context) =>
+        real.lineage!.call(ignoring, withOpenSockets(views, context)),
+    }));
+    await expect(
+      caseOf(
+        apollo({ channel: "socket", unit: ignoring }),
+        "T-stale-context",
+      ).run(),
+    ).rejects.toThrow(
+      /a later caller of required read the first caller's principal/,
     );
   });
 

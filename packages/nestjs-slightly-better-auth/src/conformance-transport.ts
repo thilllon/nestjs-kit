@@ -332,9 +332,10 @@ export interface TransportConformanceOptions {
   ): Promise<GraphResult>;
   /**
    * Connection shapes (WebSocket gateways): opens ONE connection whose handshake carries `headers`, sends one message to
-   * each given fixture handler on it in order, each after the previous one answered, and returns every outcome. Required
-   * when the transport's browser leg is its connection's handshake: the T-ws-origin-* cases then fail without it, and
-   * are skipped with a reason for other transports.
+   * each given fixture handler on it in order, each after the previous one answered, closes the connection and returns
+   * every outcome once the server has observed the close (T-stale-context runs a later caller after it). Required when
+   * the transport's browser leg is its connection's handshake: the T-ws-origin-* cases then fail without it, and are
+   * skipped with a reason for other transports.
    */
   invokeConnection?(
     app: INestApplication,
@@ -3634,23 +3635,52 @@ export function transportConformance(
         { graphqlContext: "static" },
         "GRAPHQL_STATIC_CONTEXT",
       );
-      // A cached context of a connection-shaped leg still holds a connection that may be open, so only a completed
-      // per-operation request is detectable as stale.
-      if (await connectionLeg()) {
-        return;
-      }
+      // The first caller finishes before a later caller runs: its request completes, or, where the browser leg is the
+      // connection's handshake, its connection closes; invokeConnection resolves after the server observed the close.
+      const connection = await connectionLeg();
+      assert.ok(
+        !connection || options.invokeConnection,
+        "the transport's browser leg is its connection's handshake, so invokeConnection is required",
+      );
+      const invokeAlone = async (
+        app: INestApplication,
+        handler: "required" | "optional" | "public" | "publicService",
+        headers: HeadersInit,
+      ): Promise<TransportInvocationResult> =>
+        connection
+          ? (await options.invokeConnection!(app, [handler], headers))[0]!
+          : options.invoke(app, handler, headers);
       const later = await kitIdentity(env.auth);
       const laterCookie = { ...cookie(env), cookie: later.cookie };
       await withApp(
         options,
         env,
         async ({ app, logger }) => {
-          const first = await options.invoke(app, "required", cookie(env));
+          const first = await invokeAlone(app, "required", cookie(env));
           succeeded(first, "the first caller of a cached context");
           assert.equal(principalOf(first)?.userId, env.identity.userId);
           for (const handler of ["required", "optional"] as const) {
-            const result = await options.invoke(app, handler, laterCookie);
+            const result = await invokeAlone(app, handler, laterCookie);
             const label = `a later caller of ${handler}`;
+            if (connection) {
+              // A connection that is closed when an operation starts lends it no credential: the operation runs
+              // anonymously, or with the later caller's own principal where the driver rebuilds its context.
+              assert.notEqual(
+                principalOf(result)?.userId,
+                env.identity.userId,
+                `${label} read the first caller's principal`,
+              );
+              if (result.ok) {
+                const principal = principalOf(result);
+                assert.ok(
+                  principal === null || principal?.userId === later.userId,
+                  `${label} read neither its own principal nor none: ${JSON.stringify(result.body)}`,
+                );
+              } else {
+                denied(result, 401, undefined, label);
+              }
+              continue;
+            }
             // A driver that rebuilds its context around the cached object answers with the later caller's own principal.
             if (result.ok) {
               assert.equal(
@@ -3663,18 +3693,26 @@ export function transportConformance(
               assert.match(logger.text(), /GRAPHQL_CONTEXT_STALE_REQUEST/);
             }
           }
-          // Public work reads no credential of the completed request.
+          // Public work reads no credential of the completed request or closed connection.
           succeeded(
-            await options.invoke(app, "public", laterCookie),
+            await invokeAlone(app, "public", laterCookie),
             "a later caller of a public handler",
           );
-          const service = await options.invoke(
-            app,
-            "publicService",
-            laterCookie,
-          );
+          const service = await invokeAlone(app, "publicService", laterCookie);
           succeeded(service, "a later caller of a public service read");
           assert.deepEqual(service.body, { session: null });
+          if (connection) {
+            // A closed connection is an ordinary client outcome, not a configuration error.
+            assert.deepEqual(
+              logger.errors().map((entry) => entry.text.slice(0, 200)),
+              [],
+              "a later caller of a closed connection's context logged at ERROR",
+            );
+            assert.doesNotMatch(
+              logger.text(),
+              /AUTH_MISCONFIGURED|GRAPHQL_CONTEXT_STALE_REQUEST/,
+            );
+          }
         },
         { graphqlContext: "cached" },
       );
