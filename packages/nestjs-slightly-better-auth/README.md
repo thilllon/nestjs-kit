@@ -14,7 +14,7 @@ A NestJS integration for [Better Auth](https://www.better-auth.com), built on an
 pnpm add nestjs-slightly-better-auth better-auth
 ```
 
-Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer. The `./testing` and `./testing/conformance` entries also need the optional peer `@nestjs/testing` 12; the root entry never loads it or a test runner.
+Peer dependencies: `@nestjs/common` and `@nestjs/core` 12.0.3 or newer 12.x releases, `better-auth` 1.7.5 or newer, `reflect-metadata` and `rxjs`. Node.js 24.11 or newer. The `./testing` and `./testing/conformance` entries also need the optional peer `@nestjs/testing` 12; the root entry never loads it or a test runner. [Compatibility](#compatibility) lists the tested versions and module systems.
 
 The `./graphql` entry has two optional peer dependencies, `@nestjs/graphql` ^14.0.2 and `graphql` ^16.14.2, plus the Nest driver of your GraphQL server:
 
@@ -39,6 +39,26 @@ pnpm add @nestjs/microservices @nats-io/transport-node
 ```
 
 Nest's gRPC transport uses `@grpc/grpc-js` and `@grpc/proto-loader`, Kafka uses `kafkajs`, RabbitMQ uses `amqplib` and `amqp-connection-manager`, MQTT uses `mqtt`, and Redis uses `ioredis`. TCP needs no client library. Applications that do not import `./microservices` do not need any of these packages.
+
+## Compatibility
+
+| Dependency                       | Supported                                         | Tested                                                                           |
+| -------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Node.js                          | 24.11.0 or newer                                  | 24.11.0 and the current LTS                                                      |
+| `@nestjs/common`, `@nestjs/core` | `^12.0.3`                                         | 12.0.3 and the newest 12.x release, with the matching `@nestjs/platform-express` |
+| `better-auth`                    | `>=1.7.5 <2`                                      | 1.7.5 and the newest 1.x release                                                 |
+| TypeScript declarations          | `nodenext`, `node16` ESM and `bundler` resolution | TypeScript 7 in each resolution mode                                             |
+
+The packaging tests pack this package, install the tarball with pnpm into temporary applications outside the workspace and run them with the peers installed at their declared floors and at the newest versions inside the peer ranges. The newest versions are those that pnpm's default minimum release age admits, so a new release enters the matrix after that delay. Each application compiles one Nest source as ESM and as CommonJS, signs up users of a default and a named Better Auth instance, calls a guarded route of each with its session cookie, checks that neither instance accepts the other's cookie, and closes. CI runs these tests on the current Node.js LTS and on Node.js 24.11.0.
+
+The declared floors are the supported floors. NestJS 11 and Better Auth releases before 1.7.5 are outside the peer ranges and are not tested.
+
+Module systems:
+
+- Node.js resolves `import` and `require()` to the same ESM build through the `module-sync` export condition, so ESM and CommonJS applications share one copy of every class. The `.cjs` build is the fallback for resolvers without `module-sync`; the tests also run the applications with `require()` routed to it.
+- Better Auth publishes ESM only, so CommonJS applications need `require()` of ES modules, which Node.js 24 enables by default. With `--no-experimental-require-module`, `require()` resolves every entry to its `.cjs` file, but only `./platform` and `./fastify` load; every other entry stops at its first Better Auth import with `ERR_REQUIRE_ESM`.
+- With TypeScript `module: nodenext`, ESM and CommonJS files compile against the published declarations; `module: preserve` with `moduleResolution: bundler` uses the ESM declarations. With `module: node16`, ESM files compile, but CommonJS files cannot import NestJS 12 or Better Auth, whose declarations are ESM only; use `nodenext` for CommonJS applications.
+- Each optional entry loads with only its own optional peers installed, and every other entry loads without any optional peer.
 
 ## What this release covers
 
