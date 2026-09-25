@@ -37,6 +37,7 @@ import { runConformance } from "./conformance-fixtures.js";
 import {
   type ConnectionAuthenticationResult,
   type FixtureHandler,
+  type InheritedFixture,
   type TransportConformanceOptions,
   type TransportFixtures,
   type TransportInvocationResult,
@@ -130,6 +131,58 @@ function fixtureGateway(
   return KitGateway;
 }
 
+/** The namespaces (Socket.IO) or paths (ws) of the two gateways that serve the `inherited` fixture. */
+const INHERITED_ROUTES = {
+  public: "/nsba-inherited-public",
+  denied: "/nsba-inherited-denied",
+} as const;
+
+/** The `inherited` fixture as one message handler of an abstract base gateway, served by two subclass gateways. */
+function inheritedGateways(
+  flavor: Flavor,
+  fixture: InheritedFixture,
+  globalGuard: boolean,
+) {
+  abstract class InheritedBase {
+    async inherited(input: Record<string, unknown> | undefined) {
+      const body = await fixture.handle([], input ?? {}, {
+        service: undefined as never,
+      });
+      return flavor === "ws" ? { event: "inherited", data: body } : body;
+    }
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(
+    InheritedBase.prototype,
+    "inherited",
+  )!;
+  MessageBody()(InheritedBase.prototype, "inherited", 0);
+  for (const decorator of [
+    SubscribeMessage("inherited"),
+    ...fixture.decorators,
+  ].reverse()) {
+    decorator(InheritedBase.prototype, "inherited", descriptor);
+  }
+  const route = (value: string) =>
+    flavor === "ws" ? { path: value } : { namespace: value };
+  @WebSocketGateway(route(INHERITED_ROUTES.public))
+  class PublicInheritedGateway extends InheritedBase {}
+  @WebSocketGateway(route(INHERITED_ROUTES.denied))
+  class DeniedInheritedGateway extends InheritedBase {}
+  const gateways = {
+    public: PublicInheritedGateway,
+    denied: DeniedInheritedGateway,
+  };
+  for (const subclass of ["public", "denied"] as const) {
+    if (globalGuard) {
+      UseBetterAuth()(gateways[subclass]);
+    }
+    for (const decorator of fixture.subclasses[subclass]) {
+      decorator(gateways[subclass]);
+    }
+  }
+  return [PublicInheritedGateway, DeniedInheritedGateway];
+}
+
 /** Connection-time authentication through the documented Socket.IO middleware, on its own namespace. */
 @WebSocketGateway({ namespace: CONNECTION_ROUTE })
 class IoConnectionGateway implements OnGatewayInit {
@@ -207,7 +260,30 @@ function failureOf(payload: unknown): TransportInvocationResult {
 
 interface Client {
   send(event: string, data: unknown): Promise<TransportInvocationResult>;
+  /**
+   * Sends `org` messages with the given inputs at once and pairs the replies with them: an acknowledged (Socket.IO) or
+   * matching (ws: the reply's organization) success with its input, each exception with the next input left without one.
+   */
+  sendOrgs(
+    inputs: readonly Record<string, unknown>[],
+  ): Promise<TransportInvocationResult[]>;
   close(): void;
+}
+
+/** Pairs replies with concurrently sent `org` inputs: successes by their own input, exceptions in input order. */
+function pairReplies(
+  count: number,
+  successes: ReadonlyMap<number, TransportInvocationResult>,
+  exceptions: readonly TransportInvocationResult[],
+): TransportInvocationResult[] {
+  const failures = [...exceptions];
+  return Array.from(
+    { length: count },
+    (_, index) =>
+      successes.get(index) ??
+      failures.shift() ??
+      failureOf({ message: "no reply" }),
+  );
 }
 
 /** The handshake headers, with a bearer token moved to where browsers put it: Socket.IO `auth.token`, a ws `?token=`. */
@@ -255,8 +331,12 @@ async function ioConnect(
   }
 }
 
-async function ioClient(url: string, headers: HeadersInit): Promise<Client> {
-  const socket = await ioConnect(url, headers);
+async function ioClient(
+  url: string,
+  headers: HeadersInit,
+  namespace = "/",
+): Promise<Client> {
+  const socket = await ioConnect(url, headers, namespace);
   return {
     send: (event, data) =>
       new Promise((resolve, reject) => {
@@ -277,6 +357,33 @@ async function ioClient(url: string, headers: HeadersInit): Promise<Client> {
           cleanup();
           resolve({ ok: true, body: reply, setCookies: [] });
         });
+      }),
+    sendOrgs: (inputs) =>
+      new Promise((resolve, reject) => {
+        const successes = new Map<number, TransportInvocationResult>();
+        const exceptions: TransportInvocationResult[] = [];
+        const settled = () => {
+          if (successes.size + exceptions.length === inputs.length) {
+            clearTimeout(timer);
+            socket.off("exception", exception);
+            resolve(pairReplies(inputs.length, successes, exceptions));
+          }
+        };
+        const exception = (payload: unknown) => {
+          exceptions.push(failureOf(payload));
+          settled();
+        };
+        const timer = setTimeout(() => {
+          socket.off("exception", exception);
+          reject(new Error("Socket.IO org: no reply"));
+        }, REPLY_TIMEOUT_MS);
+        socket.on("exception", exception);
+        for (const [index, input] of inputs.entries()) {
+          socket.emit("org", input, (reply: unknown) => {
+            successes.set(index, { ok: true, body: reply, setCookies: [] });
+            settled();
+          });
+        }
       }),
     close: () => socket.close(),
   };
@@ -339,8 +446,12 @@ function wsConnect(
   return { client, opened };
 }
 
-async function wsClient(url: string, headers: HeadersInit): Promise<Client> {
-  const { client, opened } = wsConnect(url, headers, "/");
+async function wsClient(
+  url: string,
+  headers: HeadersInit,
+  path = "/",
+): Promise<Client> {
+  const { client, opened } = wsConnect(url, headers, path);
   try {
     await opened;
   } catch (error) {
@@ -355,6 +466,48 @@ async function wsClient(url: string, headers: HeadersInit): Promise<Client> {
       return value.event === "exception"
         ? failureOf(value.data)
         : { ok: true, body: value.data, setCookies: [] };
+    },
+    async sendOrgs(inputs) {
+      const replies = new Promise<{ event?: string; data?: unknown }[]>(
+        (resolve, reject) => {
+          const values: { event?: string; data?: unknown }[] = [];
+          const cleanup = () => {
+            clearTimeout(timer);
+            client.off("message", message);
+          };
+          const message = (raw: Buffer) => {
+            values.push(JSON.parse(raw.toString()));
+            if (values.length === inputs.length) {
+              cleanup();
+              resolve(values);
+            }
+          };
+          const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error("ws org: no reply"));
+          }, REPLY_TIMEOUT_MS);
+          client.on("message", message);
+        },
+      );
+      for (const input of inputs) {
+        client.send(JSON.stringify({ event: "org", data: input }));
+      }
+      const successes = new Map<number, TransportInvocationResult>();
+      const exceptions: TransportInvocationResult[] = [];
+      for (const value of await replies) {
+        if (value.event === "exception") {
+          exceptions.push(failureOf(value.data));
+          continue;
+        }
+        const organization = (value.data as { organization?: unknown })
+          ?.organization;
+        const index = inputs.findIndex(
+          (input, position) =>
+            input.orgId === organization && !successes.has(position),
+        );
+        successes.set(index, { ok: true, body: value.data, setCookies: [] });
+      }
+      return pairReplies(inputs.length, successes, exceptions);
     },
     close: () => client.terminate(),
   };
@@ -444,6 +597,7 @@ function websocketHarness(
         ],
         providers: [
           fixtureGateway(flavor, flatten(fixtures), options.globalGuard),
+          ...inheritedGateways(flavor, fixtures.inherited, options.globalGuard),
           flavor === "ws" ? WsConnectionGateway : IoConnectionGateway,
           ...(options.appEnhancers
             ? [
@@ -484,11 +638,24 @@ function websocketHarness(
     },
     invoke: (app, handler, headers, input = {}) =>
       session(app, headers, (client) => client.send(entry(handler), input)),
+    // Both messages at once: each must still read its own resolution and values.
     invokeTwice: (app, _shape, [first, second], headers) =>
-      session(app, headers, async (client) => [
-        await client.send("org", first),
-        await client.send("org", second),
-      ]),
+      session(app, headers, async (client) => {
+        const [one, two] = await client.sendOrgs([first, second]);
+        return [one!, two!];
+      }),
+    async invokeInherited(app, subclass, headers) {
+      const url = apps.get(app)!;
+      const client =
+        flavor === "ws"
+          ? await wsClient(url, headers, INHERITED_ROUTES[subclass])
+          : await ioClient(url, headers, INHERITED_ROUTES[subclass]);
+      try {
+        return await client.send("inherited", {});
+      } finally {
+        client.close();
+      }
+    },
     invokeConnection: (app, handlers, headers) =>
       session(app, headers, async (client) => {
         const results: TransportInvocationResult[] = [];
@@ -577,10 +744,11 @@ function faultySocketIo(
 function withBrowser(
   call: TransportCall,
   browser: (leg: BrowserExposure | undefined) => BrowserExposure | undefined,
+  invocation: object = call.invocation,
 ): TransportCall {
   return {
     key: call.key,
-    invocation: call.invocation,
+    invocation,
     connection: call.connection,
     principalTtlMs: call.principalTtlMs,
     headers: () => call.headers(),
@@ -654,6 +822,15 @@ describe("WebSocket origin row mutations", () => {
       cases.find((item) => item.id === "T-ws-origin-junk-token")!.run(),
     ).rejects.toThrow(
       /provides WS_CONNECTION_AUTH, so authenticateConnection is required/,
+    );
+  });
+
+  it("fails T-carrier for a transport whose messages on one socket share their invocation", async () => {
+    const shared = faultySocketIo((call, context) =>
+      withBrowser(call, (leg) => leg, context.switchToWs().getClient<object>()),
+    );
+    await expect(caseOf(shared, "T-carrier").run()).rejects.toThrow(
+      /with the scope interceptor, messages/,
     );
   });
 

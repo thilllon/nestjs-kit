@@ -1,6 +1,12 @@
 import type { OutgoingHttpHeaders } from "node:http";
 import { ApolloDriver, ApolloFederationDriver } from "@nestjs/apollo";
-import { Inject, type INestApplication, Module } from "@nestjs/common";
+import {
+  type ExecutionContext,
+  Inject,
+  type INestApplication,
+  Module,
+  type Type,
+} from "@nestjs/common";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import {
   Args,
@@ -28,9 +34,12 @@ import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import type {
   AuthTransport,
+  BrowserExposure,
   ExtensionRef,
+  RoutePlan,
   TransportCall,
 } from "./auth-contracts.js";
+import { ACCEPT_PRINCIPALS_METADATA, ROUTE_PLANNER } from "./auth-tokens.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
@@ -43,6 +52,7 @@ import {
 import {
   type FixtureHandler,
   type GraphFixtures,
+  type GraphqlContextShape,
   type GraphResult,
   type GraphSelection,
   type InvocationShape,
@@ -52,6 +62,7 @@ import {
   transportConformance,
 } from "./conformance-transport.js";
 import { expressPlatform } from "./express.js";
+import type { RoutePlanner } from "./route-planner.js";
 import { fastifyPlatform } from "./fastify.js";
 import {
   apolloTransport,
@@ -66,7 +77,7 @@ type Driver = "apollo-express" | "apollo-fastify" | "mercurius";
 
 const REPLY_TIMEOUT_MS = 5000;
 /** The kit's named inputs, exposed as nullable String arguments of every fixture field. */
-const INPUTS = ["orgId", "email", "password"] as const;
+const INPUTS = ["orgId", "email", "password", "cookie"] as const;
 
 /** The type of free-form JSON results: the kit reads handler results as it reads HTTP bodies. */
 class KitJson {}
@@ -109,17 +120,25 @@ class FixtureNode {
   @Field(() => FixtureNode, { nullable: true }) guarded?: FixtureNode;
   @Field(() => KitJson, { nullable: true }) nestedReader?: unknown;
   @Field(() => String, { nullable: true }) sessionReader?: string;
+  @Field(() => String, { nullable: true }) forwarding?: string;
 }
 
 /** Selection of each FixtureNode field. */
 const FIELD_SELECTIONS: Readonly<Record<GraphField, string>> = {
   plain: "plain",
-  publicNested: "publicNested { id }",
+  publicNested: "publicNested { id reader }",
   reader: "reader",
-  guarded: "guarded { id principal }",
+  guarded: "guarded { id principal nestedReader }",
   nestedReader: "nestedReader",
   sessionReader: "sessionReader",
+  forwarding: "forwarding",
 };
+/** Field resolvers returning a String; the others return FixtureNode (nested selections) or KitJSON. */
+const STRING_FIELDS: ReadonlySet<GraphField> = new Set([
+  "plain",
+  "sessionReader",
+  "forwarding",
+]);
 
 /** Schema names of the graph roots, which share names with non-graph fixtures; invokeGraph aliases them back. */
 const GRAPH_ROOTS: Readonly<Record<keyof GraphFixtures["roots"], string>> = {
@@ -293,7 +312,7 @@ function graphResolver(graph: GraphFixtures, federation: boolean) {
     }
     const type = FIELD_SELECTIONS[field as GraphField].includes("{")
       ? () => FixtureNode
-      : field === "plain" || field === "sessionReader"
+      : STRING_FIELDS.has(field as GraphField)
         ? () => String
         : () => KitJson;
     defineHandler(
@@ -304,6 +323,9 @@ function graphResolver(graph: GraphFixtures, federation: boolean) {
       [ResolveField(field, type, { nullable: true }), ...fixture.decorators],
       call(fixture),
     );
+  }
+  for (const decorator of graph.classDecorators ?? []) {
+    decorator(GraphResolver);
   }
   const reference = graph.reference;
   if (federation && reference) {
@@ -503,9 +525,14 @@ interface Connection {
   close(): Promise<void>;
 }
 
-function connect(app: INestApplication, headers: HeadersInit): Connection {
+function connect(
+  app: INestApplication,
+  headers: HeadersInit,
+  params?: Readonly<Record<string, string>>,
+): Connection {
   const { url, omitEmptyConnectionParams } = apps.get(app)!;
-  const { headers: upgrade, connectionParams } = handshake(headers);
+  const { headers: upgrade, connectionParams: moved } = handshake(headers);
+  const connectionParams = { ...moved, ...params };
   class HandshakeSocket extends WebSocket {
     constructor(address: string | URL, protocols?: string | string[]) {
       super(address, protocols, { headers: upgrade });
@@ -563,12 +590,59 @@ async function onConnection<T>(
   app: INestApplication,
   headers: HeadersInit,
   run: (connection: Connection) => Promise<T>,
+  params?: Readonly<Record<string, string>>,
 ): Promise<T> {
-  const connection = connect(app, headers);
+  const connection = connect(app, headers, params);
   try {
     return await run(connection);
   } finally {
     await connection.close();
+  }
+}
+
+/** The cookie header of what a GraphQL driver passes a context function: an HTTP request or a graphql-ws context. */
+function cookieOf(value: unknown): string {
+  const record = value as {
+    req?: { headers?: Record<string, unknown> };
+    extra?: { request?: { headers?: Record<string, unknown> } };
+  } | null;
+  return String(
+    record?.req?.headers?.cookie ??
+      record?.extra?.request?.headers?.cookie ??
+      "",
+  );
+}
+
+/** The GraphQL module's `context` option of a boot (GraphqlContextShape); Mercurius passes (request, reply). */
+function contextOption(
+  shape: GraphqlContextShape | undefined,
+  mercurius: boolean,
+): { context?: unknown } {
+  let cached: object | undefined;
+  switch (shape) {
+    case undefined:
+      return {};
+    case "static":
+      return { context: {} };
+    case "fresh":
+      return {
+        context: mercurius
+          ? (request: object, reply: object) => ({ req: request, reply })
+          : (value: object) => ({ ...value }),
+      };
+    case "plain-request":
+      return {
+        context: (value: unknown) => ({
+          req: { headers: { cookie: cookieOf(value) } },
+        }),
+      };
+    case "cached":
+      return {
+        context: mercurius
+          ? (request: object, reply: object) =>
+              (cached ??= { req: request, reply })
+          : (value: object) => (cached ??= { ...value }),
+      };
   }
 }
 
@@ -624,10 +698,21 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
     expectCookieCapable: !socket,
     expectBrowserLeg: true,
     invocationShapes: shapes,
+    graphqlContexts: mercurius
+      ? ["static", "cached", "fresh"]
+      : ["static", "cached", "fresh", "plain-request"],
     async createApp(fixtures, auth, options) {
       const handlers = flatten(fixtures);
       const graph =
         options.fieldResolverEnhancers !== undefined || !!options.federation;
+      // A boot with its own field resolver coverage registers its own unit of the driver's transport.
+      const unit: ExtensionRef<AuthTransport> =
+        options.fieldResolverCoverage && !harness.unit
+          ? (mercurius ? mercuriusTransport : apolloTransport)({
+              ...harness.transport,
+              fieldResolverCoverage: options.fieldResolverCoverage,
+            })
+          : transport;
       const federation = !!options.federation;
       const driver = mercurius
         ? federation
@@ -644,6 +729,7 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
               ? { federation: harness.federationVersion ?? 2 }
               : true,
             fieldResolverEnhancers: [...(options.fieldResolverEnhancers ?? [])],
+            ...contextOption(options.graphqlContext, mercurius),
             ...(mercurius
               ? {
                   allowBatchedQueries: true,
@@ -666,7 +752,10 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
           BetterAuthModule.forRoot({
             auth,
             platforms: [fastify ? fastifyPlatform() : expressPlatform()],
-            transports: [transport],
+            transports: [unit],
+            ...(options.forwardDirectCalls
+              ? { cookies: { forwardDirectCalls: true } }
+              : {}),
             globalGuard: options.globalGuard,
             principals: options.principals,
             ...(options.defaultRequirements
@@ -807,26 +896,31 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
     },
     ...(socket
       ? {
-          invokeConnection: (app, handlers, headers) =>
-            onConnection(app, headers, async (connection) => {
-              const { handlers: fixtures } = apps.get(app)!;
-              const results: TransportInvocationResult[] = [];
-              for (const handler of handlers) {
-                const fields = fieldsOf(handler);
-                results.push(
-                  outcomeOf(
-                    {
-                      result: await connection.execute(
-                        fixtureOperation(fixtures, fields, {}),
-                      ),
-                      setCookies: [],
-                    },
-                    fields,
-                  ),
-                );
-              }
-              return results;
-            }),
+          invokeConnection: (app, handlers, headers, options) =>
+            onConnection(
+              app,
+              headers,
+              async (connection) => {
+                const { handlers: fixtures } = apps.get(app)!;
+                const results: TransportInvocationResult[] = [];
+                for (const handler of handlers) {
+                  const fields = fieldsOf(handler);
+                  results.push(
+                    outcomeOf(
+                      {
+                        result: await connection.execute(
+                          fixtureOperation(fixtures, fields, {}),
+                        ),
+                        setCookies: [],
+                      },
+                      fields,
+                    ),
+                  );
+                }
+                return results;
+              },
+              options?.connectionParams,
+            ),
         }
       : {}),
   };
@@ -927,14 +1021,17 @@ function faultyApollo(
   return Object.assign(Object.create(real) as AuthTransport, overrides(real));
 }
 
-/** A call whose invocation is `invocation`, with every other member of `call`, getters kept lazy. */
-function withInvocation(
+/** `call` with `invocation` and `browser` replaced, every other member kept, getters kept lazy. */
+function withCall(
   call: TransportCall,
-  invocation: object,
+  change: {
+    invocation?: object;
+    browser?: (leg: BrowserExposure | undefined) => BrowserExposure | undefined;
+  },
 ): TransportCall {
   return {
     key: call.key,
-    invocation,
+    invocation: change.invocation ?? call.invocation,
     connection: call.connection,
     principalTtlMs: call.principalTtlMs,
     lineage: call.lineage,
@@ -950,9 +1047,38 @@ function withInvocation(
       return call.request;
     },
     get browser() {
-      return call.browser;
+      return change.browser ? change.browser(call.browser) : call.browser;
     },
   };
+}
+
+/** A harness whose apps plan requests through `change`, a faulty planner, from the first request on. */
+function withPlans(
+  harness: TransportConformanceOptions,
+  change: (plan: RoutePlan, target: Type, method: string) => RoutePlan,
+): TransportConformanceOptions {
+  return {
+    ...harness,
+    async createApp(fixtures, auth, options) {
+      const app = await harness.createApp(fixtures, auth, options);
+      const planner = app.get<RoutePlanner>(ROUTE_PLANNER, { strict: false });
+      const plan = planner.plan.bind(planner);
+      planner.plan = (target, method) =>
+        change(plan(target, method), target, method);
+      return app;
+    },
+  };
+}
+
+/** The connectionParams of a graphql-ws operation served under Apollo's default context. */
+function connectionParamsOf(
+  context: ExecutionContext,
+): Record<string, unknown> | undefined {
+  return (
+    context.getArgs()[2] as
+      | { req?: { connectionParams?: Record<string, unknown> } }
+      | undefined
+  )?.req?.connectionParams;
 }
 
 describe("GraphQL transport kit mutations", () => {
@@ -965,7 +1091,7 @@ describe("GraphQL transport kit mutations", () => {
     const shared = faultyApollo((real) => ({
       describe: (context, kit) => {
         const call = real.describe.call(shared, context, kit);
-        return withInvocation(call, call.key);
+        return withCall(call, { invocation: call.key });
       },
     }));
     await expect(
@@ -1010,6 +1136,128 @@ describe("GraphQL transport kit mutations", () => {
     ).rejects.toThrow(
       /expected REFERENCE_RESOLVER_UNGUARDED or FEDERATION_FIELD_GUARDS_REQUIRED, got AUTH_BOOT_FAILED, FIELD_RESOLVER_UNGUARDED:/,
     );
+  });
+
+  it("fails T-stale-context for a transport that treats a completed request as live", async () => {
+    const live = faultyApollo((real) => ({
+      describe: (context, kit) =>
+        real.describe.call(live, context, {
+          ...kit,
+          http:
+            kit.http &&
+            Object.create(kit.http, { isLive: { value: () => true } }),
+        }),
+    }));
+    await expect(
+      caseOf(apollo({ unit: live }), "T-stale-context").run(),
+    ).rejects.toThrow(
+      /a later caller of required did not read its own principal/,
+    );
+  });
+
+  it("fails T-subscription-credentials for a transport that ignores connectionParams credentials", async () => {
+    await expect(
+      caseOf(
+        apollo({
+          channel: "socket",
+          transport: { connectionParamHeaders: [] },
+        }),
+        "T-subscription-credentials",
+      ).run(),
+    ).rejects.toThrow(
+      /a connectionParams bearer token did not authenticate its subscriptions/,
+    );
+  });
+
+  it("fails T-subscription-origin for a transport that treats socket operations as safe reads", async () => {
+    const lenient = faultyApollo((real) => ({
+      describe: (context, kit) =>
+        withCall(real.describe.call(lenient, context, kit), {
+          browser: (leg) => leg && { ...leg, enforce: false },
+        }),
+    }));
+    await expect(
+      caseOf(
+        apollo({ channel: "socket", unit: lenient }),
+        "T-subscription-origin",
+      ).run(),
+    ).rejects.toThrow(
+      /the driver's context: an untrusted Origin, subscription 1/,
+    );
+  });
+
+  it("fails T-subscription-origin-junk-connection-params for a transport that exempts connectionParams tokens", async () => {
+    const exempting = faultyApollo((real) => ({
+      describe: (context, kit) => {
+        const call = real.describe.call(exempting, context, kit);
+        return connectionParamsOf(context)?.authorization
+          ? withCall(call, { browser: () => undefined })
+          : call;
+      },
+    }));
+    await expect(
+      caseOf(
+        apollo({ channel: "socket", unit: exempting }),
+        "T-subscription-origin-junk-connection-params",
+      ).run(),
+    ).rejects.toThrow(/a junk connectionParams bearer token, subscription 1/);
+  });
+
+  it("fails T-csrf-login-proxy for a transport that serves inherited forwarding fields without field guards", async () => {
+    await expect(
+      caseOf(
+        apollo({ transport: { fieldResolverCoverage: "off" } }),
+        "T-csrf-login-proxy",
+      ).run(),
+    ).rejects.toThrow(/the boot variant booted/);
+  });
+
+  it("fails the forwardDirectCalls boot of T-stamp-per-plan when a form-mode public field records a reading", async () => {
+    // Only form-mode plans change, so every other boot of the case passes.
+    const recording = withPlans(apollo(), (plan) =>
+      plan.nested && plan.access === "public" && plan.originCheck === "form"
+        ? { ...plan, nested: false }
+        : plan,
+    );
+    await expect(caseOf(recording, "T-stamp-per-plan").run()).rejects.toThrow(
+      /cookies\.forwardDirectCalls, \[guards, interceptors\]: reader under publicNested under sessionOnly/,
+    );
+  });
+
+  it("fails T-inherit-no-lookup for a transport that does not warn about inheriting fields", async () => {
+    const quiet = faultyApollo((real) => ({
+      advise: async (context) =>
+        (await real.advise!.call(quiet, context)).filter(
+          (advice) => advice.code !== "W_FIELD_RESOLVER_INHERITS",
+        ),
+    }));
+    await expect(
+      caseOf(apollo({ unit: quiet }), "T-inherit-no-lookup").run(),
+    ).rejects.toThrow(/\[\]: boot did not warn W_FIELD_RESOLVER_INHERITS/);
+  });
+
+  it("fails T-inherit-no-lookup for a planner that applies class-level acceptance to field resolvers", async () => {
+    const widening = withPlans(apollo(), (plan, target) =>
+      plan.access === "inherit" &&
+      Reflect.getMetadata(ACCEPT_PRINCIPALS_METADATA, target)
+        ? { ...plan, access: "required" }
+        : plan,
+    );
+    await expect(caseOf(widening, "T-inherit-no-lookup").run()).rejects.toThrow(
+      /class-level @AcceptPrincipals, \[\]: the plain field resolver lost its inherit plan/,
+    );
+  });
+
+  it("fails T-reference-resolver for a transport that does not report class metadata reaching reference resolvers", async () => {
+    const quiet = faultyApollo((real) => ({
+      advise: async (context) =>
+        (await real.advise!.call(quiet, context)).filter(
+          (advice) => advice.code !== "I_CLASS_METADATA_OPERATIONS_ONLY",
+        ),
+    }));
+    await expect(
+      caseOf(apollo({ unit: quiet }), "T-reference-resolver").run(),
+    ).rejects.toThrow(/I_CLASS_METADATA_OPERATIONS_ONLY does not name/);
   });
 
   it("fails the gated GraphQL cases for a harness that omits their helpers", async () => {

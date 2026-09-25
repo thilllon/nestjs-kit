@@ -7,6 +7,7 @@ import {
   Post,
   type ExecutionContext,
   type INestApplication,
+  type Type,
 } from "@nestjs/common";
 import {
   type AbstractHttpAdapter,
@@ -22,9 +23,11 @@ import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
 import type {
   AuthRouteBinding,
+  AuthTransport,
   ConformanceCase,
   HttpPlatform,
   PlatformMountContext,
+  TransportCall,
 } from "./auth-contracts.js";
 import { defineExtension } from "./auth-module-definition.js";
 import { BetterAuthGuard } from "./auth-guard.js";
@@ -32,6 +35,7 @@ import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { BetterAuthService } from "./auth-service.js";
 import {
+  type RawResponse,
   runConformance,
   sendRaw,
   setCookieLines,
@@ -39,13 +43,15 @@ import {
 import { httpPlatformConformance } from "./conformance-http.js";
 import {
   type FixtureHandler,
+  type InheritedFixture,
   type TransportConformanceOptions,
   type TransportFixtures,
+  type TransportInvocationResult,
   transportConformance,
 } from "./conformance-transport.js";
 import { expressPlatform } from "./express.js";
 import { fastifyPlatform } from "./fastify.js";
-import { httpTransport } from "./http-transport.js";
+import { HttpTransport, httpTransport } from "./http-transport.js";
 
 describe("Express platform conformance", () => {
   runConformance(
@@ -231,18 +237,78 @@ function fixtureController(handlers: Map<string, FixtureHandler>) {
   return HttpFixtureController;
 }
 
+/** Controller paths of the two subclasses that serve the `inherited` fixture. */
+const INHERITED_PATHS = {
+  public: "kit-inherited-public",
+  denied: "kit-inherited-denied",
+} as const;
+
+/** The `inherited` fixture as one route method of an abstract base controller, served by two subclasses. */
+function inheritedControllers(fixture: InheritedFixture) {
+  abstract class InheritedBase {
+    inherited(input: Record<string, unknown>): unknown {
+      return fixture.handle([], input, { service: undefined as never });
+    }
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(
+    InheritedBase.prototype,
+    "inherited",
+  )!;
+  Input()(InheritedBase.prototype, "inherited", 0);
+  for (const decorator of [Get("inherited"), ...fixture.decorators].reverse()) {
+    decorator(InheritedBase.prototype, "inherited", descriptor);
+  }
+  @Controller(INHERITED_PATHS.public)
+  class PublicInheritedController extends InheritedBase {}
+  @Controller(INHERITED_PATHS.denied)
+  class DeniedInheritedController extends InheritedBase {}
+  for (const decorator of fixture.subclasses.public) {
+    decorator(PublicInheritedController);
+  }
+  for (const decorator of fixture.subclasses.denied) {
+    decorator(DeniedInheritedController);
+  }
+  return [PublicInheritedController, DeniedInheritedController];
+}
+
+/** The outcome of one kit request as the transport kit's result. */
+function outcome(response: RawResponse): TransportInvocationResult {
+  const text = response.body.toString("utf8");
+  const body = text ? (JSON.parse(text) as Record<string, unknown>) : null;
+  const ok = response.status >= 200 && response.status < 300;
+  return {
+    ok,
+    body: ok ? body : undefined,
+    ...(ok
+      ? {}
+      : {
+          error: {
+            statusCode: Number(body?.statusCode ?? response.status),
+            code: body?.code as string | undefined,
+            reason: body?.reason as string | undefined,
+            message: body?.message as string | undefined,
+          },
+        }),
+    setCookies: setCookieLines(response.headers),
+  };
+}
+
 const booted = new WeakMap<
   object,
   { url: string; handlers: Map<string, FixtureHandler> }
 >();
 
-/** The built-in HTTP transport, exposed through controllers on a real listening platform. */
+/**
+ * The built-in HTTP transport, exposed through controllers on a real listening platform. `unit` registers another HTTP
+ * transport ahead of the built-in one (mutation tests).
+ */
 function httpHarness(
   platform: () => HttpPlatform,
   adapter: () => AbstractHttpAdapter,
+  unit?: Type<AuthTransport>,
 ): TransportConformanceOptions {
   return {
-    transport: httpTransport(),
+    transport: unit ?? httpTransport(),
     expectCookieCapable: true,
     expectBrowserLeg: true,
     async createApp(fixtures, auth, options) {
@@ -252,6 +318,7 @@ function httpHarness(
           BetterAuthModule.forRoot({
             auth,
             platforms: [platform()],
+            ...(unit ? { transports: [unit] } : {}),
             globalGuard: options.globalGuard,
             principals: options.principals,
             ...(options.defaultRequirements
@@ -263,7 +330,10 @@ function httpHarness(
             logSummary: false,
           } as never),
         ],
-        controllers: [fixtureController(handlers)],
+        controllers: [
+          fixtureController(handlers),
+          ...inheritedControllers(fixtures.inherited),
+        ],
         providers: options.appEnhancers
           ? [
               { provide: APP_GUARD, useClass: BetterAuthGuard },
@@ -319,24 +389,15 @@ function httpHarness(
           ...(unsafe ? { body: JSON.stringify(input) } : {}),
         },
       );
-      const text = response.body.toString("utf8");
-      const body = text ? (JSON.parse(text) as Record<string, unknown>) : null;
-      const ok = response.status >= 200 && response.status < 300;
-      return {
-        ok,
-        body: ok ? body : undefined,
-        ...(ok
-          ? {}
-          : {
-              error: {
-                statusCode: Number(body?.statusCode ?? response.status),
-                code: body?.code as string | undefined,
-                reason: body?.reason as string | undefined,
-                message: body?.message as string | undefined,
-              },
-            }),
-        setCookies: setCookieLines(response.headers),
-      };
+      return outcome(response);
+    },
+    async invokeInherited(app, subclass, headers) {
+      const { url } = booted.get(app)!;
+      return outcome(
+        await sendRaw(`${url}/${INHERITED_PATHS[subclass]}/inherited`, {
+          headers: Object.fromEntries(new Headers(headers)),
+        }),
+      );
     },
   };
 }
@@ -363,4 +424,47 @@ describe("transport kit on the built-in HTTP transport with Fastify", () => {
     ),
     { describe, it },
   );
+});
+
+/** An HTTP transport whose invocation is the platform's request key, which Fastify keeps apart from the handler's request. */
+class KeyInvocationTransport extends HttpTransport {
+  override describe(
+    context: ExecutionContext,
+    kit: Parameters<HttpTransport["describe"]>[1],
+  ): TransportCall {
+    const call = super.describe(context, kit);
+    return {
+      key: call.key,
+      invocation: call.key,
+      headers: () => call.headers(),
+      param: (name) => call.param(name),
+      get clientIp() {
+        return call.clientIp;
+      },
+      get cookies() {
+        return call.cookies;
+      },
+      get request() {
+        return call.request;
+      },
+      get browser() {
+        return call.browser;
+      },
+    };
+  }
+}
+
+describe("HTTP transport kit mutations", () => {
+  it("fails T-carrier on Fastify for a transport whose invocation is not the handler's request", async () => {
+    const carrier = transportConformance(
+      httpHarness(
+        () => fastifyPlatform() as unknown as HttpPlatform,
+        () => new FastifyAdapter(),
+        KeyInvocationTransport,
+      ),
+    ).find((item) => item.id === "T-carrier")!;
+    await expect(carrier.run()).rejects.toThrow(
+      /with globalScope: false: a cookie: expected success/,
+    );
+  });
 });
