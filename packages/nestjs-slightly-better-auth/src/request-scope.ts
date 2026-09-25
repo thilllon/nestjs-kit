@@ -20,10 +20,15 @@ export interface ScopeState {
   readonly plan?: RoutePlan;
   readonly reading?: () => PrincipalReading;
 }
+/** A requirement's decision and the invocation values of the policy runs that produced an allow. */
+export interface DecisionOutcome {
+  readonly decision: AuthorizationDecision;
+  readonly published: readonly ReadonlyMap<symbol, unknown>[];
+}
 export interface RequestState {
   readonly principal: Map<string, Promise<PrincipalResult>>;
   readonly policyIo: Map<string, Promise<unknown>>;
-  readonly decisions: Map<string, Promise<AuthorizationDecision>>;
+  readonly decisions: Map<string, Promise<DecisionOutcome>>;
   readonly values: Map<symbol, unknown>;
   readonly authorizationCalls: Set<string>;
   readonly origins: Map<string, Promise<AuthFailure | null>>;
@@ -185,8 +190,8 @@ export class RequestScope {
     invocation: object,
     instance: string,
     concreteKey: string,
-    compute: () => Promise<AuthorizationDecision>,
-  ): Promise<AuthorizationDecision> {
+    compute: () => Promise<DecisionOutcome>,
+  ): Promise<DecisionOutcome> {
     const decisions = this.stateFor(invocation).decisions;
     const key = memoKey(instance, concreteKey);
     let promise = decisions.get(key);

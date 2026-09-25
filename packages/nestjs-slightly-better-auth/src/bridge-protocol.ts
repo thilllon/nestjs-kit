@@ -22,7 +22,8 @@ export interface BridgeHandle {
    * dispatching until another application binds (§10.6). A second bind() from the same owner for the same instance is a no-op that
    * returns the existing registration (NestMicroservice.init() runs lifecycle hooks twice); from the same owner for another instance it
    * throws PLUGIN_SHARED_BETWEEN_INSTANCES (B03). Throws INSTANCE_ALREADY_BOUND if another bootstrapped application is bound; takes over
-   * a never-bootstrapped one (reported, B06) and a closed one (silently).
+   * a never-bootstrapped one (reported, B06) and a closed one (silently). A never-bootstrapped binding it takes over becomes
+   * 'displaced': an application whose init() was still running when another bound fails in onApplicationBootstrap (B06).
    */
   bind(binding: BridgeBinding): { close(): void; tookOverFrom?: string };
   /** true when an endpoint returned `value` (an object) in a non-router dispatch observed while bound; false for before-hook short-circuits (LEAD-V37). */
@@ -33,8 +34,11 @@ export interface BridgeBinding {
   readonly owner: { readonly description: string };
   /** The instance this plugin object serves; one plugin object serves one instance (B03). */
   readonly instance: string;
-  /** 'initialized' at bind; the kernel sets 'bootstrapped' in onApplicationBootstrap; close() sets 'closed'. */
-  state: "initialized" | "bootstrapped" | "closed";
+  /**
+   * 'initialized' at bind; the kernel sets 'bootstrapped' in onApplicationBootstrap; close() sets 'closed'; bind() of another
+   * application sets 'displaced' on an 'initialized' binding it takes over.
+   */
+  state: "initialized" | "bootstrapped" | "closed" | "displaced";
   /** View of the kernel's RequestScope; the plugin never owns an AsyncLocalStorage. [C] */
   current(): ScopeView | undefined;
   /** Credential header names declared by the instance's principal sources (credential matching, §7.5). */

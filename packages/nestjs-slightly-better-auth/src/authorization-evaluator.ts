@@ -17,7 +17,10 @@ import type {
   PrincipalOfKind,
 } from "./auth-types.js";
 import { createInfrastructureError, isAuthFailure } from "./auth-errors.js";
-import { INVOCATION_VALUES } from "./auth-tokens.js";
+import {
+  AMBIGUOUS_INVOCATION_VALUE,
+  INVOCATION_VALUES,
+} from "./auth-tokens.js";
 import type { InstanceEntry } from "./instance-registry.js";
 import type { PolicyResolver } from "./policy-resolver.js";
 import {
@@ -25,7 +28,7 @@ import {
   normalizeForRequest,
   requestHeaders,
 } from "./principal-resolver.js";
-import type { RequestScope } from "./request-scope.js";
+import type { DecisionOutcome, RequestScope } from "./request-scope.js";
 import { methodName } from "./route-planner.js";
 
 export const allow = (): AuthorizationDecision => ({ effect: "allow" });
@@ -71,7 +74,8 @@ export class AuthorizationEvaluator {
       return allow();
     }
     const headers = requestHeaders(call, entry);
-    const context: AuthorizationContext = {
+    // provide() is bound per policy run, so each run's values stay with its decision.
+    const context: Omit<AuthorizationContext, "provide"> = {
       principal,
       instance: entry.name,
       transport,
@@ -96,30 +100,65 @@ export class AuthorizationEvaluator {
           fn,
           entry.options.limits?.maxAuthorizationCallsPerRequest,
         ),
-      provide: (slot, value) => {
+    };
+    const publish = (runs: readonly ReadonlyMap<symbol, unknown>[]) => {
+      // Two contributing runs that disagree on a slot make every slot either published ambiguous:
+      // a member role read beside a conflicting organization id would describe an unknown organization.
+      const ambiguous = new Set<symbol>();
+      for (const [index, run] of runs.entries()) {
+        for (const other of runs.slice(index + 1)) {
+          if (
+            [...run].some(
+              ([slot, value]) =>
+                other.has(slot) && !Object.is(other.get(slot), value),
+            )
+          ) {
+            for (const slot of [...run.keys(), ...other.keys()]) {
+              ambiguous.add(slot);
+            }
+          }
+        }
+      }
+      const merged = new Map<symbol, unknown>();
+      for (const run of runs) {
+        for (const [slot, value] of run) {
+          merged.set(
+            slot,
+            ambiguous.has(slot) ? AMBIGUOUS_INVOCATION_VALUE : value,
+          );
+        }
+      }
+      if (!merged.size) {
+        return;
+      }
+      let instances = Reflect.get(call.invocation, INVOCATION_VALUES) as
+        | Map<string, Map<symbol, unknown>>
+        | undefined;
+      if (!instances) {
+        instances = new Map();
+        Object.defineProperty(call.invocation, INVOCATION_VALUES, {
+          value: instances,
+        });
+      }
+      let values = instances.get(entry.name);
+      if (!values) {
+        values = new Map();
+        instances.set(entry.name, values);
+      }
+      for (const [slot, value] of merged) {
         this.scope
           .stateFor(call.invocation)
           .values.set(this.scope.valueKey(entry.name, slot), value);
-        let instances = Reflect.get(call.invocation, INVOCATION_VALUES) as
-          | Map<string, Map<symbol, unknown>>
-          | undefined;
-        if (!instances) {
-          instances = new Map();
-          Object.defineProperty(call.invocation, INVOCATION_VALUES, {
-            value: instances,
-          });
-        }
-        let values = instances.get(entry.name);
-        if (!values) {
-          values = new Map();
-          instances.set(entry.name, values);
-        }
         values.set(slot, value);
-      },
+      }
     };
-    const evaluate = (
-      expression: RequirementExpr,
-    ): Promise<AuthorizationDecision> =>
+    const withoutValues = (
+      decision: AuthorizationDecision,
+    ): DecisionOutcome => ({
+      decision,
+      published: [],
+    });
+    const evaluate = (expression: RequirementExpr): Promise<DecisionOutcome> =>
       this.scope.memoDecision(
         call.invocation,
         entry.name,
@@ -133,32 +172,44 @@ export class AuthorizationEvaluator {
               AuthorizationDecision,
               { effect: "deny" }
             >[] = [];
+            if (!children.length) {
+              // The planner rejects empty groups; a group that reaches evaluation still fails closed.
+              return withoutValues(
+                deny({ reason: "NO_REQUIREMENT_SATISFIED" }),
+              );
+            }
+            const published: ReadonlyMap<symbol, unknown>[] = [];
             for (const child of children) {
-              const decision = await evaluate(child);
+              const outcome = await evaluate(child);
+              const decision = outcome.decision;
               if (decision.effect === "allow" && disjunction) {
-                return decision;
+                return outcome;
               }
               if (decision.effect === "deny") {
                 if (!disjunction) {
-                  return decision;
+                  return withoutValues(decision);
                 }
                 denials.push(decision);
+              } else {
+                published.push(...outcome.published);
               }
             }
             if (!disjunction) {
-              return allow();
+              return { decision: allow(), published };
             }
-            return deny({
-              reason: denials[0]?.reason ?? "NO_REQUIREMENT_SATISFIED",
-              status: denials.some((d) => d.status === 401) ? 401 : 403,
-              message: children
-                .map((child) =>
-                  "policy" in child
-                    ? (child.label ?? this.policies.resolve(child.policy).id)
-                    : "requirement group",
-                )
-                .join(" or "),
-            });
+            return withoutValues(
+              deny({
+                reason: denials[0]?.reason ?? "NO_REQUIREMENT_SATISFIED",
+                status: denials.some((d) => d.status === 401) ? 401 : 403,
+                message: children
+                  .map((child) =>
+                    "policy" in child
+                      ? (child.label ?? this.policies.resolve(child.policy).id)
+                      : "requirement group",
+                  )
+                  .join(" or "),
+              }),
+            );
           }
           const policy = this.policies.resolve(expression.policy);
           const kinds = expression.principals ?? policy.requires?.principals;
@@ -166,18 +217,29 @@ export class AuthorizationEvaluator {
             (kinds && !kinds.includes(principal.kind)) ||
             (!kinds && principal.delegation)
           ) {
-            return deny({ reason: "PRINCIPAL_NOT_SUPPORTED" });
+            return withoutValues(deny({ reason: "PRINCIPAL_NOT_SUPPORTED" }));
           }
+          const values = new Map<symbol, unknown>();
+          const leaf: AuthorizationContext = {
+            ...context,
+            provide: (slot, value) => {
+              values.set(slot, value);
+            },
+          };
           try {
-            return await entry.handle.run(
+            const decision = await entry.handle.run(
               {
                 cookies: call.cookies,
                 forward: "same-credential",
                 inbound: () => headers,
                 internal: true,
               },
-              () => this.invoker.invoke(policy, expression.params, context),
+              () => this.invoker.invoke(policy, expression.params, leaf),
             );
+            // Only a run that allows contributes its values.
+            return decision.effect === "allow" && values.size
+              ? { decision, published: [values] }
+              : withoutValues(decision);
           } catch (error) {
             const normalized = normalizeForRequest(
               error,
@@ -190,12 +252,14 @@ export class AuthorizationEvaluator {
               if (normalized.status === 429) {
                 throw normalized;
               }
-              return deny({
-                status: normalized.status,
-                reason: normalized.reason ?? normalized.code,
-                message: normalized.message,
-                challenge: normalized.challenge,
-              });
+              return withoutValues(
+                deny({
+                  status: normalized.status,
+                  reason: normalized.reason ?? normalized.code,
+                  message: normalized.message,
+                  challenge: normalized.challenge,
+                }),
+              );
             }
             const source = entry.sources.find(
               (item) => item.id === principal.source && item.sessionBacked,
@@ -225,19 +289,24 @@ export class AuthorizationEvaluator {
                 entry.options.limits?.maxAuthorizationCallsPerRequest,
               );
             }
-            return deny({
-              status: 401,
-              reason: normalized.reason ?? "UNAUTHENTICATED",
-            });
+            return withoutValues(
+              deny({
+                status: 401,
+                reason: normalized.reason ?? "UNAUTHENTICATED",
+              }),
+            );
           }
         },
       );
+    const published: ReadonlyMap<symbol, unknown>[] = [];
     for (const expression of plan.requirements) {
-      const decision = await evaluate(expression);
-      if (decision.effect === "deny") {
-        return decision;
+      const outcome = await evaluate(expression);
+      if (outcome.decision.effect === "deny") {
+        return outcome.decision;
       }
+      published.push(...outcome.published);
     }
+    publish(published);
     return allow();
   }
 }

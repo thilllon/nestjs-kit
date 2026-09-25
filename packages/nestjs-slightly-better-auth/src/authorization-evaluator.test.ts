@@ -385,3 +385,136 @@ it("keeps policy symbol identity within the request across separate invocation d
   await f.run({ ...f.call, key: {}, invocation: {} });
   expect(io).toHaveBeenCalledTimes(6);
 });
+
+it("denies empty requirement groups without skipping their alternatives", async () => {
+  const { anyOf, allOf, requirement } = await import("./auth-decorators.js");
+  const observed: string[] = [];
+  const denying = requirement(
+    {
+      id: "denying",
+      evaluate() {
+        observed.push("denying");
+        return { effect: "deny", reason: "DENIED" };
+      },
+    },
+    {},
+  );
+  const f = fixture({
+    id: "unused-fixture",
+    evaluate: () => ({ effect: "allow" }),
+  });
+  for (const requirements of [
+    [allOf()],
+    [anyOf()],
+    [anyOf(allOf(), denying)],
+  ]) {
+    Object.assign(f.plan, { requirements });
+    await expect(f.run({ ...f.call, invocation: {} })).resolves.toMatchObject({
+      effect: "deny",
+    });
+  }
+  expect(observed).toEqual(["denying"]);
+});
+
+describe("invocation values", () => {
+  const ORG = Symbol.for("nestjs-slightly-better-auth:test:org");
+  const ROLE = Symbol.for("nestjs-slightly-better-auth:test:role");
+  async function published(
+    build: (
+      leaf: (
+        id: string,
+        values: [symbol, unknown][],
+        effect?: "allow" | "deny",
+      ) => import("./auth-contracts.js").RequirementExpr,
+    ) => import("./auth-contracts.js").RequirementExpr[],
+  ) {
+    const { requirement } = await import("./auth-decorators.js");
+    const { INVOCATION_VALUES, AMBIGUOUS_INVOCATION_VALUE } = await import(
+      "./auth-tokens.js"
+    );
+    const leaf = (
+      id: string,
+      values: [symbol, unknown][],
+      effect: "allow" | "deny" = "allow",
+    ) =>
+      requirement(
+        {
+          id,
+          evaluate(_params, context) {
+            for (const [slot, value] of values) {
+              context.provide(slot, value);
+            }
+            return effect === "allow"
+              ? { effect }
+              : { effect, reason: "DENIED" };
+          },
+        },
+        {},
+      );
+    const f = fixture({
+      id: "unused-fixture",
+      evaluate: () => ({ effect: "allow" }),
+    });
+    Object.assign(f.plan, { requirements: build(leaf) });
+    const decision = await f.run();
+    const values = (
+      Reflect.get(f.call.invocation, INVOCATION_VALUES) as
+        | Map<string, Map<symbol, unknown>>
+        | undefined
+    )?.get("default");
+    const read = (slot: symbol) =>
+      values?.get(slot) === AMBIGUOUS_INVOCATION_VALUE
+        ? "ambiguous"
+        : values?.get(slot);
+    return { decision, org: read(ORG), role: read(ROLE) };
+  }
+
+  it.each([
+    ["permission first", false],
+    ["member first", true],
+  ])(
+    "marks organization values ambiguous when org requirements disagree (%s)",
+    async (_name, memberFirst) => {
+      const result = await published((leaf) => {
+        const permission = leaf("permission", [[ORG, "b"]]);
+        const member = leaf("member", [
+          [ORG, "a"],
+          [ROLE, "member"],
+        ]);
+        return memberFirst ? [member, permission] : [permission, member];
+      });
+      expect(result).toEqual({
+        decision: { effect: "allow" },
+        org: "ambiguous",
+        role: "ambiguous",
+      });
+    },
+  );
+
+  it("keeps agreeing values and discards values of denied branches", async () => {
+    const { anyOf, allOf } = await import("./auth-decorators.js");
+    expect(
+      await published((leaf) => [
+        leaf("member", [
+          [ORG, "a"],
+          [ROLE, "owner"],
+        ]),
+        leaf("permission", [[ORG, "a"]]),
+      ]),
+    ).toEqual({ decision: { effect: "allow" }, org: "a", role: "owner" });
+    expect(
+      await published((leaf) => [
+        anyOf(
+          allOf(
+            leaf("member", [
+              [ORG, "a"],
+              [ROLE, "member"],
+            ]),
+            leaf("admin", [], "deny"),
+          ),
+          leaf("permission", [[ORG, "b"]]),
+        ),
+      ]),
+    ).toEqual({ decision: { effect: "allow" }, org: "b", role: undefined });
+  });
+});

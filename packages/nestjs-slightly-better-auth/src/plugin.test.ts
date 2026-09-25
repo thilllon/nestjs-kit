@@ -137,6 +137,7 @@ describe("fixed plugin entries with the SDK", () => {
       owner: { description: "replacement" },
     });
     expect(second.tookOverFrom).toBe("first app");
+    expect(first.state).toBe("displaced");
     registration.close();
     expect(bridge.state).toBe("bound");
     second.close();

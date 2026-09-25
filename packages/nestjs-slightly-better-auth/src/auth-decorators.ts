@@ -201,7 +201,22 @@ export function defineInvocationParam(
             | Map<string, Map<symbol, unknown>>
             | undefined;
           if (values?.get(reading.instance)?.has(slot)) {
-            return values.get(reading.instance)!.get(slot);
+            const value = values.get(reading.instance)!.get(slot);
+            if (value === tokens.AMBIGUOUS_INVOCATION_VALUE) {
+              throw bridge.readings.deliver(
+                BetterAuthConfigurationError.atRequest(
+                  "AMBIGUOUS_INVOCATION_VALUE",
+                  `Requirements of this handler published different values for ${slot.description ?? "an invocation parameter"}`,
+                  {
+                    site: input.site,
+                    hint: "Check one organization per handler, or read the organization from the route instead of the invocation parameter.",
+                  },
+                ),
+                input,
+                reading.instance,
+              );
+            }
+            return value;
           }
         }
         throw bridge.readings.deliver(
