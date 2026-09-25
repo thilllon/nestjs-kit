@@ -5,6 +5,7 @@ export type {
   ConformanceSkip,
 } from "./auth-contracts.js";
 export {
+  type ConformanceAuthSettings,
   conformanceProbePlugin,
   createConformanceAuth,
   PROBE_TRUSTED_ORIGIN,

@@ -62,7 +62,8 @@ import {
   conformanceSkip,
   type ConformanceOutcome,
   type ConformanceSkip,
-  conformanceAuth,
+  type ConformanceAuthSettings,
+  createConformanceAuth,
   kitIdentity,
   type KitIdentity,
   PROBE_TRUSTED_ORIGIN,
@@ -126,7 +127,7 @@ export interface InheritedFixture extends FixtureHandler {
 }
 
 /**
- * GraphQL shapes only: one object type FixtureNode, returned by three root fields and carrying the field resolvers
+ * GraphQL shapes only: one object type FixtureNode, returned by the root fields and carrying the field resolvers
  * below. invokeGraph selects `publicNested` as `publicNested { id reader }` and `guarded` as
  * `guarded { id principal nestedReader }`, so `reader` and `nestedReader` read the reading of their enclosing field.
  */
@@ -135,6 +136,11 @@ export interface GraphFixtures {
     readonly public: FixtureHandler;
     readonly sessionOnly: FixtureHandler;
     readonly mixed: FixtureHandler;
+    /**
+     * A list root: its handler returns 20 FixtureNode items, so serve it as a list of FixtureNode (`[FixtureNode]`).
+     * Given only to the reader rows of T-internal-error-logged-once.
+     */
+    readonly items?: FixtureHandler;
   };
   readonly fields: {
     readonly plain: FixtureHandler;
@@ -145,6 +151,10 @@ export interface GraphFixtures {
     readonly sessionReader: FixtureHandler;
     /** @ForwardAuthCookies() without access metadata: an inheriting form-mode field that signs a kit user in (T-csrf-login-proxy). */
     readonly forwarding?: FixtureHandler;
+    /** A String field reading @ActiveOrganizationId() without a requirement that provides it (T-internal-error-logged-once). */
+    readonly organizationReader?: FixtureHandler;
+    /** A String field returning the user id of the zero-argument service.getSession() (T-internal-error-logged-once). */
+    readonly serviceSession?: FixtureHandler;
   };
   /** Federation shapes only: @ResolveReference() of FixtureNode, with the kit's per-representation requirement on `orgId`. */
   readonly reference?: FixtureHandler;
@@ -237,8 +247,16 @@ export interface TransportConformanceOptions {
       globalGuard: boolean;
       override?: (builder: TestingModuleBuilder) => TestingModuleBuilder;
       defaultRequirements?: readonly RequirementExpr[];
-      /** GraphQL shapes: the fieldResolverEnhancers to serve 'graph' with; the kit boots GraphQL cases with [] and ['guards', 'interceptors']. */
-      fieldResolverEnhancers?: readonly ("guards" | "interceptors")[];
+      /**
+       * GraphQL shapes: the fieldResolverEnhancers to serve 'graph' with. The kit boots GraphQL cases with [] and
+       * ['guards', 'interceptors'], and the reader rows of T-internal-error-logged-once with ['guards', 'interceptors',
+       * 'filters'] and ['guards', 'filters'].
+       */
+      fieldResolverEnhancers?: readonly (
+        | "guards"
+        | "interceptors"
+        | "filters"
+      )[];
       /** GraphQL shapes: serve 'graph' from a federation subgraph (FixtureNode an entity keyed by id, with GraphFixtures.reference when given). */
       federation?: boolean;
       /** Principal sources for BetterAuthModule's `principals`: the kit's API-key source. */
@@ -251,6 +269,11 @@ export interface TransportConformanceOptions {
       logger?: LoggerService;
       /** BetterAuthModule's cookies.forwardDirectCalls (T-stamp-per-plan). */
       forwardDirectCalls?: boolean;
+      /**
+       * BetterAuthModule's logSummary. The kit passes true where it asserts the boot summary (T-coverage-claims); unset
+       * leaves the harness's choice, such as false to keep other boots quiet.
+       */
+      logSummary?: boolean;
       /** GraphQL shapes: the fieldResolverCoverage of the transport this boot registers (T-stamp-per-plan). */
       fieldResolverCoverage?: "warn";
       /** GraphQL shapes: the GraphQL module's `context` option, one of `graphqlContexts` (T-stale-context, T-subscription-origin). */
@@ -544,7 +567,12 @@ interface GraphBoot {
   readonly forwarding?: { readonly email: string; readonly password: string };
   /** Class decorators of the graph resolver class. */
   readonly classDecorators?: readonly ClassDecorator[];
+  /** Include the `items` root and the `organizationReader` and `serviceSession` fields (T-internal-error-logged-once). */
+  readonly readerErrors?: boolean;
 }
+
+/** How many FixtureNode items the `items` root returns. */
+const ITEM_COUNT = 20;
 
 /** The fixture marker of a graph handler, for claims and plans of GraphQL boots. */
 const graphMarker = (name: string) => `graph.${name}`;
@@ -751,6 +779,22 @@ function kitFixtures(
             ([p]) => ({ id: "mixed", principal: view(p) }),
           ),
         ),
+        ...(graph.readerErrors
+          ? {
+              items: marked(
+                "items",
+                handler(
+                  [AcceptPrincipals(SESSION_KIND, API_KEY_KIND)],
+                  [],
+                  "read",
+                  () =>
+                    Array.from({ length: ITEM_COUNT }, (_, index) => ({
+                      id: `item-${index}`,
+                    })),
+                ),
+              ),
+            }
+          : {}),
       },
       fields: {
         plain: marked(
@@ -786,6 +830,34 @@ function kitFixtures(
               (session as { user?: { id?: string } } | null)?.user?.id ?? null,
           ),
         ),
+        ...(graph.readerErrors
+          ? {
+              organizationReader: marked(
+                "organizationReader",
+                handler(
+                  [],
+                  [ActiveOrganizationId()],
+                  "read",
+                  ([organization]) =>
+                    typeof organization === "string" ? organization : null,
+                ),
+              ),
+              serviceSession: marked(
+                "serviceSession",
+                handler(
+                  [],
+                  [],
+                  "read",
+                  async (_params, _input, { service }) =>
+                    (
+                      (await service.getSession()) as {
+                        user?: { id?: string };
+                      } | null
+                    )?.user?.id ?? null,
+                ),
+              ),
+            }
+          : {}),
         ...(forwarding
           ? {
               forwarding: marked(
@@ -1000,17 +1072,18 @@ async function seedOrganizations(
 async function environment(
   authOptions: Omit<BetterAuthOptions, "database"> = {},
   connectionLeg = false,
+  settings: ConformanceAuthSettings = {},
 ): Promise<KitEnv> {
   const plugins = authOptions.plugins ?? [];
-  const auth = conformanceAuth(
+  const auth = createConformanceAuth(
     {
       ...authOptions,
       plugins: plugins.some((plugin) => plugin.id === "organization")
         ? plugins
         : [...plugins, organization()],
     },
-    // The T-csrf-http-unsafe opt-out row is the only kit environment that switches the check off.
-    { disableCSRFCheck: authOptions.advanced?.disableCSRFCheck === true },
+    // Only the T-csrf-http-unsafe rows pass origin-check settings.
+    settings,
   );
   const probe = await probeOf(auth);
   const identity = await kitIdentity(auth);
@@ -1064,7 +1137,7 @@ interface Booted {
   readonly instrumentation: Instrumentation;
 }
 
-type GraphEnhancers = readonly ("guards" | "interceptors")[];
+type GraphEnhancers = readonly ("guards" | "interceptors" | "filters")[];
 
 interface BootOptions {
   fixtures?: TransportFixtures;
@@ -1078,6 +1151,7 @@ interface BootOptions {
   federation?: boolean;
   globalScope?: boolean;
   appEnhancers?: boolean;
+  logSummary?: boolean;
 }
 
 async function withApp(
@@ -1111,6 +1185,7 @@ async function withApp(
         ? { fieldResolverCoverage: boot.fieldResolverCoverage }
         : {}),
       ...(boot.graphqlContext ? { graphqlContext: boot.graphqlContext } : {}),
+      ...(boot.logSummary ? { logSummary: true } : {}),
     },
   );
   app.useLogger(logger);
@@ -1148,6 +1223,21 @@ async function expectBootFailure(
     ),
     `expected ${expected.join(" or ")}, got ${codes.join(", ")}: ${String(error)}`,
   );
+}
+
+/** The default instance's boot summary line (BetterAuthModule's logSummary). */
+function summaryLine(logger: CapturingLogger): string {
+  const line = logger.entries.find(
+    (entry) =>
+      entry.level === "log" &&
+      entry.text.startsWith("'default': ") &&
+      entry.text.includes("; scope: "),
+  )?.text;
+  assert.ok(
+    line,
+    `boot logged no summary (pass the logSummary and logger options to the app): ${logger.text().slice(0, 500)}`,
+  );
+  return line;
 }
 
 /** Stable codes of the WARN entries a logger captured (`CODE: message`). */
@@ -1444,7 +1534,9 @@ export function transportConformance(
   };
   const kitEnvironment = async (
     authOptions?: Omit<BetterAuthOptions, "database">,
-  ): Promise<KitEnv> => environment(authOptions, await connectionLeg());
+    settings?: ConformanceAuthSettings,
+  ): Promise<KitEnv> =>
+    environment(authOptions, await connectionLeg(), settings);
   const addRun = (
     id: string,
     title: string,
@@ -1817,7 +1909,7 @@ export function transportConformance(
   );
   add(
     "T-csrf-http-unsafe",
-    "an unsafe cookie operation needs a trusted origin, checked before any session read, unless an explicit opt-out applies",
+    "an unsafe cookie operation needs a trusted origin, checked before any session read, unless an explicit opt-out applies; Better Auth's boolean origin skip is not one",
     async (env) => {
       const skip = await operationLeg();
       if (skip) {
@@ -1882,11 +1974,54 @@ export function transportConformance(
         ({ app }) => untrusted(app, env, "@SkipOriginCheck()"),
         { fixtures: kitFixtures({ unsafe: [SkipOriginCheck()] }) },
       );
-      const disabled = await kitEnvironment({
-        advanced: { disableCSRFCheck: true },
-      });
+      const disabled = await kitEnvironment({}, { disableCSRFCheck: true });
       await withApp(options, disabled, ({ app }) =>
         untrusted(app, disabled, "advanced.disableCSRFCheck"),
+      );
+      // Better Auth's boolean origin skip with an explicit disableCSRFCheck: false opens only Better Auth's own
+      // routes; application operations stay checked, a deliberate divergence that B19 names. [R6:BA-r6-01]
+      const sdkSkip = await kitEnvironment(
+        {},
+        { disableOriginCheck: true, disableCSRFCheck: false },
+      );
+      const skipLogger = new CapturingLogger();
+      await withApp(
+        options,
+        sdkSkip,
+        async ({ app }) => {
+          const from = sdkSkip.probe.calls.length;
+          denied(
+            await options.invoke(app, "unsafe", {
+              ...cookie(sdkSkip),
+              origin: UNTRUSTED_ORIGIN,
+            }),
+            403,
+            "INVALID_ORIGIN",
+          );
+          assert.equal(
+            sessionReads(sdkSkip.probe, from),
+            0,
+            "disableOriginCheck: true with disableCSRFCheck: false: the session was read",
+          );
+          succeeded(
+            await options.invoke(app, "unsafe", {
+              ...cookie(sdkSkip),
+              origin: KIT_BASE_URL,
+            }),
+            "disableOriginCheck: true with disableCSRFCheck: false: the trusted base URL",
+          );
+        },
+        {},
+        skipLogger,
+      );
+      assert.ok(
+        skipLogger.entries.some(
+          (entry) =>
+            entry.level === "warn" &&
+            entry.text.startsWith("W_ORIGIN_CHECK:") &&
+            entry.text.includes("app-route checks remain on"),
+        ),
+        `boot did not warn W_ORIGIN_CHECK that app-route checks remain on (pass the logger option to the app): ${skipLogger.text().slice(0, 500)}`,
       );
     },
     noBrowser,
@@ -2805,6 +2940,185 @@ export function transportConformance(
     twiceSkip &&
       "the transport has no lineage, so each error is logged once by construction",
   );
+  add(
+    "T-internal-error-logged-once",
+    "reader configuration errors under 20 list items log one ERROR entry per request and distinct error, with field interceptors and with lineage alone",
+    async (env) => {
+      const skip = await graphReady(env);
+      if (skip) {
+        return skip;
+      }
+      const apiKey = { "x-api-key": env.keys.valid };
+      /** One `items` operation: asserts 20 failed `field` values and returns the ERROR entries it logged. */
+      const items = async (
+        app: INestApplication,
+        logger: CapturingLogger,
+        fields: readonly (keyof GraphFixtures["fields"])[],
+        headers: HeadersInit,
+        label: string,
+      ): Promise<string[]> => {
+        const from = logger.errors().length;
+        const result = await options.invokeGraph!(
+          app,
+          [{ root: "items", fields }],
+          headers,
+        );
+        const list = (result.data as Record<string, unknown> | null)?.items as
+          | readonly Record<string, unknown>[]
+          | null
+          | undefined;
+        assert.equal(
+          list?.length,
+          ITEM_COUNT,
+          `${label}: the items root did not return ${ITEM_COUNT} items: ${JSON.stringify(result).slice(0, 500)}`,
+        );
+        for (const field of fields) {
+          const failed = result.errors.filter(
+            (error) => error.path.at(-1) === field,
+          );
+          assert.equal(
+            failed.length,
+            ITEM_COUNT,
+            `${label}: ${failed.length} ${field} errors instead of one per item: ${JSON.stringify(result.errors).slice(0, 500)}`,
+          );
+          assert.ok(
+            list!.every((item) => item[field] === null),
+            `${label}: a ${field} value resolved`,
+          );
+          for (const error of failed) {
+            assert.ok(
+              !/[A-Z]+_[A-Z_]+/.test(error.message ?? ""),
+              `${label}: the client saw the configuration detail ${error.message}`,
+            );
+          }
+        }
+        assert.equal(
+          result.errors.length,
+          ITEM_COUNT * fields.length,
+          `${label}: ${JSON.stringify(result.errors).slice(0, 500)}`,
+        );
+        return logger
+          .errors()
+          .slice(from)
+          .map((entry) => entry.text);
+      };
+      const once = (entries: readonly string[], code: string, label: string) =>
+        assert.ok(
+          entries.length === 1 && entries[0]!.includes(code),
+          `${label}: expected one ERROR entry with ${code}, got ${entries.length}: ${entries.join(" | ").slice(0, 500)}`,
+        );
+      // Readers throw configuration errors that share the guard's surfaced-error record. [R6:NEST-r6-02] [R7:NEST-r7-02]
+      for (const enhancers of [
+        ["guards", "interceptors", "filters"],
+        ["guards", "filters"],
+      ] as const) {
+        const scoped = enhancers.includes("interceptors" as never);
+        const boot = `[${enhancers.join(", ")}]`;
+        await withApp(
+          options,
+          env,
+          async ({ app, logger }) => {
+            // A second request logs again: the bound is per request, not per process.
+            for (const round of [1, 2]) {
+              const label = `${boot}, request ${round}`;
+              once(
+                await items(
+                  app,
+                  logger,
+                  ["sessionReader"],
+                  apiKey,
+                  `${label}: an API key's session readers`,
+                ),
+                "SESSION_REQUIRED",
+                `${label}: an API key's session readers`,
+              );
+              once(
+                await items(
+                  app,
+                  logger,
+                  ["organizationReader"],
+                  cookie(env),
+                  `${label}: organization readers without a providing requirement`,
+                ),
+                "NO_INVOCATION_VALUE",
+                `${label}: organization readers without a providing requirement`,
+              );
+              const service = await items(
+                app,
+                logger,
+                ["serviceSession"],
+                apiKey,
+                `${label}: service getSession() for an API key`,
+              );
+              // A field scope bounds service reads by the request; without one each fresh NO_AUTH_SCOPE is logged.
+              const code = scoped ? "SESSION_REQUIRED" : "NO_AUTH_SCOPE";
+              assert.equal(
+                service.length,
+                scoped ? 1 : ITEM_COUNT,
+                `${label}: service getSession() logged ${service.length} ERROR entries`,
+              );
+              assert.ok(
+                service.every((entry) => entry.includes(code)),
+                `${label}: service getSession() did not log ${code}: ${service.join(" | ").slice(0, 500)}`,
+              );
+            }
+            // Distinct reasons of one request are not suppressed.
+            const distinct = await items(
+              app,
+              logger,
+              ["sessionReader", "organizationReader"],
+              apiKey,
+              `${boot}: session and organization readers together`,
+            );
+            assert.equal(
+              distinct.length,
+              2,
+              `${boot}: two reasons logged ${distinct.length} ERROR entries: ${distinct.join(" | ").slice(0, 500)}`,
+            );
+            for (const code of ["SESSION_REQUIRED", "NO_INVOCATION_VALUE"]) {
+              assert.ok(
+                distinct.some((entry) => entry.includes(code)),
+                `${boot}: ${code} was suppressed by another reason`,
+              );
+            }
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            fixtures: kitFixtures({}, [], { readerErrors: true }),
+          },
+        );
+        // A guard that records no result leaves every nested reader without one. Without field interceptors such a
+        // guard also records no lineage, so a reader has no request key to share and each fresh error is logged.
+        if (!scoped) {
+          continue;
+        }
+        await withApp(
+          options,
+          env,
+          async ({ app, logger }) => {
+            once(
+              await items(
+                app,
+                logger,
+                ["reader"],
+                cookie(env),
+                `${boot}: readers without an authentication result`,
+              ),
+              "NO_AUTH_RESULT",
+              `${boot}: readers without an authentication result`,
+            );
+          },
+          {
+            fieldResolverEnhancers: enhancers,
+            fixtures: kitFixtures({}, [], { readerErrors: true }),
+            override: (builder) =>
+              overrideAuthGuard(builder, { canActivate: () => true }),
+          },
+        );
+      }
+    },
+    graphSkip,
+  );
   add("T-public-no-lookup", "public handlers never read the session", (env) =>
     withApp(options, env, async ({ app }) => {
       const from = env.probe.calls.length;
@@ -2961,12 +3275,17 @@ export function transportConformance(
             }
           }
         },
-        {},
+        { logSummary: true },
         defaults,
       );
       assert.ok(
         claims.some((claim) => claim.fixture),
         "the transport claimed none of the kit's fixture handlers",
+      );
+      assert.match(
+        summaryLine(defaults),
+        /; scope: global;/,
+        "the default boot's summary does not report the global scope interceptor",
       );
       // Boot 3: the bare fixtures fail with exactly the handlers B16 reports, each with its claim's code, and boot
       // when no claim calls for a report.
@@ -3061,7 +3380,7 @@ export function transportConformance(
           options,
           env,
           async () => undefined,
-          { globalScope: false },
+          { globalScope: false, logSummary: true },
           unscoped,
         );
         const added = [...warningCodes(unscoped)].filter(
@@ -3071,6 +3390,12 @@ export function transportConformance(
           added,
           ["W_NO_GLOBAL_SCOPE"],
           `globalScope: false must boot global claims with W_NO_GLOBAL_SCOPE only (pass the logger option to the app): ${unscoped.text().slice(0, 500)}`,
+        );
+        // The summary reports the missing interceptor too. [R6:SEC-r6-03]
+        assert.match(
+          summaryLine(unscoped),
+          /; scope: off — see W_NO_GLOBAL_SCOPE;/,
+          "globalScope: false: the boot summary does not report scope: off",
         );
       }
     },

@@ -643,6 +643,7 @@ type RpcAppOptions = Pick<
   | "globalScope"
   | "appEnhancers"
   | "logger"
+  | "logSummary"
 >;
 
 /** Boots a microservice (hybrid: an Express app with it connected) serving `handlers` as message patterns. */
@@ -669,7 +670,7 @@ async function createRpcApp(
         ...(options.globalScope === undefined
           ? {}
           : { globalScope: options.globalScope }),
-        logSummary: false,
+        logSummary: options.logSummary ?? false,
       } as never),
     ],
     controllers: [

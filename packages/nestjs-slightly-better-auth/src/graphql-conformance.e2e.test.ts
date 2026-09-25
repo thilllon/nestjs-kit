@@ -131,6 +131,8 @@ class FixtureNode {
   @Field(() => KitJson, { nullable: true }) nestedReader?: unknown;
   @Field(() => String, { nullable: true }) sessionReader?: string;
   @Field(() => String, { nullable: true }) forwarding?: string;
+  @Field(() => String, { nullable: true }) organizationReader?: string;
+  @Field(() => String, { nullable: true }) serviceSession?: string;
 }
 
 /** Selection of each FixtureNode field. */
@@ -142,12 +144,16 @@ const FIELD_SELECTIONS: Readonly<Record<GraphField, string>> = {
   nestedReader: "nestedReader",
   sessionReader: "sessionReader",
   forwarding: "forwarding",
+  organizationReader: "organizationReader",
+  serviceSession: "serviceSession",
 };
 /** Field resolvers returning a String; the others return FixtureNode (nested selections) or KitJSON. */
 const STRING_FIELDS: ReadonlySet<GraphField> = new Set([
   "plain",
   "sessionReader",
   "forwarding",
+  "organizationReader",
+  "serviceSession",
 ]);
 
 /** Schema names of the graph roots, which share names with non-graph fixtures; invokeGraph aliases them back. */
@@ -155,6 +161,7 @@ const GRAPH_ROOTS: Readonly<Record<keyof GraphFixtures["roots"], string>> = {
   public: "graphPublic",
   sessionOnly: "graphSessionOnly",
   mixed: "graphMixed",
+  items: "graphItems",
 };
 
 /** The subscription field serving the `org` fixture (invokeTwice shape 'subscriptions'). */
@@ -306,13 +313,18 @@ function graphResolver(graph: GraphFixtures, federation: boolean) {
       return fixture.handle(args, {}, { service: this.service });
     };
   for (const [root, fixture] of Object.entries(graph.roots)) {
+    if (!fixture) {
+      continue;
+    }
     const name = GRAPH_ROOTS[root as keyof GraphFixtures["roots"]];
+    // The items root returns a list of FixtureNode.
+    const type = root === "items" ? () => [FixtureNode] : () => FixtureNode;
     defineHandler(
       GraphResolver,
       name,
       fixture,
       [],
-      [Query(() => FixtureNode, { name }), ...fixture.decorators],
+      [Query(type, { name }), ...fixture.decorators],
       call(fixture),
     );
   }
@@ -811,7 +823,7 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
             ...(options.globalScope === undefined
               ? {}
               : { globalScope: options.globalScope }),
-            logSummary: false,
+            logSummary: options.logSummary ?? false,
           } as never),
         ],
         providers: [
