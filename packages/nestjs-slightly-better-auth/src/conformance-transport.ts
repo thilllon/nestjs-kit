@@ -62,7 +62,7 @@ import {
   conformanceSkip,
   type ConformanceOutcome,
   type ConformanceSkip,
-  createConformanceAuth,
+  conformanceAuth,
   kitIdentity,
   type KitIdentity,
   PROBE_TRUSTED_ORIGIN,
@@ -1002,12 +1002,16 @@ async function environment(
   connectionLeg = false,
 ): Promise<KitEnv> {
   const plugins = authOptions.plugins ?? [];
-  const auth = createConformanceAuth({
-    ...authOptions,
-    plugins: plugins.some((plugin) => plugin.id === "organization")
-      ? plugins
-      : [...plugins, organization()],
-  });
+  const auth = conformanceAuth(
+    {
+      ...authOptions,
+      plugins: plugins.some((plugin) => plugin.id === "organization")
+        ? plugins
+        : [...plugins, organization()],
+    },
+    // The T-csrf-http-unsafe opt-out row is the only kit environment that switches the check off.
+    { disableCSRFCheck: authOptions.advanced?.disableCSRFCheck === true },
+  );
   const probe = await probeOf(auth);
   const identity = await kitIdentity(auth);
   await seedOrganizations(auth, identity.userId);

@@ -513,6 +513,8 @@ function httpCarrier(platform: "express" | "fastify") {
     header: (_name: string, value: string) => {
       written.push(value);
     },
+    getHeader: (name: string) =>
+      name === "set-cookie" && written.length ? [...written] : undefined,
   };
   const req = {
     raw,

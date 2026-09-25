@@ -1384,6 +1384,70 @@ describe("ExpressPlatform", () => {
     }
   });
 
+  it("keeps a passing advisory verdict for a same-origin GET without Origin and Referer", async () => {
+    const auth = createTestAuth();
+    @Catch(BetterAuthConfigurationError)
+    class ExpectedConfigurationFilter implements ExceptionFilter {
+      catch(_exception: unknown, host: ArgumentsHost) {
+        const response = host.switchToHttp().getResponse<ServerResponse>();
+        response.statusCode = 500;
+        response.end();
+      }
+    }
+    @Controller("same-origin")
+    class SameOriginController {
+      constructor(private readonly service: BetterAuthService<typeof auth>) {}
+
+      @RequireAuth()
+      @Get("sessions")
+      async sessions(@Req() request: IncomingMessage) {
+        const sessions = await this.service.api.listSessions({
+          headers: this.service.headersFrom(request),
+        });
+        return { count: sessions.length };
+      }
+    }
+    const fixture = await startHttpFixture({
+      auth,
+      adapter: new ExpressAdapter(),
+      platform: expressPlatform(),
+      controllers: [SameOriginController],
+      providers: [ExpectedConfigurationFilter],
+      configure: (app) => {
+        app.useGlobalFilters(app.get(ExpectedConfigurationFilter));
+      },
+    });
+    try {
+      const cookie = cookieHeader(
+        await signUp(fixture.url, {
+          name: "Same Origin",
+          email: "same-origin@example.com",
+          password: "same origin password long enough",
+        }),
+      );
+      // The browser leg's own origin must be trusted: send the configured host.
+      const get = (headers: Record<string, string>) =>
+        sendNodeRequest(`${fixture.url}/same-origin/sessions`, {
+          method: "GET",
+          headers: { host: "localhost:3000", cookie, ...headers },
+        });
+      const sameOrigin = await get({
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+      });
+      expect(sameOrigin.status).toBe(200);
+      expect(JSON.parse(sameOrigin.body.toString())).toEqual({ count: 1 });
+      for (const site of ["same-site", "cross-site"]) {
+        expect(
+          (await get({ "sec-fetch-site": site, "sec-fetch-mode": "cors" }))
+            .status,
+        ).toBe(500);
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("preserves sessions behind image-shaped cross-site GET logout proxies for every access level", async () => {
     // A guard's session read is not origin evidence: a direct caller-session call on a safe method needs a passing
     // advisory verdict, which a cross-site image request never has and a public plan never computes. [R6:SEC-r6-01]

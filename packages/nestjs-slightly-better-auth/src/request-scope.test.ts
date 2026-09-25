@@ -195,7 +195,10 @@ it("keeps decisions and provided values local to each invocation and instance", 
   const scope = new RequestScope();
   const a = {};
   const b = {};
-  const compute = vi.fn(async () => ({ effect: "allow" as const }));
+  const compute = vi.fn(async () => ({
+    decision: { effect: "allow" as const },
+    published: [],
+  }));
   const first = scope.memoDecision(a, "default", "requirement", compute);
   expect(scope.memoDecision(a, "default", "requirement", compute)).toBe(first);
   await Promise.all([

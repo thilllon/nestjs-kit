@@ -4,6 +4,7 @@ import type {
   IncomingMessage,
   ServerResponse,
 } from "node:http";
+import { headerLines, setCookieAdditions } from "./set-cookies.js";
 
 function appendHeaderValue(
   headers: Headers,
@@ -280,14 +281,10 @@ export function appendSetCookie(
   if (res.headersSent) {
     return false;
   }
-  const current = res.getHeader("set-cookie");
-  const existing = Array.isArray(current)
-    ? current.map(String)
-    : current === undefined
-      ? []
-      : [String(current)];
-  if (values.length > 0) {
-    res.setHeader("set-cookie", [...existing, ...values]);
+  const existing = headerLines(res.getHeader("set-cookie"));
+  const additions = setCookieAdditions(existing, values);
+  if (additions.length > 0) {
+    res.setHeader("set-cookie", [...existing, ...additions]);
   }
   return true;
 }

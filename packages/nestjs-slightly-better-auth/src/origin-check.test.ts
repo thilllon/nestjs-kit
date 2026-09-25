@@ -218,6 +218,36 @@ describe("origin parity with real SDK routes", () => {
       expect(response.status).toBe(200);
     },
   );
+
+  it.each([
+    { origin: "https://app.a.example", denied: "INVALID_ORIGIN" },
+    { origin: "https://app.b.example", denied: undefined },
+  ])(
+    "agrees on a request-dependent trustedOrigins function: $origin",
+    async ({ origin, denied }) => {
+      const tenants = (request?: Request) =>
+        request
+          ? [`https://app.${new URL(request.url).hostname}`]
+          : ["https://app.a.example", "https://app.b.example"];
+      const { auth, check } = await fixture({
+        baseURL: "https://b.example",
+        trustedOrigins: tenants,
+      });
+      const headers = { cookie: "session=opaque", origin };
+      const leg = {
+        ...browser(headers),
+        url: "https://b.example/transfer",
+      };
+      expect((await check.check(leg, "cookie"))?.reason).toBe(denied);
+      const response = await auth.handler(
+        new Request("https://b.example/api/auth/cookie-probe", {
+          method: "POST",
+          headers,
+        }),
+      );
+      expect(response.status).toBe(denied ? 403 : 200);
+    },
+  );
 });
 
 it("records safe cookie verdicts as advisory evidence without treating failure as a passing proof", async () => {
@@ -239,6 +269,65 @@ it("records safe cookie verdicts as advisory evidence without treating failure a
     check.assertCallerSession(good, "/sign-out", "default"),
   ).not.toThrow();
   expect(() => check.assertCallerSession(good, "/sign-out", "admin")).toThrow();
+});
+
+it("infers a same-origin advisory verdict without Origin and Referer, never on enforcing legs", async () => {
+  const { auth, check } = await fixture();
+  const sameOrigin = {
+    cookie: "session=opaque",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "cors",
+  };
+  const safe = browser(sameOrigin, false);
+  await check.advisory(safe);
+  expect(await check.check(safe, "cookie")).toBeNull();
+  expect(() =>
+    check.assertCallerSession(safe, "/list-sessions", "default"),
+  ).not.toThrow();
+  const unsafe = browser(sameOrigin);
+  expect((await check.check(unsafe, "cookie"))?.reason).toBe(
+    "MISSING_OR_NULL_ORIGIN",
+  );
+  const router = await auth.handler(
+    new Request("https://app.example/api/auth/cookie-probe", {
+      method: "POST",
+      headers: sameOrigin,
+    }),
+  );
+  expect(router.status).toBe(403);
+  // One batched GraphQL request: a query and a mutation share the leg key.
+  const shared = {};
+  expect(
+    await check.check({ ...browser(sameOrigin, false), key: shared }, "cookie"),
+  ).toBeNull();
+  expect(
+    (await check.check({ ...browser(sameOrigin), key: shared }, "cookie"))
+      ?.reason,
+  ).toBe("MISSING_OR_NULL_ORIGIN");
+  for (const site of ["same-site", "cross-site", "none"]) {
+    const other = browser({ ...sameOrigin, "sec-fetch-site": site }, false);
+    expect((await check.check(other, "cookie"))?.reason).toBe(
+      "MISSING_OR_NULL_ORIGIN",
+    );
+    expect(() =>
+      check.assertCallerSession(other, "/list-sessions", "default"),
+    ).toThrow();
+  }
+  const untrustedLeg = {
+    ...browser(sameOrigin, false),
+    url: "https://other.example/resource",
+  };
+  expect((await check.check(untrustedLeg, "cookie"))?.reason).toBe(
+    "INVALID_ORIGIN",
+  );
+  expect(
+    (
+      await check.check(
+        browser({ ...sameOrigin, referer: "https://evil.example/page" }, false),
+        "cookie",
+      )
+    )?.reason,
+  ).toBe("INVALID_ORIGIN");
 });
 
 it("protects the ambient browser cookie even when transport credentials shadow it", async () => {

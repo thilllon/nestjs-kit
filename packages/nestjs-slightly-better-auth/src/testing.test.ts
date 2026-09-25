@@ -567,3 +567,37 @@ describe("initTestApp", () => {
     expect(ready).toHaveBeenCalled();
   });
 });
+
+describe("createConformanceAuth", () => {
+  it("keeps origin checks on whatever the caller's options say", async () => {
+    for (const advanced of [
+      { disableCSRFCheck: true },
+      { disableOriginCheck: true },
+      { disableCSRFCheck: true, disableOriginCheck: true },
+    ]) {
+      const auth = createConformanceAuth({ advanced });
+      const context = (await auth.$context) as {
+        skipCSRFCheck: boolean;
+        skipOriginCheck: boolean | readonly string[];
+      };
+      expect(context.skipCSRFCheck).toBe(false);
+      expect(context.skipOriginCheck).toBe(false);
+      const response = await auth.handler(
+        new Request("http://localhost:3000/api/auth/sign-up/email", {
+          method: "POST",
+          headers: {
+            cookie: "session=opaque",
+            origin: "https://evil.example",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            name: "Cross Site",
+            email: `${crypto.randomUUID()}@example.com`,
+            password: "cross site password",
+          }),
+        }),
+      );
+      expect(response.status).toBe(403);
+    }
+  });
+});

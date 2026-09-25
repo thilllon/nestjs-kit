@@ -21,6 +21,7 @@ const shared = [
   "auth-tokens.ts",
   "error-redactor.ts",
   "platform.ts",
+  "set-cookies.ts",
 ];
 const kernel = [
   "auth-core-module.ts",
@@ -126,6 +127,13 @@ const kernelLiteralExceptions = [
     count: 1,
     reason:
       "better-auth core model name in DatabaseHookTarget (design v7 §10.6).",
+  },
+  {
+    file: "trusted-origins.ts",
+    literal: "http",
+    count: 1,
+    reason:
+      "better-auth's dynamic baseURL protocol value, mirrored from getTrustedOrigins() (design v7 §7.10).",
   },
 ];
 

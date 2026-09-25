@@ -137,6 +137,58 @@ describe("application lifecycle", () => {
     }
   });
 
+  it("rejects one of two applications that initialize one instance concurrently", async () => {
+    const auth = createTestAuth();
+    const ran: string[] = [];
+    class BlockingHooks {
+      @BeforeDatabase("user.create") reject(
+        data: DatabaseHookData<"user.create">,
+      ) {
+        ran.push("blocking");
+        if (data.email === "blocked@example.com") {
+          return false;
+        }
+      }
+    }
+    class OpenHooks {
+      @BeforeDatabase("user.create") allow() {
+        ran.push("open");
+      }
+    }
+    const build = (hooks: new () => object) =>
+      Test.createTestingModule({
+        providers: [hooks],
+        imports: [BetterAuthModule.forRoot({ auth, http: { mount: false } })],
+      }).compile();
+    const first = await build(BlockingHooks);
+    const second = await build(OpenHooks);
+    try {
+      const results = await Promise.allSettled([first.init(), second.init()]);
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]!.reason).toMatchObject({
+        code: "INSTANCE_ALREADY_BOUND",
+      });
+      const live = results[0]!.status === "fulfilled" ? "blocking" : "open";
+      await auth.api
+        .signUpEmail({
+          body: {
+            name: "Blocked",
+            email: "blocked@example.com",
+            password: "blocked password long enough",
+          },
+        })
+        .catch(() => undefined);
+      expect(ran).toEqual([live]);
+    } finally {
+      await second.close().catch(() => undefined);
+      await first.close().catch(() => undefined);
+    }
+  });
+
   it("takes over a binding whose first application failed boot", async () => {
     const auth = createTestAuth();
     const failed = await Test.createTestingModule({

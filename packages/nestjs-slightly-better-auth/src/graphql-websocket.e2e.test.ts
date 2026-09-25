@@ -19,6 +19,7 @@ import { createClient, type Client } from "graphql-ws";
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 import { BetterAuthModule } from "./auth-module.js";
+import { BetterAuthService } from "./auth-service.js";
 import {
   CurrentPrincipal,
   OptionalAuth,
@@ -36,9 +37,24 @@ import {
 } from "./graphql.js";
 import { nestjs } from "./plugin.js";
 
+/** The session cookie a resolver's direct call carries; the test sets it per fixture. */
+let directCallCookie = "";
 @Resolver()
 class SocketResolver {
   calls = 0;
+
+  constructor(private readonly service: BetterAuthService) {}
+
+  @Query(() => String)
+  async sessions(@CurrentPrincipal() principal: AuthPrincipal) {
+    const api = this.service.api as unknown as {
+      listSessions(input: { headers: Headers }): Promise<unknown[]>;
+    };
+    const sessions = await api.listSessions({
+      headers: new Headers({ cookie: directCallCookie }),
+    });
+    return `${principal.userId}:${sessions.length}`;
+  }
 
   @Query(() => String, { nullable: true })
   @OptionalAuth()
@@ -498,6 +514,36 @@ describe.each([
       ).toMatchObject({ code: "FORBIDDEN", statusCode: 403 });
       expect(f.reads()).toBe(0);
     } finally {
+      await f.close();
+    }
+  });
+  it("lets a connectionParams session cookie make caller-session direct calls", async () => {
+    const f = await fixture(mode);
+    try {
+      directCallCookie = f.cookie;
+      const expected = { data: { sessions: `${f.userId}:1` } };
+      const upgrades: Record<string, string>[] = [
+        { origin: "http://localhost:3000" },
+        {},
+        { origin: "https://evil.example" },
+      ];
+      for (const upgrade of upgrades) {
+        expect(
+          await execute(
+            f.client(upgrade, { cookie: f.cookie }),
+            "{ sessions }",
+          ),
+        ).toEqual(expected);
+      }
+      expect(
+        await execute(
+          f.client({ cookie: f.cookie, origin: "http://localhost:3000" }),
+          "{ sessions }",
+        ),
+      ).toEqual(expected);
+      expect(f.errors).toEqual([]);
+    } finally {
+      directCallCookie = "";
       await f.close();
     }
   });

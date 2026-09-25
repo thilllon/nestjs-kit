@@ -9,7 +9,11 @@ import type {
   ResolutionRequest,
   TransportCall,
 } from "./auth-contracts.js";
-import { AuthFailures } from "./auth-errors.js";
+import {
+  AuthFailures,
+  BetterAuthInfrastructureError,
+  getRawCause,
+} from "./auth-errors.js";
 import type { BridgeBinding, BridgeHandle } from "./bridge-protocol.js";
 import { BRIDGE_HANDLE } from "./bridge-protocol.js";
 import type { InstanceEntry } from "./instance-registry.js";
@@ -78,6 +82,41 @@ describe("principal chain", () => {
     ]);
     expect(session).toHaveBeenCalledTimes(1);
     expect(machine).not.toHaveBeenCalled();
+  });
+  it("redacts a source's own infrastructure error with the request's credentials", async () => {
+    const cookie = "SECRET_COOKIE_VALUE_1234567890";
+    const cause = new Error(`store offline cookie=${cookie} key=source-secret`);
+    for (const exposeRawCause of [true, false]) {
+      const f = fixture([
+        {
+          id: "custom",
+          kinds: ["session"],
+          resolve: async () => {
+            throw new BetterAuthInfrastructureError(cause, {
+              secrets: ["source-secret"],
+            });
+          },
+        },
+      ]);
+      Object.assign(f.entry, { options: { errors: { exposeRawCause } } });
+      const error = await f.resolver
+        .resolve(
+          {
+            ...f.call,
+            headers: () => new Headers({ cookie: `sid=${cookie}` }),
+          },
+          f.request,
+        )
+        .then(
+          () => undefined,
+          (thrown: unknown) => thrown as BetterAuthInfrastructureError,
+        );
+      expect(error).toBeInstanceOf(BetterAuthInfrastructureError);
+      expect(error?.cause.message).toBe(
+        "store offline cookie=[REDACTED] key=[REDACTED]",
+      );
+      expect(getRawCause(error!)).toBe(exposeRawCause ? cause : undefined);
+    }
   });
   it("stops immediately at a presented rejected credential and preserves failures", async () => {
     const failure = AuthFailures.rejected({ status: 429, reason: "QUOTA" }),

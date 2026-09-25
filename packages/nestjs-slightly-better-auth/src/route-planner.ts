@@ -53,6 +53,31 @@ export function methodName(target: Type, handler: Function): string {
     `Cannot locate handler on ${target.name}`,
   );
 }
+/** An empty allOf() would allow every caller and an empty anyOf() every denial; neither is a requirement. */
+function rejectEmptyGroups(
+  expression: RequirementExpr,
+  site: string,
+  origin: string,
+): void {
+  if (!("anyOf" in expression) && !("allOf" in expression)) {
+    return;
+  }
+  const [name, children] =
+    "anyOf" in expression
+      ? (["anyOf", expression.anyOf] as const)
+      : (["allOf", expression.allOf] as const);
+  if (!children.length) {
+    throw new BetterAuthConfigurationError(
+      "EMPTY_REQUIREMENT_GROUP",
+      `${site} has an empty ${name}() requirement group (declared by ${origin})`,
+      "Give the group at least one requirement, or omit the requirement when a configured list is empty.",
+    );
+  }
+  for (const child of children) {
+    rejectEmptyGroups(child, site, origin);
+  }
+}
+
 export class RoutePlanner {
   // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
   private readonly cache = new WeakMap<Type, WeakMap<Function, RoutePlan>>();
@@ -145,6 +170,9 @@ export class RoutePlanner {
           ]
         : [];
     const requirements = declaredRequirements.map((item) => item.expression);
+    for (const { expression, origin } of declaredRequirements) {
+      rejectEmptyGroups(expression, site, origin);
+    }
     return {
       handler,
       chain,

@@ -279,7 +279,7 @@ export class BetterAuthCoreModule
         });
         if (result.tookOverFrom) {
           this.instances.logger.warn(
-            `W_INSTANCE_TAKEN_OVER: '${entry.name}' took over from never-bootstrapped '${result.tookOverFrom}'.`,
+            `W_INSTANCE_TAKEN_OVER: '${entry.name}' took over from never-bootstrapped '${result.tookOverFrom}'; that application fails at bootstrap if it is still initializing.`,
           );
         }
         if (unbound > 0 && count > 0) {
