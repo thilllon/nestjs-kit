@@ -53,7 +53,10 @@ export class HttpTransport implements AuthTransport {
     };
     return {
       key,
-      invocation: key,
+      // The request object handlers receive, which param decorators find among the handler's arguments without a
+      // handler scope; the platform key can be another object (Fastify: the raw request).
+      invocation:
+        typeof request === "object" && request !== null ? request : key,
       headers: () => accessor().headers(request),
       get clientIp() {
         return accessor().clientIp(request);

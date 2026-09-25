@@ -706,7 +706,7 @@ class GraphqlTransport implements AuthTransport {
         advice.push({
           level: "info",
           code: "I_CLASS_METADATA_OPERATIONS_ONLY",
-          message: `Class metadata excludes inherited fields ${entries
+          message: `Class metadata of ${(target as { name?: string }).name} excludes inherited fields ${entries
             .filter(
               (entry) =>
                 entry.target === target && entry.plan.access === "inherit",
