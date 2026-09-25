@@ -302,6 +302,8 @@
       "InheritedFixture",
       "InvocationShape",
       "PolicyConformanceOptions",
+      "PolicyDelivery",
+      "PolicyDeliveryConnection",
       "PrincipalHttpConformanceOptions",
       "PrincipalSourceConformanceOptions",
       "TransportConformanceOptions",
