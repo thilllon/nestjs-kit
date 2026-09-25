@@ -26,4 +26,4 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 
 Run commands from the repository root with mise. This package uses the shared tsdown, TypeScript, Vitest, Biome and release setup. Design utilities live in `docs/design/tools/*.mts` and run through `pnpm exec tsx`.
 
-Artifact tests run with `pnpm test:packaging` after `pnpm build`. Default unit tests must work without prebuilt artifacts or services. Legacy tests remain reference-only and must not pull obsolete dependencies into the workspace.
+Artifact tests run with `pnpm test:packaging` after `pnpm build`. A change to an entry's exported names updates `fixtures/public-api.json` in the same pull request; `src/packaging-archive.test.ts` compares every entry's runtime and declaration exports with it. Default unit tests must work without prebuilt artifacts or services. Legacy tests remain reference-only and must not pull obsolete dependencies into the workspace.

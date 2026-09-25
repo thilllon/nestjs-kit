@@ -61,7 +61,8 @@ Nest's gRPC transport uses `@grpc/grpc-js` and `@grpc/proto-loader`, Kafka uses 
 | Node.js                          | 24.11.0 or newer                                  | 24.11.0 and the current LTS                                                      |
 | `@nestjs/common`, `@nestjs/core` | `^12.0.3`                                         | 12.0.3 and the newest 12.x release, with the matching `@nestjs/platform-express` |
 | `better-auth`                    | `>=1.7.5 <2`                                      | 1.7.5 and the newest 1.x release                                                 |
-| TypeScript declarations          | `nodenext`, `node16` ESM and `bundler` resolution | TypeScript 7 in each resolution mode                                             |
+| TypeScript declarations          | `nodenext`, `node16` ESM and `bundler` resolution | TypeScript 5.9, the newest 6.x and 7 in each resolution mode                     |
+| Bundlers                         | esbuild, `nest build --webpack`                   | esbuild 0.28 and Nest CLI 12 with webpack 5                                      |
 
 The packaging tests pack this package, install the tarball with pnpm into temporary applications outside the workspace and run them with the peers installed at their declared floors and at the newest versions inside the peer ranges. The newest versions are those that pnpm's default minimum release age admits, so a new release enters the matrix after that delay. Each application compiles one Nest source as ESM and as CommonJS, signs up users of a default and a named Better Auth instance, calls a guarded route of each with its session cookie, checks that neither instance accepts the other's cookie, and closes. CI runs these tests on the current Node.js LTS and on Node.js 24.11.0.
 
@@ -73,6 +74,24 @@ Module systems:
 - Better Auth publishes ESM only, so CommonJS applications need `require()` of ES modules, which Node.js 24 enables by default. With `--no-experimental-require-module`, `require()` resolves every entry to its `.cjs` file, but only `./platform` and `./fastify` load; every other entry stops at its first Better Auth import with `ERR_REQUIRE_ESM`.
 - With TypeScript `module: nodenext`, ESM and CommonJS files compile against the published declarations; `module: preserve` with `moduleResolution: bundler` uses the ESM declarations. With `module: node16`, ESM files compile, but CommonJS files cannot import NestJS 12 or Better Auth, whose declarations are ESM only; use `nodenext` for CommonJS applications.
 - Each optional entry loads with only its own optional peers installed, and every other entry loads without any optional peer.
+
+Toolchains:
+
+- TypeScript 5.9, the newest 6.x and 7 compile the application, a `node16` CommonJS file that imports only this package, and a principal-kind check in each resolution mode. That check runs once with and once without an import of `./api-key`: `'api-key'` is a `PrincipalKind` only in programs that import it.
+- esbuild bundles the compiled application, including this package and Better Auth, as ESM and as CommonJS, and each bundle authenticates both instances from a directory without `node_modules`. The ESM bundle needs a `createRequire` banner for bundled CommonJS dependencies and `--splitting`: without it, esbuild 0.28 leaves Better Auth's `memoryAdapter`, which Better Auth also imports dynamically, uninitialized. Mark Nest's optional `@nestjs/microservices`, `@nestjs/websockets`, `class-transformer` and `class-validator` external when the application does not install them.
+- `nest build --webpack` compiles the application with the Nest CLI's default webpack configuration, which keeps `node_modules` external, and the build authenticates both instances.
+
+| Setup                                                                                                   | Status                                              |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| ESM and CommonJS applications on Node.js 24.11.0 or newer                                               | Supported and tested                                |
+| TypeScript 5.9, 6.x and 7 with `nodenext`, `node16` ESM or `bundler` resolution                         | Supported and tested                                |
+| esbuild ESM bundles with `--splitting`, esbuild CommonJS bundles, `nest build --webpack`                | Supported and tested                                |
+| TypeScript `node16` CommonJS files that import NestJS 12 or Better Auth                                 | Unsupported: their declarations are ESM only        |
+| CommonJS with `--no-experimental-require-module`                                                        | Unsupported: only `./platform` and `./fastify` load |
+| NestJS 11, Better Auth before 1.7.5                                                                     | Unsupported: outside the peer ranges                |
+| TypeScript before 5.9, the Nest CLI's rspack builder, webpack bundles of `node_modules`, other bundlers | Untested                                            |
+
+The packaging tests also inspect the packed archive. It contains only `package.json`, this README, the license and the `dist` files that the export map reaches; source maps name only this package's sources, and runtime maps embed them. Each entry exports exactly the names listed in [`fixtures/public-api.json`](fixtures/public-api.json), and no emitted file has a default export or top-level `await`.
 
 ## Entry points
 
