@@ -23,6 +23,7 @@ export {
   principalSourceConformance,
 } from "./conformance-principal.js";
 export {
+  type ConnectionAuthenticationResult,
   type FixtureContext,
   type FixtureHandler,
   type GraphFixtures,
