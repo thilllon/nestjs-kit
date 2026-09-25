@@ -11,16 +11,40 @@ Install only the integrations you need. Packages have their own npm releases and
 
 Each guide covers installation, registration options and complete examples.
 
-- [`@nestjs-kit/s3`](packages/nestjskit__s3/README.md): S3-compatible storage clients, including AWS, NetApp and Ceph. [npm](https://www.npmjs.com/package/@nestjs-kit/s3)
-- [`nestjs-azure-storage-blob`](packages/nestjs-azure-storage-blob/README.md): Azure Blob Storage operations and direct uploads through SAS URLs. [npm](https://www.npmjs.com/package/nestjs-azure-storage-blob)
-- [`@nestjs-kit/cloudinary`](packages/nestjskit__cloudinary/README.md): signed uploads and media uploads with Cloudinary transformation options. [npm](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
-- [`nestjs-drizzle-pg`](packages/nestjs-drizzle-pg/README.md): Drizzle ORM with PostgreSQL pools or clients. [npm](https://www.npmjs.com/package/nestjs-drizzle-pg)
-- [`nestjs-pg-listen`](packages/nestjs-pg-listen/README.md): PostgreSQL LISTEN / NOTIFY with a managed subscriber lifecycle. [npm](https://www.npmjs.com/package/nestjs-pg-listen)
-- [`@nestjs-kit/nodemailer`](packages/nestjskit__nodemailer/README.md): email delivery through configurable Nodemailer transports. [npm](https://www.npmjs.com/package/@nestjs-kit/nodemailer)
-- [`nestjs-sendgrid`](packages/nestjs-sendgrid/README.md): Mail Send and Web API calls through isolated Twilio SendGrid accounts. [npm](https://www.npmjs.com/package/nestjs-sendgrid)
-- [`nestjs-pubnub`](packages/nestjs-pubnub/README.md): publishing and subscribing through an injectable PubNub client. [npm](https://www.npmjs.com/package/nestjs-pubnub)
-- [`nestjs-sendbird`](packages/nestjs-sendbird/README.md): Sendbird Platform API calls with per-application tokens. [npm](https://www.npmjs.com/package/nestjs-sendbird)
-- [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md): Better Auth sessions, guards and authorization for NestJS applications. [npm](https://www.npmjs.com/package/nestjs-slightly-better-auth)
+### Storage and media
+
+- [`@nestjs-kit/s3`](packages/nestjskit__s3/README.md) [![npm version of @nestjs-kit/s3](https://img.shields.io/npm/v/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3) [![Monthly npm downloads of @nestjs-kit/s3](https://img.shields.io/npm/dm/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3)
+  - S3-compatible storage clients, including AWS, NetApp and Ceph.
+- [`nestjs-azure-storage-blob`](packages/nestjs-azure-storage-blob/README.md) [![npm version of nestjs-azure-storage-blob](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob) [![Monthly npm downloads of nestjs-azure-storage-blob](https://img.shields.io/npm/dm/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
+  - Azure Blob Storage operations and direct uploads through SAS URLs.
+- [`@nestjs-kit/cloudinary`](packages/nestjskit__cloudinary/README.md) [![npm version of @nestjs-kit/cloudinary](https://img.shields.io/npm/v/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary) [![Monthly npm downloads of @nestjs-kit/cloudinary](https://img.shields.io/npm/dm/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
+  - Signed uploads and media uploads with Cloudinary transformation options.
+
+### PostgreSQL
+
+- [`nestjs-drizzle-pg`](packages/nestjs-drizzle-pg/README.md) [![npm version of nestjs-drizzle-pg](https://img.shields.io/npm/v/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg) [![Monthly npm downloads of nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)
+  - Drizzle ORM with PostgreSQL pools or clients.
+- [`nestjs-pg-listen`](packages/nestjs-pg-listen/README.md) [![npm version of nestjs-pg-listen](https://img.shields.io/npm/v/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen) [![Monthly npm downloads of nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen)
+  - PostgreSQL LISTEN / NOTIFY with a managed subscriber lifecycle.
+
+### Email
+
+- [`@nestjs-kit/nodemailer`](packages/nestjskit__nodemailer/README.md) [![npm version of @nestjs-kit/nodemailer](https://img.shields.io/npm/v/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer) [![Monthly npm downloads of @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)
+  - Email delivery through configurable Nodemailer transports.
+- [`nestjs-sendgrid`](packages/nestjs-sendgrid/README.md) [![npm version of nestjs-sendgrid](https://img.shields.io/npm/v/nestjs-sendgrid)](https://www.npmjs.com/package/nestjs-sendgrid) [![Monthly npm downloads of nestjs-sendgrid](https://img.shields.io/npm/dm/nestjs-sendgrid)](https://www.npmjs.com/package/nestjs-sendgrid)
+  - Mail Send and Web API calls through isolated Twilio SendGrid accounts.
+
+### Messaging and chat
+
+- [`nestjs-pubnub`](packages/nestjs-pubnub/README.md) [![npm version of nestjs-pubnub](https://img.shields.io/npm/v/nestjs-pubnub)](https://www.npmjs.com/package/nestjs-pubnub) [![Monthly npm downloads of nestjs-pubnub](https://img.shields.io/npm/dm/nestjs-pubnub)](https://www.npmjs.com/package/nestjs-pubnub)
+  - Publishing and subscribing through an injectable PubNub client.
+- [`nestjs-sendbird`](packages/nestjs-sendbird/README.md) [![npm version of nestjs-sendbird](https://img.shields.io/npm/v/nestjs-sendbird)](https://www.npmjs.com/package/nestjs-sendbird) [![Monthly npm downloads of nestjs-sendbird](https://img.shields.io/npm/dm/nestjs-sendbird)](https://www.npmjs.com/package/nestjs-sendbird)
+  - Sendbird Platform API calls with per-application tokens.
+
+### Authentication
+
+- [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md) [![npm version of nestjs-slightly-better-auth](https://img.shields.io/npm/v/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth) [![Monthly npm downloads of nestjs-slightly-better-auth](https://img.shields.io/npm/dm/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth)
+  - Better Auth sessions, guards and authorization for NestJS applications.
 
 ## Shared approach
 
