@@ -19,6 +19,7 @@ import { Test } from "@nestjs/testing";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError } from "better-auth/api";
 import { admin, customSession, organization } from "better-auth/plugins";
+import { jwt } from "better-auth/plugins/jwt";
 import { role } from "better-auth/plugins/access";
 import { describe, expect, it, vi } from "vitest";
 import { adminPermissionPolicy, permission } from "./admin.js";
@@ -36,6 +37,7 @@ import {
   type AuthFailure,
   AuthFailures,
   BetterAuthConfigurationError,
+  BetterAuthInfrastructureError,
 } from "./auth-errors.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
@@ -59,6 +61,7 @@ import {
   transportConformance,
 } from "./conformance-transport.js";
 import { BootValidator } from "./boot-validator.js";
+import { jwtPrincipal } from "./jwt-extension-fixture.js";
 import {
   orgMember,
   orgMemberPolicy,
@@ -630,18 +633,98 @@ async function apiKeyAuth(): Promise<{
   };
 }
 
+/** Headers that let an auth.api call resolve a variant instance's dynamic baseURL (S-dynamic-base-url). */
+const KIT_HOST = { host: "localhost:3000" };
+
+interface KeyCreation {
+  createApiKey(input: {
+    body: object;
+    headers?: Headers;
+  }): Promise<{ id: string; key: string }>;
+  createOrganization(input: {
+    body: { name: string; slug: string };
+    headers: Headers;
+  }): Promise<{ id: string }>;
+}
+
+/** A key of a new user, created through a session call so that it also works on a dynamic-baseURL instance. */
+async function sessionKey(auth: AuthLike): Promise<Headers> {
+  const identity = await kitIdentity(auth);
+  const created = await (auth.api as unknown as KeyCreation).createApiKey({
+    body: {},
+    headers: new Headers({ ...KIT_HOST, cookie: identity.cookie }),
+  });
+  return new Headers({ "x-api-key": created.key });
+}
+
+/** A key owned by a new organization. Server-only fields (remaining, rate limits) need a server call. */
+async function organizationKey(
+  auth: AuthLike,
+  fields: Readonly<Record<string, unknown>> = {},
+): Promise<{ id: string; headers: Headers }> {
+  const identity = await kitIdentity(auth);
+  const api = auth.api as unknown as KeyCreation;
+  const session = new Headers({ ...KIT_HOST, cookie: identity.cookie });
+  const organization = await api.createOrganization({
+    headers: session,
+    body: {
+      name: "Conformance organization",
+      slug: `org-${globalThis.crypto.randomUUID()}`,
+    },
+  });
+  const created = Object.keys(fields).length
+    ? await api.createApiKey({
+        body: {
+          userId: identity.userId,
+          organizationId: organization.id,
+          ...fields,
+        },
+      })
+    : await api.createApiKey({
+        body: { organizationId: organization.id },
+        headers: session,
+      });
+  return { id: created.id, headers: new Headers({ "x-api-key": created.key }) };
+}
+
+function organizationKeyAuth(): AuthLike {
+  return createConformanceAuth({
+    plugins: [organization(), admin(), apiKey({ references: "organization" })],
+  });
+}
+
+function sessionCredentials(auth: AuthLike) {
+  return {
+    valid: async (instance: AuthLike) =>
+      new Headers({ cookie: (await kitIdentity(instance)).cookie }),
+    invalid: () =>
+      new Headers({ cookie: "better-auth.session_token=invalid.value" }),
+    auth,
+  };
+}
+
+async function jwtBearer(auth: AuthLike, subject = "conformance-jwt") {
+  const { token } = await (
+    auth.api as unknown as {
+      signJWT(input: {
+        body: { payload: Record<string, unknown> };
+        headers: Headers;
+      }): Promise<{ token: string }>;
+    }
+  ).signJWT({
+    body: { payload: { sub: subject } },
+    headers: new Headers(KIT_HOST),
+  });
+  return new Headers({ authorization: `Bearer ${token}` });
+}
+
 describe("principal source kit on the built-in session source", () => {
-  const auth = createConformanceAuth();
+  const { auth, ...credentials } = sessionCredentials(createConformanceAuth());
   runConformance(
     principalSourceConformance({
       source: sessionPrincipal(),
       auth,
-      credentials: {
-        valid: async () =>
-          new Headers({ cookie: (await kitIdentity(auth)).cookie }),
-        invalid: () =>
-          new Headers({ cookie: "better-auth.session_token=invalid.value" }),
-      },
+      credentials,
     }),
     { describe, it },
   );
@@ -656,7 +739,7 @@ describe("principal source kit on the built-in API-key source", async () => {
       source: defineExtension({ use: { useFactory: () => apiKeyPrincipal() } }),
       auth: keys.auth,
       credentials: {
-        valid: async () => new Headers({ "x-api-key": await keys.key() }),
+        valid: sessionKey,
         invalid: () => new Headers({ "x-api-key": "conformance-unknown" }),
         rateLimited: async () =>
           new Headers({
@@ -666,6 +749,315 @@ describe("principal source kit on the built-in API-key source", async () => {
     }),
     { describe, it },
   );
+});
+
+describe("principal source kit on organization-owned API keys", () => {
+  runConformance(
+    principalSourceConformance({
+      source: defineExtension({
+        use: {
+          useFactory: () => apiKeyPrincipal({ references: "organization" }),
+        },
+      }),
+      auth: organizationKeyAuth(),
+      credentials: {
+        valid: async (auth) => (await organizationKey(auth)).headers,
+        invalid: () => new Headers({ "x-api-key": "conformance-unknown" }),
+        apiKey: organizationKey,
+        organizationKey: async (auth) => (await organizationKey(auth)).headers,
+      },
+    }),
+    { describe, it },
+  );
+});
+
+describe("principal source kit on the JWT extension fixture (design v7 §4.3.4)", () => {
+  runConformance(
+    principalSourceConformance({
+      // One source per case: the source caches the key set per instance (S-jwt-claims outage row).
+      source: defineExtension({ use: { useFactory: () => jwtPrincipal() } }),
+      auth: createConformanceAuth({ plugins: [jwt()] }),
+      credentials: {
+        valid: (auth) => jwtBearer(auth),
+        invalid: () => new Headers({ authorization: "Bearer a.b.c" }),
+      },
+    }),
+    { describe, it },
+  );
+});
+
+describe("principal source kit on the JWT extension fixture with explicit claims", () => {
+  // Explicit issuer and audience let the source verify tokens under a dynamic baseURL (S-dynamic-base-url).
+  const claims = {
+    issuer: "https://issuer.conformance.example",
+    audience: "https://audience.conformance.example",
+  };
+  runConformance(
+    principalSourceConformance({
+      source: defineExtension({
+        use: { useFactory: () => jwtPrincipal(claims) },
+      }),
+      auth: createConformanceAuth({ plugins: [jwt({ jwt: claims })] }),
+      credentials: {
+        valid: (auth) => jwtBearer(auth),
+        invalid: () => new Headers({ authorization: "Bearer a.b.c" }),
+      },
+    }),
+    { describe, it },
+  );
+});
+
+function caseByTitle(
+  cases: readonly ConformanceCase[],
+  id: string,
+  title: string,
+): ConformanceCase {
+  const found = cases.find(
+    (item) => item.id === id && item.title.includes(title),
+  );
+  if (!found) {
+    throw new Error(`no case ${id} titled ${title}`);
+  }
+  return found;
+}
+
+/** The kit on an API-key instance for a (faulty) source. */
+async function apiKeyCases(source: PrincipalSource) {
+  const keys = await apiKeyAuth();
+  return principalSourceConformance({
+    source,
+    auth: keys.auth,
+    credentials: {
+      valid: sessionKey,
+      invalid: () => new Headers({ "x-api-key": "conformance-unknown" }),
+    },
+  });
+}
+
+/** A source that behaves like `real` with a replaced resolve(). */
+function faulty(
+  real: PrincipalSource<never> | PrincipalSource,
+  resolve: PrincipalSource["resolve"],
+): PrincipalSource {
+  return { ...(real as unknown as PrincipalSource), resolve };
+}
+
+describe("principal source kit mutations for the unit-specific rows", () => {
+  it("fails S-apikey-results for a source that reports every failure as an invalid key", async () => {
+    const real = apiKeyPrincipal();
+    const cases = await apiKeyCases(
+      faulty(real, async (request) => {
+        const result = await real.resolve(request);
+        return result.outcome === "rejected"
+          ? rejected(
+              AuthFailures.rejected({ status: 401, reason: "INVALID_API_KEY" }),
+            )
+          : (result as never);
+      }),
+    );
+    await expect(caseById(cases, "S-apikey-results").run()).rejects.toThrow(
+      /a rate-limited key/,
+    );
+  });
+
+  it("fails S-apikey-results for a source that verifies a key once per call instead of once per request", async () => {
+    const real = apiKeyPrincipal();
+    const cases = await apiKeyCases(
+      faulty(real, (request) =>
+        real.resolve({ ...request, memo: (_key, compute) => compute() }),
+      ),
+    );
+    await expect(caseById(cases, "S-apikey-results").run()).rejects.toThrow(
+      /one request verified its key 3 times/,
+    );
+  });
+
+  it("fails S-apikey-outage for sources without the outage probe or the latency signal", async () => {
+    const withoutProbe = await apiKeyCases(
+      apiKeyPrincipal({ outageProbe: false }),
+    );
+    await expect(
+      caseByTitle(withoutProbe, "S-apikey-outage", "key reads failing").run(),
+    ).rejects.toThrow(/during a read outage resolved/);
+    const withoutLatency = await apiKeyCases(
+      apiKeyPrincipal({ outageProbe: { slowMs: false } }),
+    );
+    await expect(
+      caseByTitle(withoutLatency, "S-apikey-outage", "stalled").run(),
+    ).rejects.toThrow(/stalled and failed resolved/);
+  });
+
+  it("fails S-apikey-outage for a source that probes storage on every invalid key", async () => {
+    const real = apiKeyPrincipal();
+    const cases = await apiKeyCases(
+      faulty(real, async (request) => {
+        const result = await real.resolve(request);
+        if (result.outcome === "rejected") {
+          const context = await request.auth.context();
+          await context.adapter.updateMany({
+            model: "apikey",
+            where: [{ field: "key", value: crypto.randomUUID() }],
+            update: { updatedAt: new Date() },
+          });
+        }
+        return result as never;
+      }),
+    );
+    await expect(
+      caseByTitle(cases, "S-apikey-outage", "flood").run(),
+    ).rejects.toThrow(/a flood of 12 invalid keys wrote 1[3-9] times/);
+  });
+
+  it("fails S-apikey-write-outage without the write probe and for a probe that touches key rows", async () => {
+    const withoutProbe = await apiKeyCases(
+      apiKeyPrincipal({ outageProbe: false }),
+    );
+    await expect(
+      caseByTitle(withoutProbe, "S-apikey-write-outage", "every write").run(),
+    ).rejects.toThrow(/during a write outage resolved/);
+    const real = apiKeyPrincipal();
+    const touching = await apiKeyCases(
+      faulty(real, async (request) => {
+        const result = await real.resolve(request);
+        const context = await request.auth.context();
+        await context.adapter.updateMany({
+          model: "apikey",
+          where: [{ field: "enabled", value: true }],
+          update: { updatedAt: new Date(Date.now() + 60_000) },
+        });
+        return result as never;
+      }),
+    );
+    await expect(
+      caseByTitle(touching, "S-apikey-write-outage", "no key row").run(),
+    ).rejects.toThrow(/an invalid key changed a stored key/);
+  });
+
+  it("fails S-apikey-org-key for a source that maps organization keys to users", async () => {
+    const cases = principalSourceConformance({
+      source: apiKeyPrincipal(),
+      auth: organizationKeyAuth(),
+      credentials: {
+        valid: async (auth) => (await organizationKey(auth)).headers,
+        invalid: () => new Headers({ "x-api-key": "conformance-unknown" }),
+        apiKey: organizationKey,
+        organizationKey: async (auth) => (await organizationKey(auth)).headers,
+      },
+    });
+    await expect(caseById(cases, "S-apikey-org-key").run()).rejects.toThrow(
+      /an organization-owned key produced a user principal/,
+    );
+  });
+
+  it("fails S-short-circuit-session for a session source that trusts hook answers on authoritative routes", async () => {
+    const { auth, ...credentials } = sessionCredentials(
+      createConformanceAuth(),
+    );
+    const real = sessionPrincipal();
+    const cases = principalSourceConformance({
+      source: faulty(real as never, (request) =>
+        real.resolve({
+          ...request,
+          auth: { ...request.auth, producedByEndpoint: () => true },
+        }),
+      ),
+      auth,
+      credentials,
+    });
+    await expect(
+      caseById(cases, "S-short-circuit-session").run(),
+    ).rejects.toThrow(/accepted a session no endpoint produced/);
+  });
+
+  it("fails S-log-redaction for a source that wraps storage errors without the request's credentials", async () => {
+    const { auth, ...credentials } = sessionCredentials(
+      createConformanceAuth(),
+    );
+    const real = sessionPrincipal();
+    const cases = principalSourceConformance({
+      source: faulty(real as never, async (request) => {
+        try {
+          return await real.resolve(request);
+        } catch (error) {
+          throw new BetterAuthInfrastructureError(error);
+        }
+      }),
+      auth,
+      credentials,
+    });
+    await expect(caseById(cases, "S-log-redaction").run()).rejects.toThrow(
+      /a credential reached the logs/,
+    );
+  });
+
+  it("fails S-jwt-claims for a JWT source that expects the basePath URL or denies a key-set outage", async () => {
+    const auth = createConformanceAuth({ plugins: [jwt()] });
+    const credentials = {
+      valid: (instance: AuthLike) => jwtBearer(instance),
+      invalid: () => new Headers({ authorization: "Bearer a.b.c" }),
+    };
+    const basePath = principalSourceConformance({
+      source: jwtPrincipal({
+        issuer: "http://localhost:3000/api/auth",
+        audience: "http://localhost:3000/api/auth",
+      }),
+      auth,
+      credentials,
+    });
+    await expect(
+      caseByTitle(basePath, "S-jwt-claims", "signJWT minted").run(),
+    ).rejects.toThrow(/did not verify/);
+    const real = jwtPrincipal();
+    const denying = principalSourceConformance({
+      source: faulty(real as never, async (request) => {
+        try {
+          return await real.resolve(request);
+        } catch {
+          return rejected(
+            AuthFailures.rejected({ status: 401, reason: "INVALID_JWT" }),
+          );
+        }
+      }),
+      auth,
+      credentials,
+    });
+    await expect(
+      caseByTitle(denying, "S-jwt-claims", "key-set read").run(),
+    ).rejects.toThrow(/a key-set outage resolved/);
+  });
+
+  it("fails S-dynamic-base-url for sources that drop the host or forwarded headers", async () => {
+    const real = apiKeyPrincipal();
+    const keep = (headers: Headers, names: readonly string[]) =>
+      new Headers(
+        names.flatMap((name) => {
+          const value = headers.get(name);
+          return value === null ? [] : [[name, value] as [string, string]];
+        }),
+      );
+    const hostless = await apiKeyCases(
+      faulty(real, (request) =>
+        real.resolve({
+          ...request,
+          headers: keep(request.headers, ["x-api-key"]),
+        }),
+      ),
+    );
+    await expect(
+      caseByTitle(hostless, "S-dynamic-base-url", "without fallback").run(),
+    ).rejects.toThrow(/threw with a dynamic baseURL/);
+    const unforwarded = await apiKeyCases(
+      faulty(real, (request) =>
+        real.resolve({
+          ...request,
+          headers: keep(request.headers, ["x-api-key", "host"]),
+        }),
+      ),
+    );
+    await expect(
+      caseByTitle(unforwarded, "S-dynamic-base-url", "trusted proxy").run(),
+    ).rejects.toThrow(/a forwarded request threw/);
+  });
 });
 
 describe("principal source kit mutations", () => {
@@ -831,6 +1223,35 @@ describe("principal source kit mutations", () => {
     await expect(caseById(cases, "S-cookie-forwarded").run()).rejects.toThrow(
       expect.objectContaining({ code: "CONFORMANCE_SESSION_REFRESH" }),
     );
+  });
+
+  it("fails S-dynamic-base-url, instead of skipping it, for a variant() without session.updateAge 0", async () => {
+    const { auth, ...credentials } = sessionCredentials(
+      createConformanceAuth(),
+    );
+    const cases = principalSourceConformance({
+      source: sessionPrincipal(),
+      auth,
+      credentials,
+      variant: (overrides) => {
+        const variant = createConformanceAuth(overrides);
+        void (
+          variant.$context as Promise<{
+            options: { session: { updateAge?: number } };
+          }>
+        ).then((context) => {
+          context.options.session.updateAge = 86_400;
+        });
+        return variant;
+      },
+    });
+    for (const item of cases.filter(
+      (value) => value.id === "S-dynamic-base-url",
+    )) {
+      await expect(item.run()).rejects.toThrow(
+        expect.objectContaining({ code: "CONFORMANCE_SESSION_REFRESH" }),
+      );
+    }
   });
 });
 
