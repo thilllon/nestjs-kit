@@ -16,7 +16,6 @@ import {
   conformanceCase,
   conformanceSkip,
   type ConformanceOutcome,
-  createConformanceAuth,
   KIT_BASE_URL,
   settle,
 } from "./conformance-fixtures.js";
@@ -32,11 +31,13 @@ import {
   kitKeySource,
   kitUser,
   type PolicyConformanceOptions,
+  type PolicyDelivery,
   type RequestOutcome,
   requirementsOf,
   sdkContext,
   sessionHeaders,
   sessionPrincipalOf,
+  variantOf,
   withHarness,
   withRequests,
 } from "./conformance-policy-harness.js";
@@ -214,7 +215,7 @@ function assertDenied(
 /**
  * The unit-specific rows of design §14.1 and the core class-policy row. Each unit's cases run when the requirement
  * contains that built-in policy, and skip with the reason otherwise; instances the case needs in another configuration
- * (customSession shapes, adminUserIds, a dynamic baseURL) are built by the kit with createConformanceAuth().
+ * (customSession shapes, adminUserIds, a dynamic baseURL) are built by options.variant(), createConformanceAuth() by default.
  */
 export function unitPolicyCases(
   options: PolicyConformanceOptions,
@@ -242,6 +243,327 @@ export function unitPolicyCases(
     run: () => Promise<ConformanceOutcome>,
     skip = noAdmin,
   ) => conformanceCase(id, title, run, skip);
+
+  /** Z-admin-rejects-api-key-session through the in-process guard, or through `delivery`'s transport. */
+  const rejectsApiKeySession = async (
+    delivery?: PolicyDelivery,
+  ): Promise<ConformanceOutcome> => {
+    if (!(await hasPlugin(auth, "api-key"))) {
+      return conformanceSkip("the instance has no apiKey() plugin");
+    }
+    const adminId = await kitUser(auth, { role: "admin" });
+    const otherId = await kitUser(auth, { role: "user" });
+    const key = await createKey(auth, adminId, {
+      permissions: { project: ["read"] },
+    });
+    if (!(await keySessions(auth, key.key))) {
+      return conformanceSkip(
+        "the instance's apiKey() plugin does not set enableSessionForAPIKeys (or reads no x-api-key header)",
+      );
+    }
+    const keyHeaders = new Headers({ [SDK_KEY_HEADER]: key.key });
+    assert.equal(
+      await sdkStatus(() =>
+        api(auth).listUsers({ headers: keyHeaders, query: {} }),
+      ),
+      401,
+      "Better Auth's listUsers accepted an API-key session",
+    );
+    assert.equal(
+      await sdkStatus(() =>
+        api(auth).banUser({
+          headers: keyHeaders,
+          body: { userId: otherId },
+        }),
+      ),
+      401,
+      "Better Auth's banUser accepted an API-key session",
+    );
+    const cookie = (await sessionHeaders(auth, adminId))!.get("cookie")!;
+    return withRequests(
+      auth,
+      {
+        routes: {
+          ban: [Require(adminRequirement(admin_, { user: ["ban"] }))],
+          authoritative: [RequireAuth({ authoritative: true })],
+          ordinary: [RequireAuth()],
+        },
+      },
+      async ({ request }) => {
+        assertDenied(
+          await request("ban", keyHeaders),
+          401,
+          undefined,
+          "x-api-key alone on @RequirePermission({ user: ['ban'] })",
+        );
+        assertDenied(
+          await request("authoritative", keyHeaders),
+          401,
+          undefined,
+          "x-api-key alone on @RequireAuth({ authoritative: true })",
+        );
+        const ordinary = await request("ordinary", keyHeaders);
+        assert.equal(
+          ordinary.ok,
+          true,
+          `a default-freshness route rejected the key session: ${describeOutcome(ordinary)}`,
+        );
+        assertDenied(
+          await request("authoritative", {
+            cookie,
+            [SDK_KEY_HEADER]: key.key,
+          }),
+          401,
+          undefined,
+          "the admin's cookie with the key on an authoritative route (RK27)",
+        );
+      },
+      delivery,
+    );
+  };
+
+  /**
+   * Z-org-ref-types' input rows through the in-process guard, or through `delivery`'s transport: junk `orgId` values are
+   * denied ORGANIZATION_REQUIRED without a Better Auth call and without an error log, the owner's ID is allowed.
+   */
+  const orgRefInputs = async (
+    leaf: Requirement,
+    delivery?: PolicyDelivery,
+  ): Promise<{ headers: Headers; organizationId: string }> => {
+    const ownerId = await kitUser(auth);
+    const headers = (await sessionHeaders(auth, ownerId))!;
+    const organizationId = await createOrganizationFor(auth, headers);
+    await withRequests(
+      auth,
+      {
+        routes: {
+          org: [Require(withOrganization(leaf, fromParam("orgId")))],
+        },
+      },
+      async ({ request, probe, logger }) => {
+        for (const value of [{ $ne: null }, 123, ["a"], ""]) {
+          const from = probe.calls.length;
+          assertDenied(
+            await request("org", headers, { orgId: value }),
+            403,
+            "ORGANIZATION_REQUIRED",
+            `orgId ${JSON.stringify(value)}`,
+          );
+          assert.deepEqual(
+            betterAuthCalls(probe, from),
+            [],
+            `orgId ${JSON.stringify(value)} reached Better Auth`,
+          );
+        }
+        const valid = await request("org", headers, {
+          orgId: organizationId,
+        });
+        assert.equal(
+          valid.ok,
+          true,
+          `the owner's organization ID was denied: ${describeOutcome(valid)}`,
+        );
+        assert.deepEqual(
+          logger.errors().map((entry) => entry.text),
+          [],
+          "a rejected organization input was logged as an error",
+        );
+      },
+      delivery,
+    );
+    return { headers, organizationId };
+  };
+
+  const quotaRoutes = () => {
+    const permission = orgPermission(
+      { organization: ["update"] },
+      { organization: fromParam("orgId") },
+    );
+    const member = orgMember({ organization: fromParam("orgId") });
+    return {
+      routes: { quota: [Require(permission, member)] },
+      permission,
+      member,
+    };
+  };
+
+  /**
+   * Z-apikey-quota-per-request's first setup through the in-process guard, or through `delivery`'s transport: an API-key
+   * session on two org policies spends the key's quota 3 times per request. Returns the skip when the instance cannot.
+   */
+  const quotaSpend = async (
+    delivery?: PolicyDelivery,
+  ): Promise<ConformanceOutcome> => {
+    if (!(await hasPlugin(auth, "api-key"))) {
+      return conformanceSkip("the instance has no apiKey() plugin");
+    }
+    const ownerId = await kitUser(auth);
+    const headers = (await sessionHeaders(auth, ownerId))!;
+    const organizationId = await createOrganizationFor(auth, headers);
+    const key = await createKey(auth, ownerId, { remaining: 100 });
+    if (!(await keySessions(auth, key.key))) {
+      return conformanceSkip(
+        "the instance's apiKey() plugin does not set enableSessionForAPIKeys (or reads no x-api-key header)",
+      );
+    }
+    return withRequests(
+      auth,
+      { routes: quotaRoutes().routes },
+      async ({ request }) => {
+        const before = await remainingOf(auth, key.id);
+        const outcome = await request(
+          "quota",
+          { [SDK_KEY_HEADER]: key.key },
+          { orgId: organizationId },
+        );
+        assert.equal(
+          outcome.ok,
+          true,
+          `the key owner's organization route was denied: ${describeOutcome(outcome)}`,
+        );
+        assert.equal(
+          before - (await remainingOf(auth, key.id)),
+          3,
+          "one request with two credential-presenting org policies must spend 3",
+        );
+      },
+      delivery,
+    );
+  };
+
+  /**
+   * Z-admin-banned on one connection of `delivery`, whose connections reuse their principal for its declared TTL: the
+   * connection keeps a signed-out user's principal for a default-freshness handler, while the authoritative admin handler
+   * denies a banned or signed-out admin with a warm cookie cache on the connection's next message.
+   */
+  const bannedOnConnection = async (
+    delivery: PolicyDelivery,
+  ): Promise<ConformanceOutcome> => {
+    if (!(await cookieCacheEnabled(auth))) {
+      return conformanceSkip(
+        "the instance's session.cookieCache is off; run the kit on an instance with session.cookieCache.enabled",
+      );
+    }
+    const sdk = await sdkContext(auth);
+    const banning = (await sessionHeaders(
+      auth,
+      await kitUser(auth, { role: "admin" }),
+    ))!;
+    const ttl = delivery.connectionPrincipalTtlMs;
+    return withRequests(
+      auth,
+      {
+        routes: {
+          list: [Require(adminRequirement(admin_, { user: ["list"] }))],
+          ordinary: [RequireAuth()],
+        },
+      },
+      async ({ connect }) => {
+        // The case runs only for deliveries with connect().
+        const open = connect!;
+        const reusing = await kitUser(auth, { role: "admin" });
+        const connection = await open((await sessionHeaders(auth, reusing))!);
+        try {
+          const first = await connection.request("ordinary");
+          assert.equal(
+            first.ok,
+            true,
+            `the connection's first message was denied: ${describeOutcome(first)}`,
+          );
+          await sdk.internalAdapter.deleteUserSessions(reusing);
+          const reused = await connection.request("ordinary");
+          assert.equal(
+            reused.ok,
+            true,
+            `the connection did not reuse its principal within its declared ${ttl} ms TTL: ${describeOutcome(reused)}`,
+          );
+          assertDenied(
+            await connection.request("list"),
+            401,
+            undefined,
+            "an authoritative handler reused the connection's principal after sign-out",
+          );
+        } finally {
+          await connection.close();
+        }
+        for (const variant of ["banned", "signed out everywhere"]) {
+          const userId = await kitUser(auth, { role: "admin" });
+          const headers = (await sessionHeaders(auth, userId, {
+            warmCache: true,
+          }))!;
+          const socket = await open(headers);
+          try {
+            for (const route of ["list", "ordinary"]) {
+              const before = await socket.request(route);
+              assert.equal(
+                before.ok,
+                true,
+                `${variant}: ${route} denied the admin before: ${describeOutcome(before)}`,
+              );
+            }
+            if (variant === "banned") {
+              await api(auth).banUser({ headers: banning, body: { userId } });
+            } else {
+              await sdk.internalAdapter.deleteUserSessions(userId);
+            }
+            assertDenied(
+              await socket.request("list"),
+              401,
+              undefined,
+              `${variant}: the connection's next message still admitted the admin`,
+            );
+          } finally {
+            await socket.close();
+          }
+        }
+      },
+      delivery,
+    );
+  };
+
+  /** The delivery variants of the transport-specific rows, titled with the delivery's name. */
+  const deliveryCases = (delivery: PolicyDelivery): ConformanceCase[] => {
+    const title = (text: string) => `${delivery.name}: ${text}`;
+    return [
+      adminCase(
+        "Z-admin-rejects-api-key-session",
+        title(
+          "an admin's API-key session is rejected on admin and authoritative handlers and accepted on default-freshness handlers",
+        ),
+        () => rejectsApiKeySession(delivery),
+      ),
+      adminCase(
+        "Z-admin-banned",
+        title(
+          "a banned or signed-out admin with a warm cookie cache is denied on the connection's next message despite its principal TTL",
+        ),
+        () => bannedOnConnection(delivery),
+        noAdmin ??
+          (!delivery.connect
+            ? "the delivery opens no connections (connect())"
+            : !(delivery.connectionPrincipalTtlMs! > 0)
+              ? "the delivery's connections reuse no principal (connectionPrincipalTtlMs); the row applies to a principal TTL"
+              : undefined),
+      ),
+      conformanceCase(
+        "Z-org-ref-types",
+        title(
+          "fromParam rejects non-string organization inputs without a Better Auth call",
+        ),
+        async () => {
+          await orgRefInputs(orgLeaf!, delivery);
+        },
+        noOrg,
+      ),
+      conformanceCase(
+        "Z-apikey-quota-per-request",
+        title("an API-key session on org policies spends 3 per request"),
+        () => quotaSpend(delivery),
+        noOrg,
+      ),
+    ];
+  };
+
   return [
     adminCase(
       "Z-admin-rejects-api-key",
@@ -311,79 +633,7 @@ export function unitPolicyCases(
     adminCase(
       "Z-admin-rejects-api-key-session",
       "an admin's API-key session is rejected on admin and authoritative routes and accepted on default-freshness routes",
-      async () => {
-        if (!(await hasPlugin(auth, "api-key"))) {
-          return conformanceSkip("the instance has no apiKey() plugin");
-        }
-        const adminId = await kitUser(auth, { role: "admin" });
-        const otherId = await kitUser(auth, { role: "user" });
-        const key = await createKey(auth, adminId, {
-          permissions: { project: ["read"] },
-        });
-        if (!(await keySessions(auth, key.key))) {
-          return conformanceSkip(
-            "the instance's apiKey() plugin does not set enableSessionForAPIKeys (or reads no x-api-key header)",
-          );
-        }
-        const keyHeaders = new Headers({ [SDK_KEY_HEADER]: key.key });
-        assert.equal(
-          await sdkStatus(() =>
-            api(auth).listUsers({ headers: keyHeaders, query: {} }),
-          ),
-          401,
-          "Better Auth's listUsers accepted an API-key session",
-        );
-        assert.equal(
-          await sdkStatus(() =>
-            api(auth).banUser({
-              headers: keyHeaders,
-              body: { userId: otherId },
-            }),
-          ),
-          401,
-          "Better Auth's banUser accepted an API-key session",
-        );
-        const cookie = (await sessionHeaders(auth, adminId))!.get("cookie")!;
-        return withRequests(
-          auth,
-          {
-            routes: {
-              ban: [Require(adminRequirement(admin_, { user: ["ban"] }))],
-              authoritative: [RequireAuth({ authoritative: true })],
-              ordinary: [RequireAuth()],
-            },
-          },
-          async ({ request }) => {
-            assertDenied(
-              await request("ban", keyHeaders),
-              401,
-              undefined,
-              "x-api-key alone on @RequirePermission({ user: ['ban'] })",
-            );
-            assertDenied(
-              await request("authoritative", keyHeaders),
-              401,
-              undefined,
-              "x-api-key alone on @RequireAuth({ authoritative: true })",
-            );
-            const ordinary = await request("ordinary", keyHeaders);
-            assert.equal(
-              ordinary.ok,
-              true,
-              `a default-freshness route rejected the key session: ${describeOutcome(ordinary)}`,
-            );
-            assertDenied(
-              await request("authoritative", {
-                cookie,
-                [SDK_KEY_HEADER]: key.key,
-              }),
-              401,
-              undefined,
-              "the admin's cookie with the key on an authoritative route (RK27)",
-            );
-          },
-        );
-      },
+      () => rejectsApiKeySession(),
     ),
     adminCase(
       "Z-admin-banned",
@@ -493,7 +743,7 @@ export function unitPolicyCases(
           ],
         ];
         for (const [shape, roleOf] of shapes) {
-          const kitAuth = createConformanceAuth({
+          const kitAuth = await variantOf(options, {
             plugins: [
               admin(),
               customSession(async ({ user, session }) => ({
@@ -594,7 +844,7 @@ export function unitPolicyCases(
       "a NULL or empty stored role answers 403 MISSING_PERMISSION as listUsers does, adminUserIds allows, never a 500",
       async () => {
         const listedId = `conformance-listed-${globalThis.crypto.randomUUID()}`;
-        const kitAuth = createConformanceAuth({
+        const kitAuth = await variantOf(options, {
           plugins: [admin({ adminUserIds: [listedId] })],
         });
         const nullId = await kitUser(kitAuth, { role: "user" });
@@ -679,9 +929,9 @@ export function unitPolicyCases(
       async () => {
         const allowedHosts = [new URL(KIT_BASE_URL).host];
         const requirement = adminRequirement(admin_, { user: ["list"] });
-        const without = await settle(() =>
+        const without = await settle(async () =>
           boot(
-            createConformanceAuth({
+            await variantOf(options, {
               baseURL: { allowedHosts },
               plugins: [admin()],
             }),
@@ -698,7 +948,7 @@ export function unitPolicyCases(
           ),
           String(without.error),
         );
-        const kitAuth = createConformanceAuth({
+        const kitAuth = await variantOf(options, {
           baseURL: { allowedHosts, fallback: KIT_BASE_URL },
           plugins: [admin()],
         });
@@ -732,42 +982,7 @@ export function unitPolicyCases(
       "fromParam rejects non-string organization inputs without a call; a literal 'active' is an ID; customSession shapes use getActiveMember",
       async () => {
         const leaf = orgLeaf!;
-        const ownerId = await kitUser(auth);
-        const headers = (await sessionHeaders(auth, ownerId))!;
-        const organizationId = await createOrganizationFor(auth, headers);
-        await withRequests(
-          auth,
-          {
-            routes: {
-              org: [Require(withOrganization(leaf, fromParam("orgId")))],
-            },
-          },
-          async ({ request, probe, logger }) => {
-            for (const value of [{ $ne: null }, 123, ["a"], ""]) {
-              const from = probe.calls.length;
-              assertDenied(
-                await request("org", headers, { orgId: value }),
-                403,
-                "ORGANIZATION_REQUIRED",
-                `orgId ${JSON.stringify(value)}`,
-              );
-              assert.deepEqual(
-                betterAuthCalls(probe, from),
-                [],
-                `orgId ${JSON.stringify(value)} reached Better Auth`,
-              );
-            }
-            const valid = await request("org", headers, {
-              orgId: organizationId,
-            });
-            assert.equal(
-              valid.ok,
-              true,
-              `the owner's organization ID was denied: ${describeOutcome(valid)}`,
-            );
-            assert.deepEqual(logger.errors(), []);
-          },
-        );
+        const { headers, organizationId } = await orgRefInputs(leaf);
         await api(auth).setActiveOrganization({
           headers,
           body: { organizationId },
@@ -801,7 +1016,7 @@ export function unitPolicyCases(
             );
           },
         );
-        const shaped = createConformanceAuth({
+        const shaped = await variantOf(options, {
           plugins: [
             organization(),
             customSession(async ({ user, session }) => ({
@@ -868,42 +1083,11 @@ export function unitPolicyCases(
       "Z-apikey-quota-per-request",
       "an API-key session on org policies spends 3 per request, with W_API_KEY_SESSION_MULTIPLIER naming them",
       async () => {
-        if (!(await hasPlugin(auth, "api-key"))) {
-          return conformanceSkip("the instance has no apiKey() plugin");
+        const spent = await quotaSpend();
+        if (spent) {
+          return spent;
         }
-        const ownerId = await kitUser(auth);
-        const headers = (await sessionHeaders(auth, ownerId))!;
-        const organizationId = await createOrganizationFor(auth, headers);
-        const key = await createKey(auth, ownerId, { remaining: 100 });
-        if (!(await keySessions(auth, key.key))) {
-          return conformanceSkip(
-            "the instance's apiKey() plugin does not set enableSessionForAPIKeys (or reads no x-api-key header)",
-          );
-        }
-        const permission = orgPermission(
-          { organization: ["update"] },
-          { organization: fromParam("orgId") },
-        );
-        const member = orgMember({ organization: fromParam("orgId") });
-        const routes = { quota: [Require(permission, member)] };
-        await withRequests(auth, { routes }, async ({ request }) => {
-          const before = await remainingOf(auth, key.id);
-          const outcome = await request(
-            "quota",
-            { [SDK_KEY_HEADER]: key.key },
-            { orgId: organizationId },
-          );
-          assert.equal(
-            outcome.ok,
-            true,
-            `the key owner's organization route was denied: ${describeOutcome(outcome)}`,
-          );
-          assert.equal(
-            before - (await remainingOf(auth, key.id)),
-            3,
-            "one request with two credential-presenting org policies must spend 3",
-          );
-        });
+        const { routes, permission, member } = quotaRoutes();
         const advice = async (
           target: AuthLike,
           session?: { apiKeySessions: boolean },
@@ -955,7 +1139,9 @@ export function unitPolicyCases(
           ],
           [
             "without the api-key plugin",
-            await advice(createConformanceAuth({ plugins: [organization()] })),
+            await advice(
+              await variantOf(options, { plugins: [organization()] }),
+            ),
           ],
         ] as const) {
           assert.deepEqual(
@@ -1137,5 +1323,6 @@ export function unitPolicyCases(
         );
       },
     ),
+    ...(options.deliveries ?? []).flatMap(deliveryCases),
   ];
 }
