@@ -1,6 +1,6 @@
 # Contributing
 
-Choose the package you want to improve from the [package directory](README.md#pick-an-integration). For bugs, include the package version, Node.js version, and a minimal reproduction. For changes to public behavior, explain the expected behavior before opening a large pull request.
+Choose the package you want to improve from the [package directory](README.md#packages). For bugs, include the package version, Node.js version, and a minimal reproduction. For changes to public behavior, explain the expected behavior before opening a large pull request.
 
 ## Setup
 
@@ -71,9 +71,9 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 ## Repository layout
 
-- `packages/nestjskit__*`: packages published under `@nestjs-kit/*`.
 - `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
 - `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
+- `packages/nestjskit__*`: packages published under `@nestjs-kit/*`.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
