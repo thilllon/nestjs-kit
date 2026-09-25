@@ -1,6 +1,10 @@
 import "reflect-metadata";
 import { ExecutionContextHost } from "@nestjs/core/helpers/execution-context-host.js";
-import { UseGuards, UseInterceptors } from "@nestjs/common";
+import {
+  type ExecutionContext,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 import { BetterAuthModule } from "./auth-module.js";
@@ -15,7 +19,10 @@ import {
   BetterAuthConfigurationError,
   createInfrastructureError,
 } from "./auth-errors.js";
-import { connectionErrorLog } from "./ws-connection-auth.js";
+import {
+  ConnectionExecutionContext,
+  connectionErrorLog,
+} from "./ws-connection-auth.js";
 import {
   socketIoTransport,
   wsTransport,
@@ -370,5 +377,40 @@ describe("connection middleware error log", () => {
       "Authentication service unavailable (Error: connect failed for [REDACTED])",
     );
     expect(`${log.message}\n${log.stack ?? ""}`).not.toContain(secret);
+  });
+});
+describe("connection execution context", () => {
+  // Nest's host assigns each switched host onto itself, so each host is read right after its switch.
+  function observe(context: ExecutionContext) {
+    const http = context.switchToHttp();
+    const httpValues = [http.getRequest(), http.getResponse(), http.getNext()];
+    const rpc = context.switchToRpc();
+    const rpcValues = [rpc.getData(), rpc.getContext()];
+    const ws = context.switchToWs();
+    const wsValues = [ws.getClient(), ws.getData(), ws.getPattern()];
+    return {
+      type: context.getType(),
+      class: context.getClass(),
+      handler: context.getHandler(),
+      args: context.getArgs(),
+      byIndex: [0, 1, 2, -1].map((index) => context.getArgByIndex(index)),
+      http: httpValues,
+      rpc: rpcValues,
+      ws: wsValues,
+    };
+  }
+
+  it("reports what Nest's host reports for a connection without a handler", () => {
+    for (const client of [
+      { handshake: { headers: {} } },
+      { [UPGRADE_REQUEST]: { headers: {} } },
+    ]) {
+      const nest = new ExecutionContextHost([client, undefined]);
+      nest.setType("ws");
+      const context = new ConnectionExecutionContext(client);
+      expect(observe(context)).toStrictEqual(observe(nest));
+      expect(context.getArgs()).toBe(context.getArgs());
+      expect(context.switchToWs().getClient()).toBe(client);
+    }
   });
 });

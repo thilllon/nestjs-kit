@@ -18,7 +18,6 @@ import {
   ModulesContainer,
   Reflector,
 } from "@nestjs/core";
-import { RoutePathFactory } from "@nestjs/core/router/route-path-factory.js";
 import type {
   AdvisedHandler,
   ApplicationRouteDescriptor,
@@ -61,10 +60,9 @@ import {
 } from "./instance-registry.js";
 import type { MountCoordinator } from "./mount-coordinator.js";
 import type { PolicyResolver } from "./policy-resolver.js";
+import { composeRoutePaths, type RouteVersion } from "./route-paths.js";
 import type { RoutePlanner } from "./route-planner.js";
 import type { TransportRegistry } from "./transport-registry.js";
-
-type NestRoutePathMetadata = Parameters<RoutePathFactory["create"]>[0];
 
 type MetadataTarget = Parameters<
   NonNullable<AuthTransport["defaultAccessFor"]>
@@ -880,8 +878,9 @@ export class BootValidator {
     if (canariesPassed) {
       this.coverage(sites, issues);
       const applicationRoutes: ApplicationRouteDescriptor[] = [];
-      const routePathFactory = new RoutePathFactory(this.appConfig);
       const globalPrefix = this.appConfig.getGlobalPrefix();
+      const globalPrefixExclusions =
+        this.appConfig.getGlobalPrefixOptions().exclude;
       const versioningOptions = this.appConfig.getVersioning();
       const modules = this.moduleRef.get(ModulesContainer, { strict: false });
       for (const wrapper of this.discovery.getControllers()) {
@@ -920,10 +919,9 @@ export class BootValidator {
           if (rawPaths === undefined || requestMethod === undefined) {
             continue;
           }
-          const methodVersion = Reflect.getMetadata(
-            "__version__",
-            handler,
-          ) as NestRoutePathMetadata["methodVersion"];
+          const methodVersion = Reflect.getMetadata("__version__", handler) as
+            | RouteVersion
+            | undefined;
           const effectiveVersion = methodVersion ?? controllerVersion;
           const conditions: ("host" | "version")[] = [];
           if (host !== undefined) {
@@ -941,21 +939,19 @@ export class BootValidator {
             for (const path of Array.isArray(rawPaths)
               ? rawPaths
               : [rawPaths]) {
-              const resolvedPaths = routePathFactory
-                .create(
-                  {
-                    ctrlPath: prefix,
-                    methodPath: path,
-                    modulePath,
-                    globalPrefix,
-                    controllerVersion:
-                      controllerVersion as NestRoutePathMetadata["controllerVersion"],
-                    methodVersion,
-                    versioningOptions,
-                  },
-                  requestMethod,
-                )
-                .map((route) => this.mounts.normalizeApplicationRoute(route));
+              const resolvedPaths = composeRoutePaths(
+                {
+                  ctrlPath: prefix,
+                  methodPath: path,
+                  modulePath,
+                  globalPrefix,
+                  controllerVersion: controllerVersion as RouteVersion,
+                  methodVersion,
+                  versioningOptions,
+                },
+                requestMethod,
+                globalPrefixExclusions,
+              ).map((route) => this.mounts.normalizeApplicationRoute(route));
               const source = `${target.name}.${method}`;
               applicationRoutes.push(
                 Object.freeze({

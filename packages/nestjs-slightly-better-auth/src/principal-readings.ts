@@ -1,4 +1,4 @@
-import { IntrinsicException } from "@nestjs/common/exceptions/intrinsic.exception.js";
+import { IntrinsicException } from "@nestjs/common";
 import type {
   InvocationLineage,
   PrincipalReading,
