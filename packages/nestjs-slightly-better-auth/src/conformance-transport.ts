@@ -660,10 +660,20 @@ function kitFixtures(
   };
 }
 
+/** How a described call exposes its browser leg: none, one per operation, or its connection's handshake. */
+type LegShape = "none" | "operation" | "connection";
+
 interface Instrumentation {
   readonly consumed: string[];
   readonly contexts: ExecutionContext[];
+  /** The leg shape of each call described while `recordLegs` is set. */
+  readonly legs: LegShape[];
   unavailable: boolean;
+  /**
+   * Read each described call's browser leg while its invocation runs. A transport may fail closed once the logical
+   * request has completed (GraphQL rejects a completed request), so the kit never reads a leg afterwards.
+   */
+  recordLegs: boolean;
 }
 
 /** Wraps the registry's describe() so request-dependent getters are counted and can be made unavailable. */
@@ -674,12 +684,24 @@ function instrument(app: INestApplication): Instrumentation {
   const state: Instrumentation = {
     consumed: [],
     contexts: [],
+    legs: [],
     unavailable: false,
+    recordLegs: false,
   };
   const original = registry.describe.bind(registry);
   registry.describe = (context, transport) => {
     const call = original(context, transport);
     state.contexts.push(context);
+    if (state.recordLegs) {
+      const browser = call.browser;
+      state.legs.push(
+        browser === undefined
+          ? "none"
+          : browser.key === call.key
+            ? "operation"
+            : "connection",
+      );
+    }
     const read = <T>(name: string, get: () => T): T => {
       state.consumed.push(name);
       if (state.unavailable) {
@@ -978,17 +1000,14 @@ async function connectionShaped(
     options,
     await environment(),
     async ({ app, instrumentation }) => {
+      instrumentation.recordLegs = true;
       succeeded(
         await options.invoke(app, "optional", {}),
         "an anonymous optional invocation",
       );
-      const [context] = instrumentation.contexts;
-      assert.ok(context, "the guard described no invocation");
-      const call = app
-        .get<TransportRegistry>(TRANSPORT_REGISTRY, { strict: false })
-        .describe(context, resolvedTransport(app, options.transport));
-      const browser = call.browser;
-      shaped = browser !== undefined && browser.key !== call.key;
+      const [leg] = instrumentation.legs;
+      assert.ok(leg, "the guard described no invocation");
+      shaped = leg === "connection";
     },
   );
   return shaped;
@@ -1177,15 +1196,15 @@ export function transportConformance(
         const registry = app.get<TransportRegistry>(TRANSPORT_REGISTRY, {
           strict: false,
         });
+        instrumentation.recordLegs = !options.expectBrowserLeg;
         succeeded(await options.invoke(app, "optional", {}));
-        if (!options.expectBrowserLeg) {
-          for (const context of [...instrumentation.contexts]) {
-            assert.equal(
-              registry.describe(context, transport).browser,
-              undefined,
-              "the transport describes a browser leg, so expectBrowserLeg must be true",
-            );
-          }
+        instrumentation.recordLegs = false;
+        for (const leg of instrumentation.legs) {
+          assert.equal(
+            leg,
+            "none",
+            "the transport describes a browser leg, so expectBrowserLeg must be true",
+          );
         }
         succeeded(await options.invoke(app, "optional", cookie(env)));
         assert.ok(
