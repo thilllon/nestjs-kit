@@ -832,7 +832,7 @@ describe("GraphQL socket classification at operation start", () => {
         cookie: "earlier=credential",
         authorization: "Bearer upgrade",
       },
-      url: "/graphql",
+      url: "/graphql?access_token=earlier",
     };
     const carrier = {
       req: {
@@ -873,6 +873,61 @@ describe("GraphQL socket classification at operation start", () => {
     }
     expect(mapped).toBe(0);
     expect(reads.count).toBe(0);
+  });
+
+  it("exposes only the upgrade path as the request URL of a connection whose socket is not open at the start", () => {
+    for (const [target, path] of [
+      ["/graphql?access_token=earlier", "/graphql"],
+      ["/graphql/ws?access_token=earlier&tenant=a", "/graphql/ws"],
+      ["/graphql?#access_token=earlier", "/graphql"],
+      ["/graphql#access_token=earlier", "/graphql"],
+      ["graphql?access_token=earlier", "/graphql"],
+    ] as const) {
+      const request = {
+        headers: { host: "localhost:3000" },
+        url: target,
+        socket: { encrypted: true },
+      };
+      const carrier = {
+        req: {
+          connectionParams: {},
+          extra: { socket: openSocket(3), request },
+        },
+      };
+      const call = (apolloTransport() as AuthTransport).describe(
+        execution(carrier).context,
+        { http: null },
+      );
+      expect(call.request).toEqual({
+        method: "GET",
+        url: `https://localhost:3000${path}`,
+      });
+    }
+  });
+
+  it("keeps the upgrade URL's query string for an open connection and for the origin check", () => {
+    const socket = openSocket();
+    const request = {
+      headers: { host: "localhost:3000" },
+      url: "/graphql?access_token=current",
+    };
+    const carrier = {
+      req: { connectionParams: {}, extra: { socket, request } },
+    };
+    const transport = apolloTransport() as AuthTransport;
+    const open = transport.describe(execution(carrier).context, { http: null });
+    expect(open.request?.url).toBe(
+      "http://localhost:3000/graphql?access_token=current",
+    );
+    socket.readyState = 3;
+    const closed = transport.describe(execution(carrier).context, {
+      http: null,
+    });
+    expect(closed.request?.url).toBe("http://localhost:3000/graphql");
+    // The browser leg reaches only the origin check, which reads the connection's handshake.
+    expect(closed.browser?.url).toBe(
+      "http://localhost:3000/graphql?access_token=current",
+    );
   });
 
   it("classifies every execution of a context at its own start", () => {

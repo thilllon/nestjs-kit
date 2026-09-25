@@ -26,7 +26,11 @@ import {
   Public,
   RequireAuth,
 } from "./auth-decorators.js";
-import type { AuthTransport } from "./auth-contracts.js";
+import type {
+  AuthPrincipalBase,
+  AuthTransport,
+  PrincipalSource,
+} from "./auth-contracts.js";
 import type { AuthPrincipal } from "./auth-types.js";
 import { expressPlatform } from "./express.js";
 import { fastifyPlatform } from "./fastify.js";
@@ -37,6 +41,43 @@ import {
   type GraphqlTransportOptions,
 } from "./graphql.js";
 import { nestjs } from "./plugin.js";
+
+interface QueryTokenPrincipal extends AuthPrincipalBase {
+  readonly kind: "query-token";
+  readonly userId: string;
+}
+declare module "./index.js" {
+  interface PrincipalKinds {
+    "query-token": QueryTokenPrincipal;
+  }
+}
+/** An application source that authenticates the request URL's access_token query parameter. */
+function queryTokenSource(
+  owners: ReadonlyMap<string, string>,
+  urls: string[],
+): PrincipalSource {
+  return {
+    id: "query-token",
+    kinds: ["query-token"],
+    acceptance: "default",
+    async resolve(request) {
+      if (!request.request) {
+        return { outcome: "absent" };
+      }
+      urls.push(request.request.url);
+      const token = new URL(request.request.url).searchParams.get(
+        "access_token",
+      );
+      const userId = token === null ? undefined : owners.get(token);
+      return userId === undefined
+        ? { outcome: "absent" }
+        : {
+            outcome: "authenticated",
+            principal: { kind: "query-token", source: "query-token", userId },
+          };
+    },
+  };
+}
 
 /** The session cookie a resolver's direct call carries; the test sets it per fixture. */
 let directCallCookie = "";
@@ -136,6 +177,35 @@ function acknowledged(
     });
   });
 }
+/**
+ * A GraphQL context function for `mode` that returns a fresh object for every operation, or the
+ * first operation's object for every later one (a cached context, a configuration error).
+ */
+function graphqlContext(mode: Mode, shape: "cached" | "fresh") {
+  const custom = mode === "apollo-custom" || mode === "apollo-fastify-custom";
+  let cached: object | undefined;
+  const build = (
+    context: {
+      req?: unknown;
+      extra?: { request?: unknown };
+      connectionParams?: unknown;
+    },
+    reply?: unknown,
+  ): object =>
+    mode.startsWith("mercurius")
+      ? { req: context, reply }
+      : custom
+        ? {
+            req: context.req ?? context.extra?.request,
+            extra: context.extra,
+            connectionParams: context.connectionParams,
+          }
+        : { ...context };
+  return shape === "cached"
+    ? (context: Parameters<typeof build>[0], reply?: unknown) =>
+        (cached ??= build(context, reply))
+    : build;
+}
 function execute(client: Client, query: string): Promise<Result> {
   return new Promise((resolve, reject) => {
     let result: Result | undefined;
@@ -185,6 +255,7 @@ async function fixture(
     },
     reply?: unknown,
   ) => object,
+  principals: readonly PrincipalSource[] = [],
 ) {
   const database: Record<string, Record<string, unknown>[]> = {
     user: [],
@@ -285,6 +356,7 @@ async function fixture(
         auth,
         logSummary: false,
         platforms: [fastify ? fastifyPlatform() : expressPlatform()],
+        principals,
         transports: [transport],
       }),
     ],
@@ -562,34 +634,7 @@ describe.each([
     "answers a later connection under a %s context with its own principal or anonymously",
     async (shape) => {
       const mercurius = mode.startsWith("mercurius");
-      const custom =
-        mode === "apollo-custom" || mode === "apollo-fastify-custom";
-      let cached: object | undefined;
-      const build = (
-        context: {
-          req?: unknown;
-          extra?: { request?: unknown };
-          connectionParams?: unknown;
-        },
-        reply?: unknown,
-      ): object =>
-        mercurius
-          ? { req: context, reply }
-          : custom
-            ? {
-                req: context.req ?? context.extra?.request,
-                extra: context.extra,
-                connectionParams: context.connectionParams,
-              }
-            : { ...context };
-      const f = await fixture(
-        mode,
-        {},
-        false,
-        shape === "cached"
-          ? (context, reply) => (cached ??= build(context, reply))
-          : build,
-      );
+      const f = await fixture(mode, {}, false, graphqlContext(mode, shape));
       try {
         const later = await f.signUp();
         const origin = "http://localhost:3000";
@@ -636,6 +681,82 @@ describe.each([
         // The first connection's who and the later connection's optionalWho reached a resolver.
         expect(f.calls()).toBe(2);
       } finally {
+        await f.close();
+      }
+    },
+  );
+  it.each(["cached", "fresh"] as const)(
+    "never authenticates a later connection under a %s context with an earlier connection's query token",
+    async (shape) => {
+      const owners = new Map([
+        ["earlier-token", "earlier-owner"],
+        ["later-token", "later-owner"],
+      ]);
+      const urls: string[] = [];
+      const f = await fixture(mode, {}, false, graphqlContext(mode, shape), [
+        queryTokenSource(owners, urls),
+      ]);
+      /** A graphql-ws client whose upgrade request carries `token` in its query string. */
+      const connect = (token: string) => {
+        const client = createClient({
+          url: `${f.url}?access_token=${token}`,
+          webSocketImpl: class extends WebSocket {
+            constructor(address: string | URL, protocols?: string | string[]) {
+              super(address, protocols, {
+                headers: { origin: "http://localhost:3000" },
+              });
+            }
+          },
+          retryAttempts: 0,
+        });
+        return client;
+      };
+      const first = connect("earlier-token");
+      try {
+        const firstClosed = closed(first);
+        expect(await execute(first, "{ who }")).toEqual({
+          data: { who: "earlier-owner" },
+        });
+        await first.dispose();
+        await firstClosed;
+        const second = connect("later-token");
+        try {
+          const results = [
+            await execute(second, "{ who optionalWho }"),
+            await execute(second, "subscription { notice }"),
+          ];
+          expect(inspect(results, { depth: Infinity })).not.toContain(
+            "earlier-owner",
+          );
+          if (shape === "fresh" || mode.startsWith("mercurius")) {
+            expect(results).toEqual([
+              { data: { who: "later-owner", optionalWho: "later-owner" } },
+              { data: { notice: "later-owner" } },
+            ]);
+          } else {
+            // The cached context carries the first connection, closed before these operations
+            // started: the source receives the upgrade path without its query string.
+            expect(results[0]!.data).toEqual({
+              who: null,
+              optionalWho: "anonymous",
+            });
+            for (const error of results.flatMap(
+              (result) => result.errors ?? [],
+            )) {
+              expect(error.extensions).toMatchObject({
+                code: "UNAUTHENTICATED",
+                statusCode: 401,
+              });
+            }
+            expect(results[1]!.errors).toHaveLength(1);
+            expect(urls.at(-1)).toMatch(/^http:\/\/[^/?#]+\/graphql$/);
+          }
+          expect(f.errors).toEqual([]);
+        } finally {
+          await second.dispose();
+        }
+      } finally {
+        await first.dispose();
         await f.close();
       }
     },

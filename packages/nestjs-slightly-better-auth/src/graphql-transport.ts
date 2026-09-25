@@ -127,6 +127,7 @@ export function mercuriusSubscriptionContext() {
 interface Upgrade {
   headers: IncomingHttpHeaders;
   url?: string;
+  secure?: boolean;
   socket?: { encrypted?: boolean };
 }
 function upgrade(value: unknown): Upgrade | undefined {
@@ -160,6 +161,21 @@ function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
 const WEBSOCKET_OPEN = 1;
 /** Upgrade-request headers that locate the server for Better Auth; none of them is a credential. */
 const HOST_METADATA = ["host", "x-forwarded-host", "x-forwarded-proto"];
+/**
+ * The upgrade request's URL without the target's query string and fragment. A query string can
+ * carry a connection's credential (`?access_token=`), which an operation that reads no credential
+ * of its connection must not expose to principal sources or policies.
+ */
+function upgradePathUrl(request: Upgrade): string {
+  const target = request.url ?? "/";
+  const end = target.search(/[?#]/);
+  return upgradeRequestUrl({
+    headers: request.headers,
+    url: end === -1 ? target : target.slice(0, end),
+    secure: request.secure,
+    socket: request.socket,
+  });
+}
 /** Copies the host metadata of `ambient` into `into` where `into` has none of its own. */
 function withHostMetadata(into: Headers, ambient: Headers): Headers {
   for (const name of HOST_METADATA) {
@@ -401,7 +417,8 @@ class GraphqlTransport implements AuthTransport {
     const initial = carrierDetails(normalized.context, this.id, kit.http);
     // Classified here, at the start of the operation. The operation of a socket that is not open
     // runs without that connection's credentials: it keeps no key or connection of the context,
-    // so no memoized or connection principal answers it, and its headers carry host metadata only.
+    // so no memoized or connection principal answers it, its headers carry host metadata only,
+    // and its request URL carries the upgrade request's path without the query string.
     const open = this.openAtStart(initial.webSocket, normalized.info);
     const key =
       !initial.socket && kit.http?.isRequest(initial.request)
@@ -491,9 +508,15 @@ class GraphqlTransport implements AuthTransport {
       },
       get request() {
         const details = checked();
-        return details.socket
-          ? { method: "GET", url: upgradeRequestUrl(details.socket) }
-          : kit.http!.request(details.request);
+        if (!details.socket) {
+          return kit.http!.request(details.request);
+        }
+        return {
+          method: "GET",
+          url: open
+            ? upgradeRequestUrl(details.socket)
+            : upgradePathUrl(details.socket),
+        };
       },
       param: (name) =>
         (this.reference(context)
@@ -504,6 +527,8 @@ class GraphqlTransport implements AuthTransport {
           : undefined),
       get browser() {
         const details = checked();
+        // The origin check reads the handshake of the connection, open or not: its verdict grants
+        // no credential, and neither principal sources nor policies receive the browser leg.
         return details.socket
           ? {
               enforce: true,
