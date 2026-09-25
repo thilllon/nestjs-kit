@@ -255,7 +255,10 @@ describe("native SDK endpoint hook parity", () => {
         ],
       );
       // A thrown before-hook skips every after-hook, so the cookie bridge never sees its headers. [R7:BA-r7-02]
-      await auth.api.probe({ body: {} }).catch(() => undefined);
+      await expect(auth.api.probe({ body: {} })).rejects.toMatchObject({
+        statusCode: 403,
+        message: "blocked",
+      });
       const response = await auth.handler(
         new Request("https://auth.test/api/auth/probe", {
           method: "POST",
