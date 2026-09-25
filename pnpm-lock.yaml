@@ -295,6 +295,52 @@ importers:
         specifier: 24.13.5
         version: 24.13.5
 
+  examples/better-auth-graphql:
+    dependencies:
+      '@apollo/server':
+        specifier: 5.5.1
+        version: 5.5.1(graphql@16.14.2)
+      '@as-integrations/express5':
+        specifier: 1.1.2
+        version: 1.1.2(@apollo/server@5.5.1(graphql@16.14.2))(express@5.2.1)
+      '@nestjs/apollo':
+        specifier: 14.0.2
+        version: 14.0.2(@apollo/server@5.5.1(graphql@16.14.2))(@apollo/subgraph@2.15.1(graphql@16.14.2))(@as-integrations/express5@1.1.2(@apollo/server@5.5.1(graphql@16.14.2))(express@5.2.1))(@as-integrations/fastify@3.1.0(@apollo/server@5.5.1(graphql@16.14.2))(fastify@5.12.4))(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/graphql@14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2))(graphql@16.14.2)
+      '@nestjs/common':
+        specifier: 12.0.3
+        version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: 12.0.3
+        version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/microservices@12.0.3)(@nestjs/platform-express@12.0.3)(@nestjs/websockets@12.0.3)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/graphql':
+        specifier: 14.0.2
+        version: 14.0.2(@apollo/subgraph@2.15.1(graphql@16.14.2))(@fastify/websocket@11.3.1)(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(graphql@16.14.2)(reflect-metadata@0.2.2)(typescript@7.0.2)
+      '@nestjs/platform-express':
+        specifier: 12.0.3
+        version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)
+      better-auth:
+        specifier: 1.7.5
+        version: 1.7.5(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.0))(pg@8.23.0)(vitest@5.0.1(@types/node@24.13.5)(vite@8.3.0(@types/node@24.13.5)(esbuild@0.28.2)(jiti@2.6.1)(tsx@4.23.15)(yaml@2.9.1)))
+      graphql:
+        specifier: 16.14.2
+        version: 16.14.2
+      graphql-ws:
+        specifier: 6.2.2
+        version: 6.2.2(@fastify/websocket@11.3.1)(graphql@16.14.2)(ws@8.21.3)
+      nestjs-slightly-better-auth:
+        specifier: workspace:*
+        version: link:../../packages/nestjs-slightly-better-auth
+      reflect-metadata:
+        specifier: 0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: 7.8.2
+        version: 7.8.2
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.5
+        version: 24.13.5
+
   examples/better-auth-rpc:
     dependencies:
       '@nestjs/common':
