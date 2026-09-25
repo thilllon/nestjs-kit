@@ -38,6 +38,8 @@ import { BetterAuthModule } from "./auth-module.js";
 import { BetterAuthScopeInterceptor } from "./auth-scope-interceptor.js";
 import { BetterAuthService } from "./auth-service.js";
 import {
+  createConformanceAuth,
+  kitIdentity,
   type RawResponse,
   runConformance,
   sendRaw,
@@ -47,6 +49,7 @@ import {
   type HttpConformanceOptions,
   httpPlatformConformance,
 } from "./conformance-http.js";
+import { principalSourceConformance } from "./conformance-principal.js";
 import {
   type FixtureHandler,
   type InheritedFixture,
@@ -60,6 +63,8 @@ import { fastifyPlatform } from "./fastify.js";
 import { BridgeClient } from "./bridge-client.js";
 import type { BridgeBinding } from "./bridge-protocol.js";
 import { HttpTransport, httpTransport } from "./http-transport.js";
+import { RoutePlanner } from "./route-planner.js";
+import { sessionPrincipal } from "./session-principal.js";
 
 const tcpMicroservice = () => ({
   transport: Transport.TCP,
@@ -649,5 +654,94 @@ describe("HTTP transport kit mutations", () => {
     await expect(carrier.run()).rejects.toThrow(
       /with globalScope: false: a cookie: expected success/,
     );
+  });
+});
+
+/** The principal kit's HTTP rows (the other rows run in testing-conformance.test.ts without a server). */
+function sessionBridgeCases(
+  platform: () => HttpPlatform,
+  createHttpAdapter: () => AbstractHttpAdapter,
+): ConformanceCase[] {
+  const auth = createConformanceAuth();
+  return principalSourceConformance({
+    source: sessionPrincipal(),
+    auth,
+    credentials: {
+      valid: async (instance) =>
+        new Headers({ cookie: (await kitIdentity(instance)).cookie }),
+      invalid: () =>
+        new Headers({ cookie: "better-auth.session_token=invalid.value" }),
+    },
+    http: { platform: platform(), createHttpAdapter },
+  }).filter((item) => item.id.startsWith("S-bridge-"));
+}
+
+describe("principal source kit bridge rows on Express", () => {
+  runConformance(
+    sessionBridgeCases(
+      () => expressPlatform() as unknown as HttpPlatform,
+      () => new ExpressAdapter(),
+    ),
+    { describe, it },
+  );
+});
+
+describe("principal source kit bridge rows on Fastify", () => {
+  runConformance(
+    sessionBridgeCases(
+      () => fastifyPlatform() as unknown as HttpPlatform,
+      () => new FastifyAdapter(),
+    ),
+    { describe, it },
+  );
+});
+
+describe("principal source kit bridge mutations", () => {
+  const bridgeCase = (id: string) => {
+    const found = sessionBridgeCases(
+      () => expressPlatform() as unknown as HttpPlatform,
+      () => new ExpressAdapter(),
+    ).find((item) => item.id === id);
+    if (!found) {
+      throw new Error(`no case ${id}`);
+    }
+    return found;
+  };
+
+  /** A defective planner: every handler forwards the cookies of its direct calls. */
+  function forwardEveryHandler() {
+    const plan = RoutePlanner.prototype.plan;
+    return vi
+      .spyOn(RoutePlanner.prototype, "plan")
+      .mockImplementation(function (this: RoutePlanner, ...args) {
+        return Object.freeze({
+          ...plan.apply(this, args),
+          forwardDirectCalls: true,
+        });
+      });
+  }
+
+  it("fails S-bridge-third-party-signup when every handler forwards direct-call cookies", async () => {
+    forwardEveryHandler();
+    await expect(
+      bridgeCase("S-bridge-third-party-signup").run(),
+    ).rejects.toThrow(/set the new user's session cookie on the caller/);
+  });
+
+  it("fails S-bridge-foreign-credentials when forwardForeignCookies runs without a declaration", async () => {
+    forwardEveryHandler();
+    await expect(
+      bridgeCase("S-bridge-foreign-credentials").run(),
+    ).rejects.toThrow(/ran outside a forwarding handler/);
+  });
+
+  it("fails S-bridge-foreign-credentials when forwardForeignCookies forwards nothing", async () => {
+    vi.spyOn(
+      BetterAuthService.prototype,
+      "forwardForeignCookies",
+    ).mockImplementation((fn) => fn());
+    await expect(
+      bridgeCase("S-bridge-foreign-credentials").run(),
+    ).rejects.toThrow(/did not forward the foreign refresh cookie/);
   });
 });

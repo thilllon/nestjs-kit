@@ -19,6 +19,8 @@ export {
   policyConformance,
 } from "./conformance-policy.js";
 export {
+  type ConformanceApiKey,
+  type PrincipalHttpConformanceOptions,
   type PrincipalSourceConformanceOptions,
   principalSourceConformance,
 } from "./conformance-principal.js";
