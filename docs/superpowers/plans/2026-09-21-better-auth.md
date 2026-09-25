@@ -665,7 +665,7 @@ Create working example workspaces at `examples/better-auth-express/`, `examples/
 
 **Interfaces:** Final export keys are exactly `.`, `./plugin`, `./platform`, `./express`, `./fastify`, `./graphql`, `./websockets`, `./microservices`, `./admin`, `./organization`, `./api-key`, `./testing`, `./testing/conformance`, plus `./package.json`. Each runtime entry has `.mjs`, `.cjs`, `.d.mts`, `.d.cts`, correct condition order and external peers.
 
-- [ ] Expand the actual packed-consumer test before filling missing artifact conditions. From an installed tarball in a temporary consumer directory, execute:
+- [x] Expand the actual packed-consumer test before filling missing artifact conditions. From an installed tarball in a temporary consumer directory, execute:
 
 ```ts
 const imported = await import("nestjs-slightly-better-auth");
