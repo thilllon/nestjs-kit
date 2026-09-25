@@ -601,6 +601,11 @@ describe("fixed plugin entries with the SDK", () => {
       headers: new Headers({ cookie: "__Secure-custom_session=foreign" }),
     });
     expect(check).toHaveBeenCalledTimes(1);
+    // An in-band credential mapped into the inbound headers is not ambient: no cross-site request can carry it.
+    await auth.api.probe({
+      headers: new Headers({ cookie: "__Secure-custom_session=mapped" }),
+    });
+    expect(check).toHaveBeenCalledTimes(1);
     internal = true;
     await auth.api.probe({
       headers: new Headers({ cookie: "__Secure-custom_session=ambient" }),
