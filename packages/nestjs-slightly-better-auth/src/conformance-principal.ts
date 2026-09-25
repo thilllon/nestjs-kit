@@ -1601,8 +1601,12 @@ function bridgeCases(
   ): Promise<ConformanceOutcome> => {
     const inspected = await harness(options);
     const { source } = inspected;
-    const credential = await options.credentials.valid(options.auth);
-    await inspected.close();
+    let credential: Headers;
+    try {
+      credential = await options.credentials.valid(options.auth);
+    } finally {
+      await inspected.close();
+    }
     if (!source.sessionBacked) {
       return conformanceSkip("the source is not session-backed");
     }
