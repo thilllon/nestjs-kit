@@ -1,0 +1,5 @@
+---
+"nestjs-slightly-better-auth": patch
+---
+
+Run an Apollo graphql-ws operation anonymously when its graphql-ws socket is not open at the start of the operation. The transport classifies the socket once per operation; an operation whose socket is closed or closing then reads no connection parameter, `subscriptionCredentials`, upgrade-header or cookie credential of that connection, so required operations answer the unauthenticated denial, optional and public operations run without a principal, and nothing is logged at ERROR. A cached GraphQL context of a closed connection therefore authenticates nothing, and a client that closes its connection while graphql-ws prepares an operation no longer logs a configuration error. An operation whose socket closes after it started keeps its connection's credentials, and Mercurius socket operations are unchanged. `T-stale-context` now runs its cached-context row on connection-shaped legs, where a later caller must never receive the first caller's principal and nothing may be logged at ERROR, and `invokeConnection` resolves after the server has observed the connection's close.

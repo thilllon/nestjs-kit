@@ -41,6 +41,7 @@ import {
   REQUIREMENTS_METADATA,
 } from "./auth-tokens.js";
 import {
+  type GraphInfo,
   graphqlArgs,
   graphqlInvocation,
   graphqlLineage,
@@ -134,21 +135,50 @@ function upgrade(value: unknown): Upgrade | undefined {
     ? (candidate as unknown as Upgrade)
     : undefined;
 }
+/** The WebSocket of a graphql-ws `extra` ({ socket, request }): a socket with function-typed send and close. */
+function graphqlWsSocket(
+  value: unknown,
+): Record<PropertyKey, unknown> | undefined {
+  const socket = record(record(value)?.socket);
+  return socket &&
+    typeof socket.send === "function" &&
+    typeof socket.close === "function"
+    ? socket
+    : undefined;
+}
 /**
  * The upgrade request of a graphql-ws `extra` ({ socket, request }) whose socket is a
  * WebSocket. Only the graphql-ws server creates that pair; parsed request data cannot carry
  * functions, so a client-sent header or field never selects the socket path. The socket's
- * state is deliberately ignored: a connection closing during authentication stays a socket
- * operation instead of turning into an unrecognized context.
+ * state does not change this recognition: the transport classifies it once per operation
+ * (GraphqlTransport.openAtStart).
  */
 function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
-  const extra = record(value);
-  const socket = record(extra?.socket);
-  return socket &&
-    typeof socket.send === "function" &&
-    typeof socket.close === "function"
-    ? upgrade(extra?.request)
-    : undefined;
+  return graphqlWsSocket(value) ? upgrade(record(value)?.request) : undefined;
+}
+/** WebSocket.OPEN of the `ws` sockets that Nest's graphql-ws server creates. */
+const WEBSOCKET_OPEN = 1;
+/** Upgrade-request headers that locate the server for Better Auth; none of them is a credential. */
+const HOST_METADATA = ["host", "x-forwarded-host", "x-forwarded-proto"];
+/** Copies the host metadata of `ambient` into `into` where `into` has none of its own. */
+function withHostMetadata(into: Headers, ambient: Headers): Headers {
+  for (const name of HOST_METADATA) {
+    const value = ambient.get(name);
+    if (!into.has(name) && value !== null) {
+      into.set(name, value);
+    }
+  }
+  return into;
+}
+/**
+ * The identity of one GraphQL execution, shared by every resolver of that execution. graphql-js
+ * coerces the variable values into a fresh object for every execution, including one
+ * subscription and its events; a parsed operation can be cached across executions, so it
+ * serves only as the fallback.
+ */
+function executionOf(info: GraphInfo | undefined): object | undefined {
+  const value = record(info);
+  return record(value?.variableValues) ?? record(value?.operation);
 }
 function ambientHeaders(request: unknown): Headers {
   const value = record(request);
@@ -204,10 +234,16 @@ function carrierDetails(
     driver === "apollo" && !httpRequest && graphqlWsUpgrade(req?.extra)
       ? req
       : undefined;
+  const wsExtra =
+    driver === "apollo" && !httpRequest
+      ? wsContext
+        ? wsContext.extra
+        : extra
+      : undefined;
   const socket = httpRequest
     ? undefined
     : driver === "apollo"
-      ? graphqlWsUpgrade(wsContext ? wsContext.extra : extra)
+      ? graphqlWsUpgrade(wsExtra)
       : (upgrade(carrier[MERCURIUS_UPGRADE]) ??
         ("_connectionInit" in carrier
           ? (upgrade(carrier.request) ??
@@ -228,7 +264,9 @@ function carrierDetails(
     carrier[MERCURIUS_AMBIENT] instanceof Headers
       ? new Headers(carrier[MERCURIUS_AMBIENT])
       : ambientHeaders(socket);
-  return { carrier, socket, connection, params, request, ambient };
+  // Mercurius socket contexts carry no graphql-ws extra: its subscription context is per connection.
+  const webSocket = socket ? graphqlWsSocket(wsExtra) : undefined;
+  return { carrier, socket, webSocket, connection, params, request, ambient };
 }
 class GraphqlTransport implements AuthTransport {
   readonly requires = { hostlessCalls: false };
@@ -243,6 +281,8 @@ class GraphqlTransport implements AuthTransport {
   }[] = [];
   private enhancerAdvice?: BootAdvice;
   private filterAdvice?: BootAdvice;
+  /** Whether each execution's graphql-ws socket was open when the execution first reached the transport. */
+  private readonly socketsAtStart = new WeakMap<object, boolean>();
 
   constructor(
     readonly id: "apollo" | "mercurius",
@@ -281,8 +321,17 @@ class GraphqlTransport implements AuthTransport {
   }
 
   lineage(context: ExecutionContext) {
+    const args = context.getArgs();
+    const normalized = graphqlArgs(args);
+    // A public root reaches the transport through its lineage alone, so an operation can start
+    // here: its socket's classification then holds for the guarded fields nested in it.
+    this.openAtStart(
+      carrierDetails(normalized.context, this.id, this.kit?.http ?? null)
+        .webSocket,
+      normalized.info,
+    );
     return {
-      ...graphqlLineage(context.getArgs(), this.reference(context)),
+      ...graphqlLineage(args, this.reference(context)),
       assertReadable: (args: readonly unknown[]) => {
         if (this.kit) {
           this.assertRequest(args, this.kit);
@@ -291,12 +340,36 @@ class GraphqlTransport implements AuthTransport {
     };
   }
 
+  /**
+   * Whether the operation's graphql-ws socket was open when the operation started. The first
+   * classification of an execution holds for every later reader of it, so a connection that
+   * closes during authentication keeps its credentials. A socket that is not open when an
+   * operation starts belongs either to a connection that closed while graphql-ws prepared the
+   * operation or to an earlier connection that a cached context carries; its state cannot tell
+   * the two apart, so the operation reads no credential of that connection in either case.
+   */
+  private openAtStart(
+    webSocket: Record<PropertyKey, unknown> | undefined,
+    info: GraphInfo | undefined,
+  ): boolean {
+    if (!webSocket) {
+      return true;
+    }
+    const execution = executionOf(info);
+    const known = execution ? this.socketsAtStart.get(execution) : undefined;
+    if (known !== undefined) {
+      return known;
+    }
+    const open = webSocket.readyState === WEBSOCKET_OPEN;
+    if (execution) {
+      this.socketsAtStart.set(execution, open);
+    }
+    return open;
+  }
+
   private assertRequest(args: readonly unknown[], kit: TransportKit) {
-    const details = carrierDetails(
-      graphqlArgs(args).context,
-      this.id,
-      kit.http,
-    );
+    const normalized = graphqlArgs(args);
+    const details = carrierDetails(normalized.context, this.id, kit.http);
     if (details.socket) {
       return details;
     }
@@ -313,7 +386,9 @@ class GraphqlTransport implements AuthTransport {
       throw BetterAuthConfigurationError.atRequest(
         "GRAPHQL_CONTEXT_STALE_REQUEST",
         "GraphQL context contains a completed request",
-        { hint: "Return a fresh context object for every operation." },
+        {
+          hint: "Return a fresh context object for every operation and every graphql-ws connection.",
+        },
       );
     }
     return details;
@@ -324,10 +399,16 @@ class GraphqlTransport implements AuthTransport {
     const args = context.getArgs();
     const normalized = graphqlArgs(args);
     const initial = carrierDetails(normalized.context, this.id, kit.http);
+    // Classified here, at the start of the operation. The operation of a socket that is not open
+    // runs without that connection's credentials: it keeps no key or connection of the context,
+    // so no memoized or connection principal answers it, and its headers carry host metadata only.
+    const open = this.openAtStart(initial.webSocket, normalized.info);
     const key =
       !initial.socket && kit.http?.isRequest(initial.request)
         ? kit.http.key(initial.request)
-        : normalized.context;
+        : open
+          ? normalized.context
+          : (executionOf(normalized.info) ?? args);
     const checked = () => this.assertRequest(args, kit);
     const headers = () => {
       const details = checked();
@@ -335,6 +416,10 @@ class GraphqlTransport implements AuthTransport {
         return kit.http!.headers(details.request);
       }
       const ambient = details.ambient();
+      if (!open) {
+        // Neither the upgrade request's credentials nor the connection's client data are read.
+        return withHostMetadata(new Headers(), ambient);
+      }
       if (this.options.subscriptionCredentials) {
         // Keep callback errors outside the conversion boundary: application
         // programming failures are not malformed credential denials.
@@ -350,13 +435,7 @@ class GraphqlTransport implements AuthTransport {
             reason: "MALFORMED_CREDENTIALS",
           });
         }
-        for (const name of ["host", "x-forwarded-host", "x-forwarded-proto"]) {
-          const value = ambient.get(name);
-          if (!mapped.has(name) && value !== null) {
-            mapped.set(name, value);
-          }
-        }
-        return mapped;
+        return withHostMetadata(mapped, ambient);
       }
       const credentials = new Headers(ambient);
       const allow = new Set(
@@ -391,7 +470,7 @@ class GraphqlTransport implements AuthTransport {
       key,
       invocation: graphqlInvocation(args, this.reference(context)),
       lineage: this.lineage(context),
-      ...(initial.socket
+      ...(initial.socket && open
         ? { connection: initial.socket, principalTtlMs: this.connectionTtlMs }
         : {}),
       headers,

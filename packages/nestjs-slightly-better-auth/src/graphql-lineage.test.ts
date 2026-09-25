@@ -589,8 +589,6 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         url: "/graphql",
       };
       const extra = { socket: openSocket(), request };
-      // A connection that closes during authentication remains a socket operation.
-      const closed = { socket: openSocket(3), request };
       for (const carrier of [
         // Nest's default context: the graphql-ws Context at context.req.
         { req: { connectionParams: {}, extra } },
@@ -599,7 +597,6 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         // A custom context keeping graphql-ws extra beside its own req.
         { req: request, extra, connectionParams: {} },
         { req: request, extra },
-        { req: { connectionParams: {}, extra: closed } },
       ]) {
         const call = (apolloTransport() as AuthTransport).describe(
           graphqlContext(carrier),
@@ -730,5 +727,194 @@ describe("Mercurius HTTP classification with client-spread fields", () => {
     expect(call.connection).toBe(f.req);
     expect(call.clientIp).toBeNull();
     expect(call.cookies).toBeNull();
+  });
+});
+
+/** An object whose property reads and key listings are counted. */
+function counted<T extends object>(target: T, reads: { count: number }): T {
+  return new Proxy(target, {
+    get(value, key) {
+      reads.count++;
+      return Reflect.get(value, key);
+    },
+    ownKeys(value) {
+      reads.count++;
+      return Reflect.ownKeys(value);
+    },
+    getOwnPropertyDescriptor(value, key) {
+      reads.count++;
+      return Reflect.getOwnPropertyDescriptor(value, key);
+    },
+  });
+}
+
+describe("GraphQL socket classification at operation start", () => {
+  class Resolver {
+    query() {}
+  }
+  /** One execution of the query field: graphql-js coerces a fresh variable-values object for each. */
+  function execution(carrier: object, operation: object = {}) {
+    const args = [
+      null,
+      {},
+      carrier,
+      { ...info(operation, ["query"]), variableValues: {} },
+    ];
+    const context = new ExecutionContextHost(
+      args,
+      Resolver,
+      Resolver.prototype.query,
+    );
+    context.setType("graphql");
+    return { args, context };
+  }
+  function connection() {
+    const socket = openSocket();
+    const request = {
+      headers: {
+        host: "localhost:3000",
+        upgrade: "websocket",
+        cookie: "current=credential",
+      },
+      url: "/graphql",
+    };
+    return {
+      socket,
+      request,
+      carrier: { req: { connectionParams: {}, extra: { socket, request } } },
+    };
+  }
+
+  it("keeps a connection that closes after its operation started a socket operation", () => {
+    const { socket, request, carrier } = connection();
+    const transport = apolloTransport() as AuthTransport;
+    const { args, context } = execution(carrier);
+    const call = transport.describe(context, { http: null });
+    socket.readyState = 3;
+    expect(call.headers().get("host")).toBe("localhost:3000");
+    expect(call.headers().get("cookie")).toBe("current=credential");
+    expect(call.browser?.enforce).toBe(true);
+    expect(() => call.lineage?.assertReadable?.(args)).not.toThrow();
+    // The scope interceptor describes the same execution again after the close.
+    const again = transport.describe(context, { http: null });
+    expect(again.key).toBe(carrier);
+    expect(again.connection).toBe(request);
+    expect(again.headers().get("host")).toBe("localhost:3000");
+  });
+
+  it("classifies the socket when a public root first reads the operation's lineage", () => {
+    const { socket, request, carrier } = connection();
+    const transport = apolloTransport() as AuthTransport;
+    const operation = {};
+    const variableValues = {};
+    const root = execution(carrier, operation);
+    (root.args[3] as { variableValues: object }).variableValues =
+      variableValues;
+    // A public root records its lineage without describing a call.
+    transport.lineage?.(root.context);
+    socket.readyState = 3;
+    // A guarded field nested in the same execution starts after the close.
+    const nested = execution(carrier, operation);
+    (nested.args[3] as { variableValues: object }).variableValues =
+      variableValues;
+    const call = transport.describe(nested.context, { http: null });
+    expect(call.connection).toBe(request);
+    expect(call.headers().get("cookie")).toBe("current=credential");
+  });
+
+  it("reads no credential of a connection whose socket is not open at the start", () => {
+    const socket = openSocket(3);
+    const reads = { count: 0 };
+    const request = {
+      headers: {
+        host: "localhost:3000",
+        "x-forwarded-proto": "https",
+        cookie: "earlier=credential",
+        authorization: "Bearer upgrade",
+      },
+      url: "/graphql",
+    };
+    const carrier = {
+      req: {
+        connectionParams: counted({ authorization: "Bearer earlier" }, reads),
+        extra: { socket, request },
+      },
+    };
+    let mapped = 0;
+    for (const options of [
+      {},
+      {
+        subscriptionCredentials: () => {
+          mapped++;
+          return { authorization: "Bearer earlier" };
+        },
+      },
+    ]) {
+      const transport = apolloTransport(options) as AuthTransport;
+      const { args, context } = execution(carrier);
+      const call = transport.describe(context, { http: null });
+      // No memoized principal or connection principal of the context answers this operation.
+      expect(call.key).not.toBe(carrier);
+      expect(call.connection).toBeUndefined();
+      // The classification at the start holds when the socket reports open later.
+      socket.readyState = 1;
+      expect([...call.headers()]).toEqual([
+        ["host", "localhost:3000"],
+        ["x-forwarded-proto", "https"],
+      ]);
+      expect(call.clientIp).toBeNull();
+      expect(call.cookies).toBeNull();
+      expect(call.request).toEqual({
+        method: "GET",
+        url: "http://localhost:3000/graphql",
+      });
+      expect(() => call.lineage?.assertReadable?.(args)).not.toThrow();
+      socket.readyState = 3;
+    }
+    expect(mapped).toBe(0);
+    expect(reads.count).toBe(0);
+  });
+
+  it("classifies every execution of a context at its own start", () => {
+    const { socket, carrier } = connection();
+    const transport = apolloTransport() as AuthTransport;
+    // A parsed operation can be cached across executions, so two executions may share it.
+    const operation = {};
+    const first = execution(carrier, operation);
+    const firstCall = transport.describe(first.context, { http: null });
+    socket.readyState = 3;
+    const later = execution(carrier, operation);
+    const laterCall = transport.describe(later.context, { http: null });
+    expect(laterCall.connection).toBeUndefined();
+    expect(laterCall.headers().has("cookie")).toBe(false);
+    expect(firstCall.connection).toBe(carrier.req.extra.request);
+    expect(firstCall.headers().get("cookie")).toBe("current=credential");
+  });
+
+  it("leaves Mercurius socket operations, which carry no graphql-ws extra, on the connection's credentials", () => {
+    const request = {
+      headers: { host: "localhost:3000", cookie: "current=credential" },
+      url: "/graphql",
+    };
+    // A closed graphql-ws socket beside a Mercurius subscription context does not classify it.
+    const carrier = {
+      _connectionInit: {},
+      request,
+      extra: { socket: openSocket(3), request },
+    };
+    const { context } = execution(carrier);
+    const call = (mercuriusTransport() as AuthTransport).describe(context, {
+      http: null,
+    });
+    expect(call.key).toBe(carrier);
+    expect(call.connection).toBe(request);
+    expect(call.headers().get("cookie")).toBe("current=credential");
+    // The Apollo transport classifies the same carrier by its graphql-ws socket.
+    const apollo = (apolloTransport() as AuthTransport).describe(
+      execution(carrier).context,
+      { http: null },
+    );
+    expect(apollo.connection).toBeUndefined();
+    expect(apollo.headers().has("cookie")).toBe(false);
   });
 });
