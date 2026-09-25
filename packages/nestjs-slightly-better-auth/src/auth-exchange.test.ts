@@ -507,7 +507,8 @@ describe("HttpTransport", () => {
     const call = transport.describe(httpContext(req), { http: accessor });
     expect(read).not.toHaveBeenCalled();
     expect(call.key).toBe(key);
-    expect(call.invocation).toBe(key);
+    // Param decorators without a handler scope find the invocation among the handler's arguments.
+    expect(call.invocation).toBe(req);
     expect(call.cookies).toBe(cookieSink);
     expect(call.clientIp).toBe("203.0.113.2");
     expect(call.browser?.enforce).toBe(true);
