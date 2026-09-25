@@ -1,5 +1,0 @@
----
-"nestjs-slightly-better-auth": minor
----
-
-Complete the policy conformance kit. `policyConformance` adds `Z-policy-session-lost`, `Z-singleton`, `Z-class-policy-requires` and a warm-cookie-cache variant of `Z-infra-throws`. It also adds unit-specific rows that run when the requirement contains a built-in policy: `Z-admin-rejects-api-key`, `Z-admin-rejects-api-key-session`, `Z-admin-banned`, `Z-admin-custom-session-role`, `Z-admin-deleted-user`, `Z-admin-null-role`, `Z-admin-dynamic-base-url`, `Z-org-ref-types` and `Z-apikey-quota-per-request`. Cases that need route planning and principal resolution send in-process requests through the real guard, and the new `sources` option registers the sources of the requirement's other principal kinds, such as `apiKeyPrincipal()`. The transport kit's `org` fixture uses `orgPermission` with `fromParam('orgId')` on organizations that the kit seeds. The session unit's `W_API_KEY_SESSION_MULTIPLIER` advice lists the credential-presenting policies and follows the `session.apiKeySessions` wording.
