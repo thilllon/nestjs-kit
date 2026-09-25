@@ -52,6 +52,11 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm test:packaging
+      - name: Test Better Auth packed consumers on the Node.js engines floor
+        run: |
+          floor="$(node --print 'require("./packages/nestjs-slightly-better-auth/package.json").engines.node.match(/\d+\.\d+\.\d+/)[0]')"
+          test "$(mise exec "node@$floor" -- node --version)" = "v$floor"
+          mise exec "node@$floor" -- pnpm test:packaging packages/nestjs-slightly-better-auth/src
       - name: Start integration services
         run: pnpm docker:up
       - name: Test HTTP, database, socket, and broker integrations
