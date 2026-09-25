@@ -17,6 +17,7 @@ import {
   ExpressAdapter,
   type NestExpressApplication,
 } from "@nestjs/platform-express";
+import { Transport } from "@nestjs/microservices";
 import { FastifyAdapter } from "@nestjs/platform-fastify";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
@@ -24,8 +25,10 @@ import type {
   AuthRouteBinding,
   ConformanceCase,
   HttpPlatform,
+  InboundAuthRequest,
   PlatformMountContext,
 } from "./auth-contracts.js";
+import { BetterAuthCoreModule } from "./auth-core-module.js";
 import { defineExtension } from "./auth-module-definition.js";
 import { BetterAuthGuard } from "./auth-guard.js";
 import { BetterAuthModule } from "./auth-module.js";
@@ -38,7 +41,10 @@ import {
   sendRaw,
   setCookieLines,
 } from "./conformance-fixtures.js";
-import { httpPlatformConformance } from "./conformance-http.js";
+import {
+  type HttpConformanceOptions,
+  httpPlatformConformance,
+} from "./conformance-http.js";
 import { principalSourceConformance } from "./conformance-principal.js";
 import {
   type FixtureHandler,
@@ -48,9 +54,16 @@ import {
 } from "./conformance-transport.js";
 import { expressPlatform } from "./express.js";
 import { fastifyPlatform } from "./fastify.js";
+import { BridgeClient } from "./bridge-client.js";
+import type { BridgeBinding } from "./bridge-protocol.js";
 import { httpTransport } from "./http-transport.js";
 import { RoutePlanner } from "./route-planner.js";
 import { sessionPrincipal } from "./session-principal.js";
+
+const tcpMicroservice = () => ({
+  transport: Transport.TCP,
+  options: { host: "127.0.0.1", port: 0 },
+});
 
 describe("Express platform conformance", () => {
   runConformance(
@@ -60,6 +73,7 @@ describe("Express platform conformance", () => {
       trustOneProxy: (app) => {
         (app as NestExpressApplication).set("trust proxy", 1);
       },
+      microservice: tcpMicroservice,
     }),
     { describe, it },
   );
@@ -71,13 +85,20 @@ describe("Fastify platform conformance", () => {
       platform: fastifyPlatform(),
       createHttpAdapter: () => new FastifyAdapter(),
       http2: { createHttpAdapter: () => new FastifyAdapter({ http2: true }) },
+      microservice: tcpMicroservice,
     }),
     { describe, it },
   );
 });
 
-/** A defective platform: it joins every Set-Cookie value into one header line. */
-function mergingSetCookie(real: HttpPlatform): HttpPlatform {
+/** A platform that routes every auth request of `real` through `handle`. */
+function wrappedPlatform(
+  real: HttpPlatform,
+  handle: (
+    binding: AuthRouteBinding,
+    inbound: InboundAuthRequest,
+  ) => Promise<Response>,
+): HttpPlatform {
   const wrap = (binding: AuthRouteBinding): AuthRouteBinding => ({
     instance: binding.instance,
     basePath: binding.basePath,
@@ -85,23 +106,7 @@ function mergingSetCookie(real: HttpPlatform): HttpPlatform {
     staticOrigin: binding.staticOrigin,
     matches: (pathname) => binding.matches(pathname),
     payloadTooLarge: () => binding.payloadTooLarge(),
-    async handle(inbound) {
-      const response = await binding.handle(inbound);
-      const headers = new Headers();
-      for (const [name, value] of response.headers) {
-        if (name !== "set-cookie") {
-          headers.append(name, value);
-        }
-      }
-      const cookies = response.headers.getSetCookie();
-      if (cookies.length) {
-        headers.set("set-cookie", cookies.join(", "));
-      }
-      return new Response(response.body, {
-        status: response.status,
-        headers,
-      });
-    },
+    handle: (inbound) => handle(binding, inbound),
   });
   return {
     id: real.id,
@@ -119,6 +124,55 @@ function mergingSetCookie(real: HttpPlatform): HttpPlatform {
   };
 }
 
+/** A defective platform: it joins every Set-Cookie value into one header line. */
+function mergingSetCookie(real: HttpPlatform): HttpPlatform {
+  return wrappedPlatform(real, async (binding, inbound) => {
+    const response = await binding.handle(inbound);
+    const headers = new Headers();
+    for (const [name, value] of response.headers) {
+      if (name !== "set-cookie") {
+        headers.append(name, value);
+      }
+    }
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length) {
+      headers.set("set-cookie", cookies.join(", "));
+    }
+    return new Response(response.body, {
+      status: response.status,
+      headers,
+    });
+  });
+}
+
+/** A defective Express platform that rewrites the inbound request it hands the core. */
+function rewritingExpress(
+  rewrite: (inbound: InboundAuthRequest) => InboundAuthRequest,
+): HttpPlatform {
+  return wrappedPlatform(
+    expressPlatform() as unknown as HttpPlatform,
+    (binding, inbound) => binding.handle(rewrite(inbound)),
+  );
+}
+
+function kitCase(
+  options: Omit<HttpConformanceOptions, "createHttpAdapter" | "bootstrap">,
+  id: string,
+  title: RegExp,
+): ConformanceCase {
+  const found = httpPlatformConformance({
+    createHttpAdapter: () => new ExpressAdapter(),
+    bootstrap: ["testing"],
+    trustOneProxy: (app) => {
+      (app as NestExpressApplication).set("trust proxy", 1);
+    },
+    microservice: tcpMicroservice,
+    ...options,
+  }).find((item) => item.id === id && title.test(item.title));
+  expect(found?.skip).toBeUndefined();
+  return found!;
+}
+
 describe("platform kit mutations", () => {
   it("fails H-resp-multicookie for a platform that merges Set-Cookie lines", async () => {
     const cases = httpPlatformConformance({
@@ -128,6 +182,135 @@ describe("platform kit mutations", () => {
     });
     const multicookie = cases.find((item) => item.id === "H-resp-multicookie");
     await expect(multicookie!.run()).rejects.toThrow(/Set-Cookie lines/);
+  });
+
+  it("fails H-ip-platform for a platform that hands Better Auth no client IP", async () => {
+    const platform = rewritingExpress((inbound) => ({
+      ...inbound,
+      clientIp: null,
+    }));
+    await expect(
+      kitCase({ platform }, "H-ip-platform", /^Better Auth's getIP/).run(),
+    ).rejects.toThrow(/resolved no client IP/);
+  });
+
+  it("fails the trusted-hop H-ip-platform bucket row for a platform that ignores its proxy trust", async () => {
+    const platform = rewritingExpress((inbound) => ({
+      ...inbound,
+      clientIp: "127.0.0.1",
+    }));
+    await expect(
+      kitCase({ platform }, "H-ip-platform", /behind a trusted hop/).run(),
+    ).rejects.toThrow(/shared the first client's bucket/);
+  });
+
+  it("fails the dynamic H-mount-custom-path row for a platform that drops the request host", async () => {
+    const platform = rewritingExpress((inbound) => ({
+      ...inbound,
+      url: new URL(new URL(inbound.url).pathname, "http://localhost:3000").href,
+    }));
+    await expect(
+      kitCase(
+        { platform },
+        "H-mount-custom-path",
+        /^a dynamic allowedHosts/,
+      ).run(),
+    ).rejects.toThrow(/lost the allowed host tenant\.example/);
+  });
+
+  it("fails H-proxy-untrusted-warning for a platform that strips forwarding headers", async () => {
+    const platform = rewritingExpress((inbound) => {
+      const headers = new Headers(inbound.headers);
+      for (const name of ["x-forwarded-for", "forwarded", "x-real-ip"]) {
+        headers.delete(name);
+      }
+      return { ...inbound, headers };
+    });
+    await expect(
+      kitCase(
+        { platform },
+        "H-proxy-untrusted-warning",
+        /with proxy trust off/,
+      ).run(),
+    ).rejects.toThrow(/logged no W_PROXY_UNTRUSTED/);
+  });
+
+  it("fails H-close-keeps-hooks for a kernel that unbinds hooks on close", async () => {
+    const bindings: BridgeBinding[] = [];
+    const bind = BridgeClient.prototype.bind;
+    const close = BridgeClient.prototype.close;
+    const spies = [
+      vi.spyOn(BridgeClient.prototype, "bind").mockImplementation(function (
+        this: BridgeClient,
+        entry,
+        binding,
+      ) {
+        bindings.push(binding);
+        return bind.call(this, entry, binding);
+      }),
+      vi.spyOn(BridgeClient.prototype, "close").mockImplementation(function (
+        this: BridgeClient,
+      ) {
+        close.call(this);
+        for (const binding of bindings) {
+          Object.assign(binding, { before: [], after: [] });
+        }
+      }),
+    ];
+    try {
+      await expect(
+        kitCase(
+          { platform: expressPlatform() },
+          "H-close-keeps-hooks",
+          /./,
+        ).run(),
+      ).rejects.toThrow(/after app\.close\(\) skipped/);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
+  it("fails H-close-keeps-hooks for a kernel that reports taking over a closed binding", async () => {
+    const bind = BridgeClient.prototype.bind;
+    const spy = vi
+      .spyOn(BridgeClient.prototype, "bind")
+      .mockImplementation(function (this: BridgeClient, entry, binding) {
+        const closed = entry.bridge.state === "closed";
+        const result = bind.call(this, entry, binding);
+        return closed
+          ? { ...result, tookOverFrom: "a closed application" }
+          : result;
+      });
+    try {
+      await expect(
+        kitCase(
+          { platform: expressPlatform() },
+          "H-close-keeps-hooks",
+          /./,
+        ).run(),
+      ).rejects.toThrow(/warned while taking over the closed binding/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails the microservice H-no-adapter row for a kernel that keeps the binding open on shutdown", async () => {
+    const spy = vi
+      .spyOn(BetterAuthCoreModule.prototype, "onApplicationShutdown")
+      .mockImplementation(() => undefined);
+    try {
+      await expect(
+        kitCase(
+          { platform: expressPlatform() },
+          "H-no-adapter",
+          /microservice/,
+        ).run(),
+      ).rejects.toThrow(/close\(\) left the binding bound/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("decides capability cases of a definition platform from the resolved platform", async () => {

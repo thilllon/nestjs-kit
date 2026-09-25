@@ -22,9 +22,11 @@ import {
   type DynamicModule,
   type ExecutionContext,
   type INestApplication,
+  type INestMicroservice,
   type MiddlewareConsumer,
   type NestInterceptor,
   type NestModule,
+  type OnApplicationShutdown,
   type Type,
 } from "@nestjs/common";
 import {
@@ -66,6 +68,7 @@ import {
   conformanceCase,
   conformanceSkip,
   type ConformanceOutcome,
+  type ConformanceSkip,
   createConformanceAuth,
   KIT_BASE_URL,
   kitIdentity,
@@ -92,10 +95,24 @@ export interface HttpConformanceOptions {
   http2?: { createHttpAdapter(): AbstractHttpAdapter };
   /** How to obtain a base URL. Default: app.listen(0) + getUrl(). */
   listen?(app: INestApplication): Promise<string>;
+  /**
+   * Transport options for the H-no-adapter microservice rows, e.g. () => ({ transport: Transport.TCP, options: { host:
+   * '127.0.0.1', port: 0 } }). The kit does not load the optional @nestjs/microservices peer itself; without this option
+   * those rows are skipped with the reason.
+   */
+  microservice?(): MicroserviceOptions;
 }
+
+/** The options NestFactory.createMicroservice() and TestingModule.createNestMicroservice() accept. */
+type MicroserviceOptions = NonNullable<
+  Parameters<typeof NestFactory.createMicroservice>[1]
+>;
 
 type Bootstrap = "factory" | "testing";
 const AUTH = "/api/auth";
+const DYNAMIC_AUTH = "/tenant/auth";
+/** The client IP of the kit's requests: baseUrl() always connects over IPv4 loopback. */
+const LOOPBACK = "127.0.0.1";
 const CORS_ORIGIN = "https://app.example";
 /** Makes the kit's `around` interceptor throw, so auth.handler rejects with a non-APIError. */
 const THROW_HEADER = "x-conformance-throw";
@@ -116,6 +133,12 @@ interface BootConfig {
   middleware?: boolean;
   http2?: boolean;
   trustProxy?: boolean;
+  /** Boot on this instance instead of a fresh createConformanceAuth(config.auth). */
+  instance?: AuthLike;
+  /** Receives the paths the kit's @BeforeAuth() hook provider sees. */
+  hooks?: string[];
+  /** Runs in the kit root module's onApplicationShutdown hook. */
+  onShutdown?(): Promise<void>;
 }
 
 interface AccessorObservation {
@@ -204,6 +227,23 @@ async function capabilitiesOf(
   }
 }
 
+/** Whether the resolved platform implements an optional member, booting a testing app when the reference cannot tell. */
+async function implementsMember(
+  options: HttpConformanceOptions,
+  name: keyof HttpPlatform,
+): Promise<boolean> {
+  const known = staticMember(options.platform, name);
+  if (known !== undefined) {
+    return known;
+  }
+  const boot = await bootHttp(options, "testing", {});
+  try {
+    return typeof Reflect.get(resolvedPlatform(boot.app), name) === "function";
+  } finally {
+    await boot.close();
+  }
+}
+
 function kitModule(
   options: HttpConformanceOptions,
   auth: AuthLike,
@@ -219,6 +259,7 @@ function kitModule(
     hooks?: string[];
   },
 ): Type {
+  const hooks = state.hooks ?? config.hooks;
   const record: AuthHandlerInterceptor = async (call, next) => {
     state.around.push(
       `${call.request.method.toUpperCase()} ${new URL(call.request.url).pathname}`,
@@ -379,7 +420,7 @@ function kitModule(
   class ConformanceHookProvider {
     @BeforeAuth("/probe/html")
     record(_context: AuthHookContext<"/probe/html">): void {
-      state.hooks?.push("/probe/html");
+      hooks?.push("/probe/html");
     }
   }
 
@@ -399,7 +440,7 @@ function kitModule(
       { provide: APP_FILTER, useClass: ConformanceRecordingFilter },
     ],
   })
-  class ConformanceHttpModule implements NestModule {
+  class ConformanceHttpModule implements NestModule, OnApplicationShutdown {
     configure(consumer: MiddlewareConsumer): void {
       if (config.middleware) {
         consumer
@@ -410,6 +451,10 @@ function kitModule(
           .forRoutes({ path: "*path", method: RequestMethod.ALL });
       }
     }
+
+    async onApplicationShutdown(): Promise<void> {
+      await config.onShutdown?.();
+    }
   }
   return ConformanceHttpModule;
 }
@@ -419,7 +464,7 @@ async function bootHttp(
   bootstrap: Bootstrap,
   config: BootConfig,
 ): Promise<HttpBoot> {
-  const auth = createConformanceAuth(config.auth);
+  const auth = config.instance ?? createConformanceAuth(config.auth);
   const probe = await probeOf(auth);
   const logger = new CapturingLogger();
   const filtered: unknown[] = [];
@@ -600,6 +645,72 @@ async function waitFor(
   }
 }
 
+/**
+ * Runs `fn` with process.env.NODE_ENV set to `value`, then restores it. The kit's production-mode rows use it: the
+ * library treats every NODE_ENV except development, dev and test as production (§5.4). Run kit cases sequentially.
+ */
+async function withNodeEnv<T>(value: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = value;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_ENV");
+    } else {
+      process.env.NODE_ENV = previous;
+    }
+  }
+}
+
+const inProduction = <T>(fn: () => Promise<T>) => withNodeEnv("production", fn);
+
+/** The per-IP rule the rate-limit rows apply to /probe/ip, counted in a per-boot store that records every key. */
+const IP_RULE = { window: 60, max: 2 } as const;
+
+function rateLimited(keys: string[]): BootConfig {
+  const counts = new Map<string, number>();
+  return {
+    auth: {
+      rateLimit: {
+        enabled: true,
+        customRules: { "/probe/ip": IP_RULE },
+        customStorage: {
+          async consume(key, rule) {
+            keys.push(key);
+            const count = (counts.get(key) ?? 0) + 1;
+            counts.set(key, count);
+            return count > rule.max
+              ? { allowed: false, retryAfter: rule.window }
+              : { allowed: true, retryAfter: null };
+          },
+        },
+      },
+    },
+  };
+}
+
+/** Better Auth trustedProxies covering every loopback address the kit's requests come from. */
+const loopbackProxies: BootConfig = {
+  auth: {
+    advanced: { ipAddress: { trustedProxies: ["127.0.0.0/8", "::1/128"] } },
+  },
+};
+
+function warningsWith(boot: HttpBoot, ...parts: string[]): string[] {
+  return boot.logger.entries
+    .filter(
+      (entry) =>
+        entry.level === "warn" &&
+        parts.every((part) => entry.text.includes(part)),
+    )
+    .map((entry) => entry.text);
+}
+
+function http2Origin(boot: HttpBoot): string {
+  return boot.url.replace(/^https?:/, "http:");
+}
+
 function http2Request(
   origin: string,
   headers: Record<string, string>,
@@ -650,7 +761,9 @@ type PerBootstrap = (
  * Auth instance that includes conformanceProbePlugin(), an app controller, a @BeforeAuth() hook provider, a recording
  * global filter and an `around` recorder. HTTP/2 is required when the platform declares capabilities.http2; a platform
  * without the capability, or without the optional proxyTrust() or trustOneProxy, gets a skip with the reason: before
- * the run for platform objects, at run time for classes and definitions.
+ * the run for platform objects, at run time for classes and definitions. The microservice rows of H-no-adapter need the
+ * `microservice` option. Production-mode rows set process.env.NODE_ENV to 'production' while they run and restore it,
+ * so run the cases sequentially.
  */
 export function httpPlatformConformance(
   options: HttpConformanceOptions,
@@ -674,6 +787,31 @@ export function httpPlatformConformance(
       );
     }
   };
+  const noHttp2 = () =>
+    declaredCapabilities(options.platform) !== undefined &&
+    !declaredCapabilities(options.platform)?.http2
+      ? "the platform declares no http2 capability"
+      : undefined;
+  /** A skip when the resolved platform declares no http2 capability; requires the http2 option when it does. */
+  const http2Ready = async (
+    o: HttpConformanceOptions,
+  ): Promise<ConformanceSkip | undefined> => {
+    const capabilities = await capabilitiesOf(o);
+    if (!capabilities?.http2) {
+      return conformanceSkip("the platform declares no http2 capability");
+    }
+    assert.ok(
+      o.http2,
+      "the platform declares capabilities.http2, so the kit requires the http2 option",
+    );
+    return undefined;
+  };
+  const noProxyTrust = () =>
+    staticMember(options.platform, "proxyTrust") === false
+      ? "the platform does not implement the optional proxyTrust()"
+      : undefined;
+  const noTrustHook = () =>
+    options.trustOneProxy ? undefined : "no trustOneProxy option was given";
 
   add(
     "H-mount-methods",
@@ -755,6 +893,80 @@ export function httpPlatformConformance(
         },
       );
     },
+  );
+  const dynamicHosts = [new URL(KIT_BASE_URL).host, "tenant.example"];
+  const dynamicMount: BootConfig = {
+    auth: {
+      baseURL: { allowedHosts: dynamicHosts, fallback: KIT_BASE_URL },
+      basePath: DYNAMIC_AUTH,
+    },
+    prefix: "v1",
+    versioning: true,
+  };
+  const assertDynamicUrl = (value: unknown, host: string) => {
+    const url = new URL(String(value));
+    assert.equal(
+      url.host,
+      host,
+      `the request URL lost the allowed host ${host}`,
+    );
+    assert.equal(url.pathname, `${DYNAMIC_AUTH}/probe/url`);
+  };
+  add(
+    "H-mount-custom-path",
+    "a dynamic allowedHosts baseURL mounts at basePath for every allowed host, unaffected by a global prefix and URI versioning",
+    (o, b) =>
+      withBoot(o, b, dynamicMount, async (boot) => {
+        for (const host of dynamicHosts) {
+          const response = await sendRaw(
+            `${boot.url}${DYNAMIC_AUTH}/probe/url`,
+            {
+              headers: { host },
+            },
+          );
+          assert.equal(
+            response.status,
+            200,
+            `${host}: ${response.body.toString("utf8").slice(0, 200)}`,
+          );
+          assertDynamicUrl(json(response).url, host);
+        }
+        const ping = await sendRaw(`${boot.url}/v1/app/ping`);
+        assert.equal(ping.status, 200);
+        const prefixed = await sendRaw(
+          `${boot.url}/v1${DYNAMIC_AUTH}/probe/html`,
+        );
+        assert.notEqual(prefixed.status, 200);
+        const fallthrough = await sendRaw(`${boot.url}${AUTH}/probe/html`);
+        assert.equal(fallthrough.status, 404);
+        assert.ok(
+          !boot.around.some((entry) => entry.includes(AUTH)),
+          `the default base path reached Better Auth: ${boot.around.join(", ")}`,
+        );
+      }),
+  );
+  add(
+    "H-mount-custom-path",
+    "over HTTP/2, a dynamic allowedHosts baseURL serves the :authority host at basePath",
+    async (o, b) => {
+      const skip = await http2Ready(o);
+      if (skip) {
+        return skip;
+      }
+      await withBoot(o, b, { ...dynamicMount, http2: true }, async (boot) => {
+        const response = await http2Request(http2Origin(boot), {
+          ":method": "GET",
+          ":path": `${DYNAMIC_AUTH}/probe/url`,
+          ":authority": "tenant.example",
+        });
+        assert.equal(response.status, 200, response.body.toString("utf8"));
+        assertDynamicUrl(
+          (JSON.parse(response.body.toString("utf8")) as { url: string }).url,
+          "tenant.example",
+        );
+      });
+    },
+    noHttp2,
   );
   add(
     "H-app-route-precedence",
@@ -1009,14 +1221,175 @@ export function httpPlatformConformance(
         }
       }),
   );
+  const probeIp = async (
+    boot: HttpBoot,
+    headers: Record<string, string> = {},
+  ): Promise<{ status: number; ip?: unknown; resolved?: unknown }> => {
+    const response = await sendRaw(`${boot.url}${AUTH}/probe/ip`, { headers });
+    return response.status === 200
+      ? { status: response.status, ...json(response) }
+      : { status: response.status };
+  };
   add(
     "H-ip-platform",
     "Better Auth's getIP sees the platform client IP",
     (o, b) =>
       withBoot(o, b, {}, async (boot) => {
-        const response = await sendRaw(`${boot.url}${AUTH}/probe/ip`);
-        assert.equal(json(response).ip, "127.0.0.1");
+        const value = await probeIp(boot);
+        assert.equal(
+          value.resolved,
+          LOOPBACK,
+          "Better Auth resolved no client IP from the request headers the platform set",
+        );
+        assert.equal(value.ip, LOOPBACK);
       }),
+  );
+  add(
+    "H-ip-platform",
+    "over HTTP/2, Better Auth's getIP sees the platform client IP",
+    async (o, b) => {
+      const skip = await http2Ready(o);
+      if (skip) {
+        return skip;
+      }
+      await withBoot(o, b, { http2: true }, async (boot) => {
+        const response = await http2Request(http2Origin(boot), {
+          ":method": "GET",
+          ":path": `${AUTH}/probe/ip`,
+        });
+        assert.equal(response.status, 200, response.body.toString("utf8"));
+        const value = JSON.parse(response.body.toString("utf8")) as {
+          resolved: unknown;
+        };
+        assert.equal(
+          value.resolved,
+          LOOPBACK,
+          "Better Auth resolved no client IP over HTTP/2",
+        );
+      });
+    },
+    noHttp2,
+  );
+  const spoofedIp = {
+    "x-forwarded-for": "203.0.113.20",
+    "x-real-ip": "203.0.113.21",
+    [`x-nsba-ip-${"0".repeat(32)}`]: "203.0.113.22",
+  };
+  add(
+    "H-ip-platform",
+    "in production mode, the platform IP keys a per-IP rate-limit bucket that client-sent IP headers cannot leave",
+    (o, b) => {
+      const keys: string[] = [];
+      return inProduction(() =>
+        withBoot(o, b, rateLimited(keys), async (boot) => {
+          const first = await probeIp(boot);
+          assert.equal(first.resolved, LOOPBACK);
+          const statuses = [first.status];
+          for (let index = 1; index <= IP_RULE.max; index++) {
+            statuses.push((await probeIp(boot)).status);
+          }
+          assert.deepEqual(
+            statuses,
+            [200, 200, 429],
+            `the per-IP rule (max ${IP_RULE.max}) answered ${statuses.join(", ")}`,
+          );
+          assert.equal(
+            (await probeIp(boot, spoofedIp)).status,
+            429,
+            "client-sent IP headers moved the request out of the platform IP's bucket",
+          );
+          assert.deepEqual(
+            [...new Set(keys)],
+            [`${LOOPBACK}|/probe/ip`],
+            "the rate limiter was not keyed by the platform IP",
+          );
+        }),
+      );
+    },
+  );
+  add(
+    "H-ip-platform",
+    "in production mode behind a trusted hop, every forwarded client gets its own rate-limit bucket",
+    (o, b) => {
+      const keys: string[] = [];
+      const [left, right] = ["203.0.113.30", "203.0.113.31"];
+      return inProduction(() =>
+        withBoot(
+          o,
+          b,
+          { ...rateLimited(keys), trustProxy: true },
+          async (boot) => {
+            const statuses: number[] = [];
+            for (let index = 0; index <= IP_RULE.max; index++) {
+              statuses.push(
+                (await probeIp(boot, { "x-forwarded-for": left })).status,
+              );
+            }
+            assert.deepEqual(statuses, [200, 200, 429]);
+            const other = await probeIp(boot, { "x-forwarded-for": right });
+            assert.equal(
+              other.status,
+              200,
+              "a second client shared the first client's bucket",
+            );
+            assert.equal(other.resolved, right);
+            assert.deepEqual([...new Set(keys)].sort(), [
+              `${left}|/probe/ip`,
+              `${right}|/probe/ip`,
+            ]);
+          },
+        ),
+      );
+    },
+    noTrustHook,
+  );
+  add(
+    "H-ip-platform",
+    "with trustedProxies covering the platform IP and trust off, Better Auth resolves no IP and B18 warns where proxyTrust() reports 'none'",
+    (o, b) =>
+      inProduction(() =>
+        withBoot(o, b, loopbackProxies, async (boot) => {
+          const value = await probeIp(boot, {
+            "x-forwarded-for": "203.0.113.40",
+          });
+          assert.equal(
+            value.resolved,
+            null,
+            `Better Auth resolved ${String(value.resolved)} although trustedProxies covers the socket IP`,
+          );
+          const platform = resolvedPlatform(boot.app);
+          const trust = platform.proxyTrust?.(
+            boot.app.getHttpAdapter() as AbstractHttpAdapter,
+          );
+          const b18 = warningsWith(boot, "W_CLIENT_IP", "trustedProxies");
+          if (trust?.mode === "none") {
+            assert.equal(b18.length, 1, boot.logger.text());
+          }
+        }),
+      ),
+  );
+  add(
+    "H-ip-platform",
+    "with trustedProxies covering the proxy and trust on, Better Auth resolves the client IP without a B18 warning",
+    (o, b) =>
+      inProduction(() =>
+        withBoot(
+          o,
+          b,
+          { ...loopbackProxies, trustProxy: true },
+          async (boot) => {
+            const value = await probeIp(boot, {
+              "x-forwarded-for": "203.0.113.41",
+            });
+            assert.equal(value.resolved, "203.0.113.41");
+            assert.deepEqual(
+              warningsWith(boot, "W_CLIENT_IP", "trustedProxies"),
+              [],
+            );
+          },
+        ),
+      ),
+    noTrustHook,
   );
   add("H-ip-spoof", "client-sent client-IP headers are ignored", (o, b) =>
     withBoot(o, b, {}, async (boot) => {
@@ -1113,18 +1486,13 @@ export function httpPlatformConformance(
     "H-h2-pseudo",
     "HTTP/2 pseudo-headers never reach Better Auth",
     async (o, b) => {
-      const capabilities = await capabilitiesOf(o);
-      if (!capabilities?.http2) {
-        return conformanceSkip("the platform declares no http2 capability");
+      const skip = await http2Ready(o);
+      if (skip) {
+        return skip;
       }
-      assert.ok(
-        o.http2,
-        "the platform declares capabilities.http2, so the kit requires the http2 option",
-      );
       await withBoot(o, b, { http2: true }, async (boot) => {
-        const origin = boot.url.replace(/^https?:/, "http:");
         const response = await http2Request(
-          origin,
+          http2Origin(boot),
           {
             ":method": "POST",
             ":path": `${AUTH}/probe/echo-raw`,
@@ -1145,11 +1513,7 @@ export function httpPlatformConformance(
         );
       });
     },
-    () =>
-      declaredCapabilities(options.platform) !== undefined &&
-      !declaredCapabilities(options.platform)?.http2
-        ? "the platform declares no http2 capability"
-        : undefined,
+    noHttp2,
   );
   add(
     "H-resp-multicookie",
@@ -1495,6 +1859,72 @@ export function httpPlatformConformance(
     },
   );
   add(
+    "H-no-adapter",
+    "a microservice boots once without an HTTP adapter, with listen() and with init() then listen()",
+    async (o, b) => {
+      for (const initFirst of [false, true]) {
+        const label = `${b === "factory" ? "NestFactory.createMicroservice()" : "Test.createNestMicroservice()"} with ${initFirst ? "init() then listen()" : "listen()"}`;
+        const auth = createConformanceAuth();
+        const bridge = await bridgeOf(auth);
+        const logger = new CapturingLogger();
+        const module = kitModule(
+          o,
+          auth,
+          await probeOf(auth),
+          { module: { logSummary: true } },
+          {
+            filtered: [],
+            around: [],
+            accessor: {},
+            requests: () => assert.fail("no HTTP platform expected"),
+            adapter: () => assert.fail("no HTTP adapter expected"),
+          },
+        );
+        const microserviceOptions = {
+          ...o.microservice!(),
+          logger,
+          abortOnError: false,
+        };
+        const microservice: INestMicroservice =
+          b === "factory"
+            ? await NestFactory.createMicroservice(module, microserviceOptions)
+            : (
+                await Test.createTestingModule({ imports: [module] }).compile()
+              ).createNestMicroservice(microserviceOptions);
+        try {
+          if (initFirst) {
+            await microservice.init();
+          }
+          await microservice.listen();
+          assert.equal(
+            bridge.state,
+            "bound",
+            `${label}: the instance is not bound`,
+          );
+          const summaries = logger.entries.filter((entry) =>
+            entry.text.startsWith("'default': "),
+          );
+          assert.equal(
+            summaries.length,
+            1,
+            `${label}: the lifecycle ran ${summaries.length} times\n${logger.text()}`,
+          );
+          assert.match(summaries[0]!.text, /not mounted/, label);
+          assert.deepEqual(logger.errors(), [], `${label}: ${logger.text()}`);
+        } finally {
+          await microservice.close();
+        }
+        assert.equal(
+          bridge.state,
+          "closed",
+          `${label}: close() left the binding ${bridge.state}`,
+        );
+      }
+    },
+    () =>
+      options.microservice ? undefined : "no microservice option was given",
+  );
+  add(
     "H-late-adapter",
     "module init followed by an application init fails with LATE_HTTP_ADAPTER",
     async (o) => {
@@ -1629,6 +2059,85 @@ export function httpPlatformConformance(
     },
   );
   add(
+    "H-close-keeps-hooks",
+    "app.close() closes the binding without unbinding its hooks, and the next application takes it over silently",
+    async (o, b) => {
+      const auth = createConformanceAuth();
+      const bridge = await bridgeOf(auth);
+      const direct = async () =>
+        (await auth.handler(new Request(`${KIT_BASE_URL}${AUTH}/probe/html`)))
+          .status;
+      const closedHooks: string[] = [];
+      let duringShutdown: number | undefined;
+      const first = await bootHttp(o, b, {
+        instance: auth,
+        hooks: closedHooks,
+        onShutdown: async () => {
+          duringShutdown = await direct();
+        },
+      });
+      try {
+        const served = await sendRaw(`${first.url}${AUTH}/probe/html`);
+        assert.equal(served.status, 200);
+        assert.equal(
+          closedHooks.length,
+          1,
+          "the @BeforeAuth() hook did not run",
+        );
+      } finally {
+        await first.close();
+      }
+      const warns = (boot: HttpBoot) =>
+        boot.logger.entries
+          .filter((entry) => entry.level === "warn")
+          .map((entry) => entry.text);
+      const expected = new Set(warns(first));
+      assert.equal(duringShutdown, 200);
+      assert.equal(
+        closedHooks.length,
+        2,
+        "a Better Auth call from another module's shutdown hook skipped the application's @BeforeAuth() hook",
+      );
+      assert.equal(
+        bridge.state,
+        "closed",
+        `app.close() left the binding ${bridge.state}`,
+      );
+      assert.equal(await direct(), 200);
+      assert.equal(
+        closedHooks.length,
+        3,
+        "a Better Auth call after app.close() skipped the closed application's @BeforeAuth() hook",
+      );
+      const nextHooks: string[] = [];
+      await withBoot(
+        o,
+        b,
+        { instance: auth, hooks: nextHooks },
+        async (next) => {
+          assert.equal(bridge.state, "bound");
+          assert.deepEqual(
+            warns(next).filter((text) => !expected.has(text)),
+            [],
+            "the next application warned while taking over the closed binding",
+          );
+          const served = await sendRaw(`${next.url}${AUTH}/probe/html`);
+          assert.equal(served.status, 200);
+          assert.equal(
+            nextHooks.length,
+            1,
+            "the next application's hook did not run",
+          );
+          assert.equal(
+            closedHooks.length,
+            3,
+            "the closed application's hook still ran after the next application bound",
+          );
+        },
+      );
+    },
+  );
+  add(
     "H-diagnostics-404",
     "an unknown auth path logs one WARN with a suggestion and keeps the 404",
     (o, b) =>
@@ -1660,6 +2169,106 @@ export function httpPlatformConformance(
           assert.match(warnings[0]!.text, /Did you mean/);
         },
       ),
+  );
+  const proxyWarnings = (boot: HttpBoot) =>
+    warningsWith(boot, "W_PROXY_UNTRUSTED");
+  add(
+    "H-proxy-untrusted-warning",
+    "in production with proxy trust off, the first forwarded auth request logs W_PROXY_UNTRUSTED once and changes no response",
+    (o, b) =>
+      inProduction(() =>
+        withBoot(o, b, {}, async (boot) => {
+          const platform = resolvedPlatform(boot.app);
+          if (typeof platform.proxyTrust !== "function") {
+            return conformanceSkip(
+              "the platform does not implement the optional proxyTrust()",
+            );
+          }
+          const trust = platform.proxyTrust(
+            boot.app.getHttpAdapter() as AbstractHttpAdapter,
+          );
+          if (trust.mode !== "none") {
+            return conformanceSkip(
+              `a fresh adapter reports proxy trust '${trust.mode}', not 'none'`,
+            );
+          }
+          const html = async (headers: Record<string, string> = {}) => {
+            const response = await sendRaw(`${boot.url}${AUTH}/probe/html`, {
+              headers,
+            });
+            assert.equal(response.status, 200);
+            assert.equal(response.body.toString("utf8"), "<p>probe</p>");
+          };
+          await html();
+          assert.deepEqual(
+            proxyWarnings(boot),
+            [],
+            "a request without forwarding headers logged",
+          );
+          const ping = await sendRaw(`${boot.url}/app/ping`, {
+            headers: { "x-forwarded-for": "203.0.113.50" },
+          });
+          assert.equal(ping.status, 200);
+          assert.deepEqual(proxyWarnings(boot), [], "an app route logged");
+          await html({ "x-forwarded-for": "203.0.113.51" });
+          const [warning, ...repeated] = proxyWarnings(boot);
+          assert.ok(
+            warning,
+            "a forwarded auth request logged no W_PROXY_UNTRUSTED",
+          );
+          assert.ok(
+            warning.includes(`socket IP ${LOOPBACK}.`),
+            `the warning did not name the platform's socket IP: ${warning}`,
+          );
+          assert.ok(
+            !warning.includes("203.0.113.51"),
+            "the warning named a client-sent address as the socket IP",
+          );
+          assert.deepEqual(repeated, []);
+          await html({ forwarded: "for=203.0.113.52" });
+          await html({ "x-real-ip": "203.0.113.53" });
+          assert.equal(
+            proxyWarnings(boot).length,
+            1,
+            "W_PROXY_UNTRUSTED was logged more than once per application",
+          );
+        }),
+      ),
+    noProxyTrust,
+  );
+  add(
+    "H-proxy-untrusted-warning",
+    "outside production, forwarded auth requests log no W_PROXY_UNTRUSTED",
+    (o, b) =>
+      withNodeEnv("test", () =>
+        withBoot(o, b, {}, async (boot) => {
+          await sendRaw(`${boot.url}${AUTH}/probe/html`, {
+            headers: { "x-forwarded-for": "203.0.113.54" },
+          });
+          assert.deepEqual(proxyWarnings(boot), []);
+        }),
+      ),
+    noProxyTrust,
+  );
+  add(
+    "H-proxy-untrusted-warning",
+    "in production behind a trusted hop, forwarded auth requests log no W_PROXY_UNTRUSTED",
+    async (o, b) => {
+      if (!(await implementsMember(o, "proxyTrust"))) {
+        return conformanceSkip(
+          "the platform does not implement the optional proxyTrust()",
+        );
+      }
+      return inProduction(() =>
+        withBoot(o, b, { trustProxy: true }, async (boot) => {
+          await sendRaw(`${boot.url}${AUTH}/probe/html`, {
+            headers: { "x-forwarded-for": "203.0.113.55" },
+          });
+          assert.deepEqual(proxyWarnings(boot), []);
+        }),
+      );
+    },
+    () => noProxyTrust() ?? noTrustHook(),
   );
   add(
     "H-log-hygiene",
