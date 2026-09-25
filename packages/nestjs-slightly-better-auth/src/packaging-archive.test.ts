@@ -179,11 +179,14 @@ function exportedNames(body: readonly ModuleItem[]): string[] {
   });
 }
 
-async function declarationExports(file: string): Promise<string[]> {
-  const { body } = parseSync(await readFile(join(root, file), "utf8"), {
+async function parse(file: string): Promise<ModuleItem[]> {
+  return parseSync(await readFile(join(root, file), "utf8"), {
     syntax: "typescript",
-  });
-  return exportedNames(body);
+  }).body;
+}
+
+async function declarationExports(file: string): Promise<string[]> {
+  return exportedNames(await parse(file));
 }
 
 async function node(script: string): Promise<unknown> {
@@ -204,6 +207,36 @@ describe("packed authentication archive", () => {
   it("contains only the manifest, README, license and the files the export map reaches", async () => {
     const expected = [...(await reachableFiles()), "README.md", "LICENSE"];
     expect(files).toEqual(expected.sort());
+  });
+
+  // Files that only import and re-export have nothing to map; the rolldown
+  // runtime chunk holds generated helpers without a source.
+  it("references a source map from every emitted file with code of its own", async () => {
+    const unmapped: string[] = [];
+    for (const file of files.filter((path) =>
+      /\.(?:[cm]js|d\.[cm]ts)$/.test(path),
+    )) {
+      const code = await readFile(join(root, file), "utf8");
+      if (
+        sourceMappingUrl.test(code) ||
+        /^dist\/rolldown-runtime-[\w-]+\.cjs$/.test(file)
+      ) {
+        continue;
+      }
+      // Judge a CommonJS file by its ESM sibling, which has the same content.
+      const esm = file.replace(/\.cjs$/, ".mjs").replace(/\.d\.cts$/, ".d.mts");
+      const statements = await parse(esm);
+      if (
+        !statements.every(
+          (item) =>
+            item.type === "ImportDeclaration" ||
+            item.type === "ExportNamedDeclaration",
+        )
+      ) {
+        unmapped.push(file);
+      }
+    }
+    expect(unmapped).toEqual([]);
   });
 
   // Every map names only this package's non-test sources by relative path. The
@@ -262,6 +295,12 @@ describe("packed authentication archive", () => {
   });
 
   it("lists one allow-list row per entry and no internal name", () => {
+    // A string-valued export would bypass the per-entry checks below.
+    expect(
+      Object.entries(manifest.exports)
+        .filter(([, target]) => typeof target === "string")
+        .map(([subpath]) => subpath),
+    ).toEqual(["./package.json"]);
     expect(Object.keys(publicApi).sort()).toEqual(
       entries.map(({ subpath }) => subpath).sort(),
     );
