@@ -657,6 +657,18 @@ const cases: ConformanceCase[] = [
 ];
 runConformance(cases, { describe, it });
 
+principalSourceConformance({
+  source: apiKeyPrincipal(),
+  auth,
+  credentials: {
+    ...credentials,
+    valid: async (instance) => new Headers({ "x-api-key": String(instance === auth) }),
+    apiKey: async (_instance, fields) => ({ id: String(fields.remaining), headers: new Headers() }),
+    organizationKey: async () => new Headers(),
+  },
+  variant: (overrides) => createConformanceAuth({ ...overrides, plugins: [admin(), apiKey()] }),
+  http: { platform: expressPlatform(), createHttpAdapter: () => new ExpressAdapter() },
+});
 // @ts-expect-error A transport is not a principal source.
 principalSourceConformance({ source: rpcTransport(), auth, credentials });
 // @ts-expect-error A principal source is not an HTTP platform.
