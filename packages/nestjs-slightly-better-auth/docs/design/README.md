@@ -104,20 +104,25 @@ The reviewed v7 text stays unchanged. These published declarations differ from i
   graphql-ws awaited the operation's context or to an earlier connection that a cached context
   carries; its state cannot tell the two apart. The operation therefore reads no credential of
   that connection: its headers carry only the upgrade request's host metadata, without
-  connection parameters, `subscriptionCredentials`, upgrade-request credentials or cookies, and
-  its call carries neither the context as its memo key nor a connection for principal reuse. It
-  runs anonymously: required operations answer the unauthenticated denial, public and optional
-  ones run without a principal, and nothing is logged at ERROR. The origin check still evaluates
-  that connection's handshake, which grants no credential. A socket that closes after its
-  operation started keeps that operation's credentials. A cached context of a closed connection
-  authenticates nothing; while the earlier connection is still open, the transport cannot tell a
-  cached context from the current one, so the fresh-context rule is mandatory.
-  `T-stale-context` runs its cached-context row on connection-shaped legs through
-  `invokeConnection`, which resolves after the server observed the close, and accepts the later
-  caller's own principal, an anonymous answer or the unauthenticated denial, never the first
-  caller's principal, with nothing logged at ERROR. Mercurius socket operations use its
-  per-connection `subscription.context` and carry no graphql-ws `extra`, so they are unaffected
-  ([issue #625](https://github.com/thilllon/nestjs-kit/issues/625)).
+  connection parameters, cookies, `subscriptionCredentials` or upgrade-request credentials, its
+  request URL (`PrincipalRequest.request`, the policy context's `request`) is the upgrade URL
+  without its query string or fragment, so a query-string credential such as `?access_token=`
+  reaches no principal source or policy, and its call carries neither the context as its memo
+  key nor a connection for principal reuse. It runs anonymously: required operations answer the
+  unauthenticated denial, optional and public ones run without a principal, and nothing is
+  logged at ERROR. The origin check still evaluates that connection's handshake, including its
+  full URL, which grants no credential; principal sources and policies do not receive the
+  browser leg. A socket that closes after its operation started keeps that operation's
+  credentials. A cached context of a closed connection authenticates nothing; while the earlier
+  connection is still open, the transport cannot tell a cached context from the current one, so
+  the fresh-context rule is mandatory. `T-stale-context` runs its cached-context row on
+  connection-shaped legs through `invokeConnection`, which resolves after the server observed
+  the close, and accepts the later caller's own principal, an anonymous answer or the
+  unauthenticated denial, never the first caller's principal, with nothing logged at ERROR.
+  Mercurius socket operations use its per-connection `subscription.context` and carry no
+  graphql-ws `extra`, so they are unaffected
+  ([issue #625](https://github.com/thilllon/nestjs-kit/issues/625),
+  [issue #656](https://github.com/thilllon/nestjs-kit/issues/656)).
 
 ## Paths in historical documents
 
