@@ -32,6 +32,7 @@ import type {
   PrincipalRequest,
   PrincipalResult,
   PrincipalSource,
+  ProxyTrust,
   TransportCall,
 } from "./auth-contracts.js";
 import { AuthFailures } from "./auth-errors.js";
@@ -90,12 +91,27 @@ describe("Express platform conformance", () => {
   );
 });
 
+/**
+ * Fastify fixes trustProxy when the adapter constructs its instance, so the trusted-hop rows boot on adapters that
+ * trust the loopback hop the kit's requests come from. Fastify 5 fails closed for a numeric hop count, and it exposes
+ * no public trustProxy metadata, so FastifyPlatform has no proxyTrust() and the rows that need one skip.
+ */
+const fastifyHarness = {
+  createHttpAdapter: () => new FastifyAdapter(),
+  createTrustingHttpAdapter: () =>
+    new FastifyAdapter({ trustProxy: "loopback" }),
+  http2: {
+    createHttpAdapter: () => new FastifyAdapter({ http2: true }),
+    createTrustingHttpAdapter: () =>
+      new FastifyAdapter({ http2: true, trustProxy: "loopback" }),
+  },
+} satisfies Omit<HttpConformanceOptions, "platform">;
+
 describe("Fastify platform conformance", () => {
   runConformance(
     httpPlatformConformance({
       platform: fastifyPlatform(),
-      createHttpAdapter: () => new FastifyAdapter(),
-      http2: { createHttpAdapter: () => new FastifyAdapter({ http2: true }) },
+      ...fastifyHarness,
       microservice: tcpMicroservice,
     }),
     { describe, it },
@@ -166,6 +182,37 @@ function rewritingExpress(
   );
 }
 
+/** The one Fastify case of the kit whose title matches, booted through the testing bootstrap. */
+function fastifyKitCase(
+  platform: HttpPlatform,
+  id: string,
+  title: RegExp,
+): ConformanceCase {
+  const found = httpPlatformConformance({
+    platform,
+    ...fastifyHarness,
+    bootstrap: ["testing"],
+  }).find((item) => item.id === id && title.test(item.title));
+  expect(found?.skip).toBeUndefined();
+  return found!;
+}
+
+/** A Fastify platform whose proxyTrust() answers with `report`. */
+function reportingFastify(
+  report: (adapter: AbstractHttpAdapter) => ProxyTrust,
+): HttpPlatform {
+  return {
+    ...wrappedPlatform(fastifyPlatform() as HttpPlatform, (binding, inbound) =>
+      binding.handle(inbound),
+    ),
+    proxyTrust: report,
+  };
+}
+
+/** A defective Fastify platform that reports proxy trust 'none' whatever its adapter trusts. */
+const untrustingFastify = () =>
+  reportingFastify(() => ({ mode: "none", detail: "trustProxy = false" }));
+
 function kitCase(
   options: Omit<HttpConformanceOptions, "createHttpAdapter" | "bootstrap">,
   id: string,
@@ -213,6 +260,83 @@ describe("platform kit mutations", () => {
     await expect(
       kitCase({ platform }, "H-ip-platform", /behind a trusted hop/).run(),
     ).rejects.toThrow(/shared the first client's bucket/);
+  });
+
+  it.each([
+    { title: /^in production mode behind a trusted hop/ },
+    { title: /^over HTTP\/2, in production mode behind a trusted hop/ },
+  ])(
+    "fails the Fastify trusted-hop H-ip-platform bucket row $title for a platform that ignores its proxy trust",
+    async ({ title }) => {
+      const platform = wrappedPlatform(
+        fastifyPlatform() as HttpPlatform,
+        (binding, inbound) =>
+          binding.handle({ ...inbound, clientIp: "127.0.0.1" }),
+      );
+      await expect(
+        fastifyKitCase(platform, "H-ip-platform", title).run(),
+      ).rejects.toThrow(/shared the first client's bucket/);
+    },
+  );
+
+  it.each([
+    {
+      id: "H-proxy-untrusted-warning",
+      title: /^in production behind a trusted hop/,
+      error: /W_PROXY_UNTRUSTED/,
+    },
+    {
+      id: "H-proxy-untrusted-warning",
+      title: /^over HTTP\/2, in production behind a trusted hop/,
+      error: /W_PROXY_UNTRUSTED/,
+    },
+    {
+      id: "H-ip-platform",
+      title: /^with trustedProxies covering the proxy and trust on/,
+      error: /W_CLIENT_IP/,
+    },
+    {
+      id: "H-ip-platform",
+      title:
+        /^over HTTP\/2, with trustedProxies covering the proxy and trust on/,
+      error: /W_CLIENT_IP/,
+    },
+  ])(
+    "fails the Fastify trusted-hop $id row $title for a platform that reports 'none' behind a trusted hop",
+    async ({ id, title, error }) => {
+      await expect(
+        fastifyKitCase(untrustingFastify(), id, title).run(),
+      ).rejects.toThrow(error);
+    },
+  );
+
+  it("decides H-proxy-trust from a trusting adapter when trust is fixed at construction, and fails a platform that ignores it", async () => {
+    const trusting = new WeakSet<AbstractHttpAdapter>();
+    const harness = {
+      ...fastifyHarness,
+      createTrustingHttpAdapter: () => {
+        const adapter = new FastifyAdapter({ trustProxy: "loopback" });
+        trusting.add(adapter);
+        return adapter;
+      },
+      bootstrap: ["testing"] as const,
+    };
+    const row = (platform: HttpPlatform) => {
+      const found = httpPlatformConformance({ platform, ...harness }).find(
+        (item) => item.id === "H-proxy-trust",
+      );
+      expect(found?.skip).toBeUndefined();
+      return found!;
+    };
+    const reporting = reportingFastify((adapter) =>
+      trusting.has(adapter)
+        ? { mode: "partial", detail: "trustProxy = loopback" }
+        : { mode: "none", detail: "trustProxy = false" },
+    );
+    await expect(row(reporting).run()).resolves.toBeUndefined();
+    await expect(row(untrustingFastify()).run()).rejects.toThrow(
+      /did not reflect the trusted hop/,
+    );
   });
 
   it("fails the dynamic H-mount-custom-path row for a platform that drops the request host", async () => {
