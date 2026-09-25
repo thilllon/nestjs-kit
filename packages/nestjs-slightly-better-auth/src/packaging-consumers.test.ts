@@ -96,8 +96,8 @@ function coreDependencies(row: Row): Record<string, string> {
   };
 }
 
-// Optional-peer consumers: the floor core set plus one subpath's peers and the
-// packages its boot needs, at the versions the workspace tests use.
+// Optional-peer consumers: a row's core set plus one subpath's peers and the
+// packages its boot needs.
 const optionalConsumers = {
   graphql: {
     peers: ["@nestjs/graphql", "graphql"],
@@ -304,26 +304,35 @@ beforeAll(async () => {
     timeout: 120_000,
   });
   tarball = join(workspace, `${manifest.name}-${manifest.version}.tgz`);
-  const floor = coreDependencies("floor");
+  const rows = ["floor", "current"] as const;
   const installs: [string, Record<string, string>][] = [
-    ["floor", floor],
-    ["current", coreDependencies("current")],
-    ...Object.entries(optionalConsumers).map(
-      ([name, { peers, extras }]): [string, Record<string, string>] => [
-        name,
-        {
-          ...floor,
-          ...Object.fromEntries(
-            peers.map((peer) => [
-              peer,
-              floorOf(manifest.peerDependencies[peer]),
-            ]),
-          ),
-          ...Object.fromEntries(
-            extras.map((extra) => [extra, manifest.devDependencies[extra]]),
-          ),
-        },
-      ],
+    ...rows.map((row): [string, Record<string, string>] => [
+      row,
+      coreDependencies(row),
+    ]),
+    ...rows.flatMap((row) =>
+      Object.entries(optionalConsumers).map(
+        ([name, { peers, extras }]): [string, Record<string, string>] => [
+          `${row}-${name}`,
+          {
+            ...coreDependencies(row),
+            ...Object.fromEntries(
+              peers.map((peer) => {
+                const range = manifest.peerDependencies[peer];
+                return [peer, row === "floor" ? floorOf(range) : range];
+              }),
+            ),
+            // Packages outside the peer list: the workspace version, or the
+            // newest release of its major.
+            ...Object.fromEntries(
+              extras.map((extra) => {
+                const version = manifest.devDependencies[extra];
+                return [extra, row === "floor" ? version : `^${version}`];
+              }),
+            ),
+          },
+        ],
+      ),
     ),
   ];
   // Settle every install before failing, so cleanup never races a running pnpm.
@@ -827,13 +836,20 @@ console.log(JSON.stringify({ principals, outcomes: [...new Set(outcomes)].sort()
   },
 };
 
-describe.each(Object.keys(optionalConsumers) as OptionalConsumer[])(
-  "installed tarball with only the ./%s optional peers",
-  (name) => {
+describe.each(
+  (["floor", "current"] as const).flatMap((row) =>
+    (Object.keys(optionalConsumers) as OptionalConsumer[]).map((name) => ({
+      row,
+      name,
+    })),
+  ),
+)(
+  "installed tarball with only the ./$name optional peers at the $row versions",
+  ({ row, name }) => {
     const { peers } = optionalConsumers[name];
 
     it("keeps every other optional peer absent and loads each entry whose peers are present", async () => {
-      const result = await loadAllEntries(consumerFor(name));
+      const result = await loadAllEntries(consumerFor(`${row}-${name}`));
       const present = Object.keys(manifest.peerDependenciesMeta).filter(
         (peer) => (peers as readonly string[]).includes(peer),
       );
@@ -846,7 +862,7 @@ describe.each(Object.keys(optionalConsumers) as OptionalConsumer[])(
       "boots the subpath from the installed %s artifacts",
       async (format) => {
         const { stdout } = await nodeScript(
-          consumerFor(name),
+          consumerFor(`${row}-${name}`),
           `${bootPrelude(format)}${optionalBoots[name].script}`,
           format,
         );
