@@ -69,6 +69,94 @@ describe("TrustedOrigins with better-auth 1.7.5", () => {
     ).toBe(false);
   });
 
+  it("never trusts a request-dependent function's no-request result", async () => {
+    const calls: (string | null)[] = [];
+    const tenants = (request?: Request) => {
+      calls.push(request ? new URL(request.url).host : null);
+      return request
+        ? [`https://app.${new URL(request.url).hostname}`]
+        : ["https://app.a.example", "https://app.b.example"];
+    };
+    const request = new Request("https://b.example/transfer");
+    for (const options of [
+      { baseURL: "https://b.example" },
+      {
+        baseURL: {
+          allowedHosts: ["b.example", "localhost:3000"],
+          fallback: "https://fallback.example",
+        },
+      },
+    ] satisfies Parameters<typeof betterAuth>[0][]) {
+      const ctx = await context({ ...options, trustedOrigins: tenants });
+      expect(calls).toEqual([null]);
+      calls.length = 0;
+      const origins = new TrustedOrigins(async () => ctx);
+      expect(await origins.isTrusted("https://app.a.example", request)).toBe(
+        false,
+      );
+      expect(await origins.isTrusted("https://app.b.example", request)).toBe(
+        true,
+      );
+      expect(await origins.isTrusted("https://b.example", request)).toBe(true);
+      expect(calls.every((host) => host === "b.example")).toBe(true);
+      calls.length = 0;
+    }
+    const dynamic = await context({
+      baseURL: {
+        allowedHosts: ["b.example", "localhost:3000"],
+        fallback: "https://fallback.example",
+      },
+      trustedOrigins: tenants,
+    });
+    const list = await new TrustedOrigins(async () => dynamic).list(request);
+    expect(list).toEqual(
+      expect.arrayContaining([
+        "https://b.example",
+        "https://localhost:3000",
+        "http://localhost:3000",
+        "https://fallback.example",
+        "https://app.b.example",
+      ]),
+    );
+    expect(list).not.toContain("http://b.example");
+    expect(list).not.toContain("https://app.a.example");
+  });
+
+  it("keeps plugin and environment origins beside a function option", async () => {
+    const previous = process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS = "https://env.example";
+    try {
+      const ctx = await context({
+        trustedOrigins: (request?: Request) =>
+          request ? [] : ["https://init-only.example"],
+        plugins: [
+          {
+            id: "origin-test",
+            init: () => ({
+              options: { trustedOrigins: ["https://plugin.example"] },
+            }),
+          },
+        ],
+      });
+      const request = new Request("https://app.example/");
+      const origins = new TrustedOrigins(async () => ctx);
+      for (const [origin, trusted] of [
+        ["https://app.example", true],
+        ["https://plugin.example", true],
+        ["https://env.example", true],
+        ["https://init-only.example", false],
+      ] as const) {
+        expect(await origins.isTrusted(origin, request)).toBe(trusted);
+      }
+    } finally {
+      if (previous === undefined) {
+        delete process.env.BETTER_AUTH_TRUSTED_ORIGINS;
+      } else {
+        process.env.BETTER_AUTH_TRUSTED_ORIGINS = previous;
+      }
+    }
+  });
+
   it("trusts a leg's origin only for a genuinely unset baseURL", async () => {
     const fixed = await context();
     const unset = {

@@ -685,3 +685,79 @@ it.each([false, true])(
     }
   },
 );
+it("lets a mapped in-band session cookie make caller-session direct calls", async () => {
+  @WebSocketGateway()
+  @UseBetterAuth()
+  class Gateway {
+    constructor(
+      @Inject(getBetterAuthServiceToken())
+      private readonly auth: BetterAuthService,
+    ) {}
+
+    @RequireAuth()
+    @SubscribeMessage("sessions")
+    async sessions() {
+      const api = this.auth.api as unknown as {
+        listSessions(input: { headers: Headers }): Promise<unknown[]>;
+      };
+      const sessions = await api.listSessions({
+        headers: new Headers({ cookie: mapped }),
+      });
+      return { event: "sessions", data: sessions.length };
+    }
+  }
+  let mapped = "";
+  const auth = createTestAuth();
+  const fixture = await startHttpFixture({
+    auth,
+    adapter: new ExpressAdapter(),
+    platform: expressPlatform(),
+    controllers: [],
+    providers: [Gateway],
+    transports: [
+      wsTransport({
+        credentials: (client) => {
+          const session = new URL(
+            client[UPGRADE_REQUEST]!.url!,
+            "http://localhost",
+          ).searchParams.get("session");
+          return session ? { cookie: session } : undefined;
+        },
+      }),
+    ],
+    configure: (app) => {
+      app.useWebSocketAdapter(new (withUpgradeRequest(WsAdapter))(app));
+    },
+  });
+  const clients: WebSocket[] = [];
+  try {
+    const response = await auth.api.signUpEmail({
+      body: {
+        email: "mapped@example.com",
+        name: "Mapped",
+        password: "password1234",
+      },
+      asResponse: true,
+    });
+    mapped = response.headers
+      .getSetCookie()
+      .map((line) => line.split(";")[0])
+      .join("; ");
+    for (const origin of [undefined, "http://localhost:3000"]) {
+      const client = await connect(
+        `${fixture.url}/?session=${encodeURIComponent(mapped)}`,
+        { host: "localhost:3000", ...(origin ? { origin } : {}) },
+      );
+      clients.push(client);
+      expect(await sendMessage(client, "sessions", {})).toEqual({
+        event: "sessions",
+        data: 1,
+      });
+    }
+  } finally {
+    for (const client of clients) {
+      client.terminate();
+    }
+    await fixture.close();
+  }
+});
