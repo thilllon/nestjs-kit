@@ -87,6 +87,8 @@ export interface ProbeState {
     | undefined;
   /** Milliseconds the before hook waits for a path, so that concurrent sources settle in a chosen order. */
   delay: ((path: string) => number | undefined) | undefined;
+  /** A response header the after hook sets on a dispatched path, beside its Set-Cookie lines; undefined sets none. */
+  responseHeader: ((path: string) => [string, string] | undefined) | undefined;
   streamCancelled: boolean;
 }
 
@@ -103,6 +105,7 @@ export function createProbeState(): ProbeState {
     storageDelay: undefined,
     respond: undefined,
     delay: undefined,
+    responseHeader: undefined,
     streamCancelled: false,
   };
 }
@@ -387,6 +390,10 @@ function probePlugin(
               path: ctx.path,
               skip: (await getShouldSkipSessionRefresh()) === true,
             });
+            const header = state.responseHeader?.(ctx.path);
+            if (header) {
+              ctx.setHeader(header[0], header[1]);
+            }
             const setCookies =
               ctx.context.responseHeaders?.getSetCookie() ?? [];
             if (setCookies.length) {
@@ -454,25 +461,29 @@ export async function probeOf(auth: AuthLike): Promise<ProbeState> {
 }
 
 /**
+ * Better Auth's origin-check flags of a conformance instance. Both default to false, so every origin check is on; a
+ * caller's `options.advanced` cannot change them, only this argument can.
+ */
+export interface ConformanceAuthSettings {
+  /**
+   * Better Auth's advanced.disableOriginCheck. true skips Better Auth's own origin validation of its routes; with
+   * disableCSRFCheck false the library's application-route checks stay on (BA-r6-01, T-csrf-http-unsafe).
+   */
+  readonly disableOriginCheck?: boolean;
+  /** Better Auth's advanced.disableCSRFCheck. true switches every origin check off, the library's included. */
+  readonly disableCSRFCheck?: boolean;
+}
+
+/**
  * A memory-adapter Better Auth instance with the settings the kits assume: origin checks explicitly on
  * (advanced.disableOriginCheck: false, which vitest's TEST=true would otherwise switch off, and
  * advanced.disableCSRFCheck: false, which would otherwise switch every origin check off), session.updateAge 0 so
  * every session read refreshes, testUtils(), bearer(), conformanceProbePlugin() and nestjs() last. The kit settings
- * win over the same options in `options`.
+ * win over the same options in `options`; `settings` switches the origin checks off explicitly.
  */
 export function createConformanceAuth(
   options: Omit<BetterAuthOptions, "database"> = {},
-): AuthLike {
-  return conformanceAuth(options);
-}
-
-/**
- * Internal: createConformanceAuth() with the kits' own opt-out rows. Only a kit switches Better Auth's
- * advanced.disableCSRFCheck on, for the case that proves the kernel honors it; a caller's option never does.
- */
-export function conformanceAuth(
-  options: Omit<BetterAuthOptions, "database">,
-  kit: { readonly disableCSRFCheck?: boolean } = {},
+  settings: ConformanceAuthSettings = {},
 ): AuthLike {
   // The probe creates a table for every model of the resolved schema when Better Auth initializes it.
   const tables: Record<string, unknown[]> = {};
@@ -485,8 +496,8 @@ export function conformanceAuth(
     session: { ...options.session, updateAge: 0 },
     advanced: {
       ...options.advanced,
-      disableOriginCheck: false,
-      disableCSRFCheck: kit.disableCSRFCheck === true,
+      disableOriginCheck: settings.disableOriginCheck === true,
+      disableCSRFCheck: settings.disableCSRFCheck === true,
     },
     plugins: [
       testUtils(),

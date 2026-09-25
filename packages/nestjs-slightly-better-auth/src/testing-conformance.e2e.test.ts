@@ -29,9 +29,13 @@ import type {
   HttpPlatform,
   InboundAuthRequest,
   PlatformMountContext,
+  PrincipalRequest,
+  PrincipalResult,
+  PrincipalSource,
   ProxyTrust,
   TransportCall,
 } from "./auth-contracts.js";
+import { AuthFailures } from "./auth-errors.js";
 import { BetterAuthCoreModule } from "./auth-core-module.js";
 import { defineExtension } from "./auth-module-definition.js";
 import { BetterAuthGuard } from "./auth-guard.js";
@@ -64,6 +68,7 @@ import { fastifyPlatform } from "./fastify.js";
 import { BridgeClient } from "./bridge-client.js";
 import type { BridgeBinding } from "./bridge-protocol.js";
 import { HttpTransport, httpTransport } from "./http-transport.js";
+import { rejected } from "./principal-resolver.js";
 import { RoutePlanner } from "./route-planner.js";
 import { sessionPrincipal } from "./session-principal.js";
 
@@ -639,7 +644,7 @@ function httpHarness(
             ...(options.globalScope === undefined
               ? {}
               : { globalScope: options.globalScope }),
-            logSummary: false,
+            logSummary: options.logSummary ?? false,
           } as never),
         ],
         controllers: [
@@ -781,14 +786,18 @@ describe("HTTP transport kit mutations", () => {
   });
 });
 
-/** The principal kit's HTTP rows (the other rows run in testing-conformance.test.ts without a server). */
-function sessionBridgeCases(
+/**
+ * The principal kit's HTTP rows: S-bridge-* and the HTTP-route rows of S-cookie-forwarded and S-infra-throws (the
+ * other rows run in testing-conformance.test.ts without a server).
+ */
+function sessionHttpCases(
   platform: () => HttpPlatform,
   createHttpAdapter: () => AbstractHttpAdapter,
+  source: PrincipalSource = sessionPrincipal() as unknown as PrincipalSource,
 ): ConformanceCase[] {
   const auth = createConformanceAuth();
   return principalSourceConformance({
-    source: sessionPrincipal(),
+    source,
     auth,
     credentials: {
       valid: async (instance) =>
@@ -797,12 +806,16 @@ function sessionBridgeCases(
         new Headers({ cookie: "better-auth.session_token=invalid.value" }),
     },
     http: { platform: platform(), createHttpAdapter },
-  }).filter((item) => item.id.startsWith("S-bridge-"));
+  }).filter(
+    (item) =>
+      item.id.startsWith("S-bridge-") ||
+      item.title.startsWith("through an HTTP route"),
+  );
 }
 
-describe("principal source kit bridge rows on Express", () => {
+describe("principal source kit HTTP rows on Express", () => {
   runConformance(
-    sessionBridgeCases(
+    sessionHttpCases(
       () => expressPlatform() as unknown as HttpPlatform,
       () => new ExpressAdapter(),
     ),
@@ -810,9 +823,9 @@ describe("principal source kit bridge rows on Express", () => {
   );
 });
 
-describe("principal source kit bridge rows on Fastify", () => {
+describe("principal source kit HTTP rows on Fastify", () => {
   runConformance(
-    sessionBridgeCases(
+    sessionHttpCases(
       () => fastifyPlatform() as unknown as HttpPlatform,
       () => new FastifyAdapter(),
     ),
@@ -820,17 +833,54 @@ describe("principal source kit bridge rows on Fastify", () => {
   );
 });
 
-describe("principal source kit bridge mutations", () => {
-  const bridgeCase = (id: string) => {
-    const found = sessionBridgeCases(
+describe("principal source kit HTTP mutations", () => {
+  const bridgeCase = (id: string, source?: PrincipalSource) => {
+    const found = sessionHttpCases(
       () => expressPlatform() as unknown as HttpPlatform,
       () => new ExpressAdapter(),
+      source,
     ).find((item) => item.id === id);
     if (!found) {
       throw new Error(`no case ${id}`);
     }
     return found;
   };
+
+  /** The session source with a replaced resolve(). */
+  const faultySession = (
+    resolve: (
+      real: PrincipalSource,
+      request: PrincipalRequest,
+    ) => Promise<PrincipalResult>,
+  ): PrincipalSource => {
+    const real = sessionPrincipal() as unknown as PrincipalSource;
+    return { ...real, resolve: (request) => resolve(real, request) };
+  };
+
+  it("fails the HTTP-route row of S-cookie-forwarded for a source that drops its refresh cookies", async () => {
+    // The session still refreshes, but the source never appends the refresh cookie it forwards by hand.
+    const dropping = faultySession((real, request) =>
+      real.resolve({ ...request, cookies: { append: () => true } }),
+    );
+    await expect(
+      bridgeCase("S-cookie-forwarded", dropping).run(),
+    ).rejects.toThrow(/the client received it 0 times/);
+  });
+
+  it("fails the HTTP-route row of S-infra-throws for a source that reports storage outages as invalid sessions", async () => {
+    const denying = faultySession(async (real, request) => {
+      try {
+        return await real.resolve(request);
+      } catch {
+        return rejected(
+          AuthFailures.rejected({ status: 401, reason: "INVALID_SESSION" }),
+        );
+      }
+    });
+    await expect(bridgeCase("S-infra-throws", denying).run()).rejects.toThrow(
+      /answered 401 for a storage outage instead of 5xx/,
+    );
+  });
 
   /** A defective planner: every handler forwards the cookies of its direct calls. */
   function forwardEveryHandler() {
