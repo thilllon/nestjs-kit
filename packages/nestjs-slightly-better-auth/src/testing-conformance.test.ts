@@ -16,10 +16,11 @@ import {
   MetadataScanner,
 } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
+import type { BetterAuthPlugin } from "better-auth";
 import { APIError } from "better-auth/api";
-import { admin, organization } from "better-auth/plugins";
+import { admin, customSession, organization } from "better-auth/plugins";
 import { role } from "better-auth/plugins/access";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { adminPermissionPolicy, permission } from "./admin.js";
 import { apiKeyPermission, apiKeyPrincipal } from "./api-key.js";
 import type {
@@ -57,7 +58,15 @@ import {
   type TransportInvocationResult,
   transportConformance,
 } from "./conformance-transport.js";
-import { orgMember, organizationRef, orgPermission } from "./organization.js";
+import { BootValidator } from "./boot-validator.js";
+import {
+  orgMember,
+  orgMemberPolicy,
+  organizationRef,
+  orgPermission,
+  orgPermissionPolicy,
+} from "./organization.js";
+import { PolicyResolver } from "./policy-resolver.js";
 import { authenticated, rejected } from "./principal-resolver.js";
 import { freshSession, sessionPrincipal } from "./session-principal.js";
 
@@ -863,7 +872,10 @@ function keyPrincipal(
 }
 
 async function adminFixture() {
-  const auth = createConformanceAuth({ plugins: [admin(), apiKey()] });
+  const auth = createConformanceAuth({
+    session: { cookieCache: { enabled: true } },
+    plugins: [admin(), apiKey({ enableSessionForAPIKeys: true })],
+  });
   const administrator = await kitIdentity(auth, { role: "admin" });
   const member = await kitIdentity(auth, { role: "user" });
   return { auth, administrator, member };
@@ -906,8 +918,11 @@ describe("policy kit on the session-only admin permission", async () => {
   );
 });
 
-describe("policy kit on the built-in organization policies", async () => {
-  const auth = createConformanceAuth({ plugins: [organization()] });
+async function organizationFixture(plugins: BetterAuthPlugin[] = []) {
+  const auth = createConformanceAuth({
+    session: { cookieCache: { enabled: true } },
+    plugins: [organization(), ...plugins],
+  });
   const owner = await kitIdentity(auth);
   const outsider = await kitIdentity(auth);
   const created = await (
@@ -922,6 +937,13 @@ describe("policy kit on the built-in organization policies", async () => {
     body: { name: "Conformance", slug: `conformance-${crypto.randomUUID()}` },
   });
   const ref = organizationRef(() => created.id);
+  return { auth, owner, outsider, ref };
+}
+
+describe("policy kit on the built-in organization policies", async () => {
+  const { auth, owner, outsider, ref } = await organizationFixture([
+    apiKey({ enableSessionForAPIKeys: true }),
+  ]);
   for (const [name, requirement] of [
     [
       "permission",
@@ -945,6 +967,24 @@ describe("policy kit on the built-in organization policies", async () => {
   }
 });
 
+describe("policy kit on the organization permission policy with customSession", async () => {
+  const { auth, owner, outsider, ref } = await organizationFixture([
+    customSession(async ({ user, session }) => ({ user, session })),
+  ]);
+  runConformance(
+    policyConformance({
+      requirement: orgPermission(
+        { organization: ["update"] },
+        { organization: ref },
+      ),
+      auth,
+      allowingPrincipal: async () => sessionPrincipalOf({ id: owner.userId }),
+      denyingPrincipal: async () => sessionPrincipalOf({ id: outsider.userId }),
+    }),
+    { describe, it },
+  );
+});
+
 describe("policy kit on the built-in API-key permission policy", async () => {
   const keys = await apiKeyAuth();
   runConformance(
@@ -957,6 +997,7 @@ describe("policy kit on the built-in API-key permission policy", async () => {
         keyPrincipal(keys.owner, { project: ["write"] }),
       delegatedPrincipal: async () =>
         keyPrincipal(keys.owner, { project: ["read"] }),
+      sources: [apiKeyPrincipal()],
     }),
     { describe, it },
   );
@@ -1035,5 +1076,261 @@ describe("policy kit mutations", () => {
     ).toThrow(
       expect.objectContaining({ code: "CONFORMANCE_POLICY_OBJECT_REQUIRED" }),
     );
+  });
+
+  type AdminPolicy = typeof adminPermissionPolicy;
+
+  /** The admin kit's options with the given stand-in for the built-in admin policy (same id, so the admin rows run). */
+  async function adminCases(policy: AdminPolicy) {
+    const fixture = await adminFixture();
+    return policyConformance({
+      requirement: {
+        policy,
+        params: { permissions: { user: ["ban"] } },
+        principals: ["session", "api-key" as never],
+      },
+      auth: fixture.auth,
+      allowingPrincipal: async () =>
+        sessionPrincipalOf({ id: fixture.administrator.userId }),
+      denyingPrincipal: async () =>
+        sessionPrincipalOf({ id: fixture.member.userId }),
+      delegatedPrincipal: async () =>
+        keyPrincipal(fixture.administrator.userId, { user: ["ban"] }),
+    });
+  }
+
+  function adminVariant(
+    requires: Partial<NonNullable<AdminPolicy["requires"]>>,
+    evaluate: AdminPolicy["evaluate"] = adminPermissionPolicy.evaluate,
+  ): AdminPolicy {
+    return {
+      ...adminPermissionPolicy,
+      requires: { ...adminPermissionPolicy.requires, ...requires },
+      evaluate,
+    };
+  }
+
+  interface AdminCall {
+    userHasPermission(input: {
+      body: { userId?: string; role?: string; permissions: object };
+    }): Promise<{ success: boolean }>;
+  }
+
+  it("fails Z-admin-rejects-api-key for an admin policy that admits API keys by default", async () => {
+    const cases = await adminCases(
+      adminVariant({ principals: ["session", "api-key" as never] }),
+    );
+    await expect(
+      caseById(cases, "Z-admin-rejects-api-key").run(),
+    ).rejects.toThrow(/"effect":"allow"/);
+  });
+
+  it("fails Z-admin-rejects-api-key-session and Z-admin-banned for an admin policy without fresh identity", async () => {
+    const cases = await adminCases(adminVariant({ freshIdentity: false }));
+    await expect(
+      caseById(cases, "Z-admin-rejects-api-key-session").run(),
+    ).rejects.toThrow(/x-api-key alone on @RequirePermission.*: allowed/);
+    await expect(caseById(cases, "Z-admin-banned").run()).rejects.toThrow(
+      /banned: the warm cookie cache still admitted the admin: allowed/,
+    );
+  });
+
+  it("fails Z-admin-banned for an admin policy that ignores a key owner's ban", async () => {
+    const cases = await adminCases(
+      adminVariant({}, async ({ permissions }, context) => {
+        const result = await (
+          context.auth.api as unknown as AdminCall
+        ).userHasPermission({
+          body: { userId: context.principal.userId!, permissions },
+        });
+        return result.success &&
+          (!context.principal.delegation ||
+            context.principal.delegation.allows(permissions))
+          ? { effect: "allow" }
+          : { effect: "deny", reason: "MISSING_PERMISSION" };
+      }),
+    );
+    await expect(caseById(cases, "Z-admin-banned").run()).rejects.toThrow(
+      /a banned owner's key was not denied USER_BANNED/,
+    );
+  });
+
+  it("fails Z-admin-custom-session-role for an admin policy that reads the session's role", async () => {
+    const cases = await adminCases(
+      adminVariant({}, async ({ permissions }, context) => {
+        const role = (
+          context.principal as { session?: { user?: { role?: unknown } } }
+        ).session?.user?.role;
+        const result = await (
+          context.auth.api as unknown as AdminCall
+        ).userHasPermission({
+          body: {
+            role: Array.isArray(role) ? role.join(",") : String(role),
+            permissions,
+          },
+        });
+        return result.success
+          ? { effect: "allow" }
+          : { effect: "deny", reason: "MISSING_PERMISSION" };
+      }),
+    );
+    await expect(
+      caseById(cases, "Z-admin-custom-session-role").run(),
+    ).rejects.toThrow(/listUsers/);
+  });
+
+  it("fails Z-admin-deleted-user and Z-admin-null-role for an admin policy that trusts the stored user", async () => {
+    const cases = await adminCases(
+      adminVariant({}, async ({ permissions }, context) => {
+        const owner = await (
+          await context.auth.context()
+        ).internalAdapter.findUserById(context.principal.userId!);
+        const roles = (owner as { role: string }).role.split(",");
+        const result = await (
+          context.auth.api as unknown as AdminCall
+        ).userHasPermission({
+          body: { role: roles.join(","), permissions },
+        });
+        return result.success
+          ? { effect: "allow" }
+          : { effect: "deny", reason: "MISSING_PERMISSION" };
+      }),
+    );
+    await expect(caseById(cases, "Z-admin-deleted-user").run()).rejects.toThrow(
+      /a key whose owner was deleted/,
+    );
+    await expect(caseById(cases, "Z-admin-null-role").run()).rejects.toThrow(
+      /the policy threw|a NULL role/,
+    );
+  });
+
+  it("fails Z-admin-dynamic-base-url for an admin policy that does not declare hostless calls", async () => {
+    const cases = await adminCases(adminVariant({ hostlessCalls: false }));
+    await expect(
+      caseById(cases, "Z-admin-dynamic-base-url").run(),
+    ).rejects.toThrow(/a dynamic baseURL without fallback booted/);
+  });
+
+  it("fails Z-singleton when boot validation accepts request-scoped policies", async () => {
+    const spy = vi
+      .spyOn(
+        BootValidator.prototype as unknown as {
+          singletonChecks(...args: unknown[]): void;
+        },
+        "singletonChecks",
+      )
+      .mockImplementation(() => undefined);
+    try {
+      const cases = await adminCases(adminPermissionPolicy);
+      await expect(caseById(cases, "Z-singleton").run()).rejects.toThrow(
+        /boot did not report NON_SINGLETON_EXTENSION/,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails Z-class-policy-requires when route planning ignores a class policy's requires field", async () => {
+    const resolve = PolicyResolver.prototype.resolve;
+    const spy = vi
+      .spyOn(PolicyResolver.prototype, "resolve")
+      .mockImplementation(function (this: PolicyResolver, reference) {
+        const policy = resolve.call(this, reference);
+        return policy.id.includes("conformance/class-")
+          ? { ...policy, requires: undefined }
+          : policy;
+      });
+    try {
+      const cases = await adminCases(adminPermissionPolicy);
+      await expect(
+        caseById(cases, "Z-class-policy-requires").run(),
+      ).rejects.toThrow(/an API key was not admitted/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  async function organizationCases(policy: typeof orgPermissionPolicy) {
+    const { auth, owner, outsider, ref } = await organizationFixture([
+      apiKey({ enableSessionForAPIKeys: true }),
+    ]);
+    return policyConformance({
+      requirement: {
+        policy,
+        params: {
+          permissions: { organization: ["update"] },
+          organization: ref,
+        },
+      },
+      auth,
+      allowingPrincipal: async () => sessionPrincipalOf({ id: owner.userId }),
+      denyingPrincipal: async () => sessionPrincipalOf({ id: outsider.userId }),
+    });
+  }
+
+  it("fails Z-policy-session-lost and both Z-infra-throws variants for a policy that turns errors into denials", async () => {
+    const cases = await organizationCases({
+      ...orgPermissionPolicy,
+      async evaluate(params, context) {
+        try {
+          return await orgPermissionPolicy.evaluate(params, context);
+        } catch {
+          return { effect: "deny", reason: "MISSING_PERMISSION" };
+        }
+      },
+    });
+    await expect(
+      caseById(cases, "Z-policy-session-lost").run(),
+    ).rejects.toThrow(/must deny 401 UNAUTHENTICATED/);
+    const infra = cases.filter((item) => item.id === "Z-infra-throws");
+    expect(infra.map((item) => item.title)).toEqual([
+      expect.stringContaining("cookie cache off"),
+      expect.stringContaining("warm cookie cache"),
+    ]);
+    for (const item of infra) {
+      await expect(item.run()).rejects.toThrow(/a storage outage was decided/);
+    }
+  });
+
+  it("fails Z-org-ref-types for an organization policy that coerces inputs to strings", async () => {
+    const cases = await organizationCases({
+      ...orgPermissionPolicy,
+      evaluate: (params, context) =>
+        orgPermissionPolicy.evaluate(
+          {
+            ...params,
+            organization: organizationRef(async (inner) => {
+              const value = await params.organization(inner);
+              return typeof value === "string" ? value : JSON.stringify(value);
+            }),
+          },
+          context,
+        ),
+    });
+    await expect(caseById(cases, "Z-org-ref-types").run()).rejects.toThrow(
+      /orgId \{"\$ne":null\}/,
+    );
+  });
+
+  it("fails Z-apikey-quota-per-request for an organization policy that repeats its Better Auth call", async () => {
+    const evaluate = orgMemberPolicy.evaluate;
+    const spy = vi
+      .spyOn(orgMemberPolicy, "evaluate")
+      .mockImplementation(async (params, context) => {
+        const uncached = {
+          ...context,
+          memo: <T>(_key: unknown, fn: () => Promise<T>) => fn(),
+        };
+        await evaluate(params, uncached);
+        return evaluate(params, uncached);
+      });
+    try {
+      const cases = await organizationCases(orgPermissionPolicy);
+      await expect(
+        caseById(cases, "Z-apikey-quota-per-request").run(),
+      ).rejects.toThrow(/must spend 3/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
