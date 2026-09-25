@@ -158,6 +158,18 @@ function graphqlWsUpgrade(value: unknown): Upgrade | undefined {
 }
 /** WebSocket.OPEN of the `ws` sockets that Nest's graphql-ws server creates. */
 const WEBSOCKET_OPEN = 1;
+/** Upgrade-request headers that locate the server for Better Auth; none of them is a credential. */
+const HOST_METADATA = ["host", "x-forwarded-host", "x-forwarded-proto"];
+/** Copies the host metadata of `ambient` into `into` where `into` has none of its own. */
+function withHostMetadata(into: Headers, ambient: Headers): Headers {
+  for (const name of HOST_METADATA) {
+    const value = ambient.get(name);
+    if (!into.has(name) && value !== null) {
+      into.set(name, value);
+    }
+  }
+  return into;
+}
 /**
  * The identity of one GraphQL execution, shared by every resolver of that execution. graphql-js
  * coerces the variable values into a fresh object for every execution, including one
@@ -322,8 +334,10 @@ class GraphqlTransport implements AuthTransport {
   /**
    * Whether the operation's graphql-ws socket was open when the operation started. The first
    * classification of an execution holds for every later reader of it, so a connection that
-   * closes during authentication stays a socket operation. A socket that is already closed
-   * when an operation starts belongs to an earlier connection: a cached context carries it.
+   * closes during authentication keeps its credentials. A socket that is not open when an
+   * operation starts belongs either to a connection that closed while graphql-ws prepared the
+   * operation or to an earlier connection that a cached context carries; its state cannot tell
+   * the two apart, so the operation reads no credential of that connection in either case.
    */
   private openAtStart(
     webSocket: Record<PropertyKey, unknown> | undefined,
@@ -348,16 +362,6 @@ class GraphqlTransport implements AuthTransport {
     const normalized = graphqlArgs(args);
     const details = carrierDetails(normalized.context, this.id, kit.http);
     if (details.socket) {
-      if (!this.openAtStart(details.webSocket, normalized.info)) {
-        // Neither the upgrade request nor the connection's client data are consulted.
-        throw BetterAuthConfigurationError.atRequest(
-          "GRAPHQL_CONTEXT_STALE_REQUEST",
-          "GraphQL context contains the graphql-ws connection of a closed socket",
-          {
-            hint: "Return a fresh context object for every operation and every graphql-ws connection.",
-          },
-        );
-      }
       return details;
     }
     if (!kit.http?.isRequest(details.request)) {
@@ -386,8 +390,9 @@ class GraphqlTransport implements AuthTransport {
     const args = context.getArgs();
     const normalized = graphqlArgs(args);
     const initial = carrierDetails(normalized.context, this.id, kit.http);
-    // Classified here, at the start of the operation; a stale socket keeps no key or connection
-    // of the cached context, so no memoized principal of the earlier connection answers it.
+    // Classified here, at the start of the operation. The operation of a socket that is not open
+    // runs without that connection's credentials: it keeps no key or connection of the context,
+    // so no memoized or connection principal answers it, and its headers carry host metadata only.
     const open = this.openAtStart(initial.webSocket, normalized.info);
     const key =
       !initial.socket && kit.http?.isRequest(initial.request)
@@ -402,6 +407,10 @@ class GraphqlTransport implements AuthTransport {
         return kit.http!.headers(details.request);
       }
       const ambient = details.ambient();
+      if (!open) {
+        // Neither the upgrade request's credentials nor the connection's client data are read.
+        return withHostMetadata(new Headers(), ambient);
+      }
       if (this.options.subscriptionCredentials) {
         // Keep callback errors outside the conversion boundary: application
         // programming failures are not malformed credential denials.
@@ -417,13 +426,7 @@ class GraphqlTransport implements AuthTransport {
             reason: "MALFORMED_CREDENTIALS",
           });
         }
-        for (const name of ["host", "x-forwarded-host", "x-forwarded-proto"]) {
-          const value = ambient.get(name);
-          if (!mapped.has(name) && value !== null) {
-            mapped.set(name, value);
-          }
-        }
-        return mapped;
+        return withHostMetadata(mapped, ambient);
       }
       const credentials = new Headers(ambient);
       const allow = new Set(

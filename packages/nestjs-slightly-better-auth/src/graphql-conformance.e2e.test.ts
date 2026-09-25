@@ -1425,7 +1425,7 @@ describe("GraphQL transport kit mutations", () => {
     );
   });
 
-  it("fails T-stale-context for a transport that ignores the graphql-ws socket's state at operation start", async () => {
+  it("fails T-stale-context for a transport that keeps using a closed connection's credentials", async () => {
     const views = new WeakMap<object, object>();
     const ignoring = faultyApollo((real) => ({
       describe: (context, kit) =>
@@ -1439,7 +1439,7 @@ describe("GraphQL transport kit mutations", () => {
         "T-stale-context",
       ).run(),
     ).rejects.toThrow(
-      /a later caller of required did not read its own principal/,
+      /a later caller of required read the first caller's principal/,
     );
   });
 

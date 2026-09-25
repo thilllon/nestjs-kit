@@ -3635,8 +3635,8 @@ export function transportConformance(
         { graphqlContext: "static" },
         "GRAPHQL_STATIC_CONTEXT",
       );
-      // A cached context is detectable only once its first caller finished: a completed request, or a closed connection
-      // where the browser leg is the connection's handshake. invokeConnection resolves after the server observed the close.
+      // The first caller finishes before a later caller runs: its request completes, or, where the browser leg is the
+      // connection's handshake, its connection closes; invokeConnection resolves after the server observed the close.
       const connection = await connectionLeg();
       assert.ok(
         !connection || options.invokeConnection,
@@ -3662,6 +3662,25 @@ export function transportConformance(
           for (const handler of ["required", "optional"] as const) {
             const result = await invokeAlone(app, handler, laterCookie);
             const label = `a later caller of ${handler}`;
+            if (connection) {
+              // A connection that is closed when an operation starts lends it no credential: the operation runs
+              // anonymously, or with the later caller's own principal where the driver rebuilds its context.
+              assert.notEqual(
+                principalOf(result)?.userId,
+                env.identity.userId,
+                `${label} read the first caller's principal`,
+              );
+              if (result.ok) {
+                const principal = principalOf(result);
+                assert.ok(
+                  principal === null || principal?.userId === later.userId,
+                  `${label} read neither its own principal nor none: ${JSON.stringify(result.body)}`,
+                );
+              } else {
+                denied(result, 401, undefined, label);
+              }
+              continue;
+            }
             // A driver that rebuilds its context around the cached object answers with the later caller's own principal.
             if (result.ok) {
               assert.equal(
@@ -3682,6 +3701,18 @@ export function transportConformance(
           const service = await invokeAlone(app, "publicService", laterCookie);
           succeeded(service, "a later caller of a public service read");
           assert.deepEqual(service.body, { session: null });
+          if (connection) {
+            // A closed connection is an ordinary client outcome, not a configuration error.
+            assert.deepEqual(
+              logger.errors().map((entry) => entry.text.slice(0, 200)),
+              [],
+              "a later caller of a closed connection's context logged at ERROR",
+            );
+            assert.doesNotMatch(
+              logger.text(),
+              /AUTH_MISCONFIGURED|GRAPHQL_CONTEXT_STALE_REQUEST/,
+            );
+          }
         },
         { graphqlContext: "cached" },
       );

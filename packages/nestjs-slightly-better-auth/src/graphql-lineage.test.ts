@@ -768,18 +768,14 @@ describe("GraphQL socket classification at operation start", () => {
     context.setType("graphql");
     return { args, context };
   }
-  function staleCode(read: () => unknown): unknown {
-    try {
-      read();
-    } catch (error) {
-      return (error as { code?: unknown }).code;
-    }
-    return undefined;
-  }
   function connection() {
     const socket = openSocket();
     const request = {
-      headers: { host: "localhost:3000", upgrade: "websocket" },
+      headers: {
+        host: "localhost:3000",
+        upgrade: "websocket",
+        cookie: "current=credential",
+      },
       url: "/graphql",
     };
     return {
@@ -796,6 +792,7 @@ describe("GraphQL socket classification at operation start", () => {
     const call = transport.describe(context, { http: null });
     socket.readyState = 3;
     expect(call.headers().get("host")).toBe("localhost:3000");
+    expect(call.headers().get("cookie")).toBe("current=credential");
     expect(call.browser?.enforce).toBe(true);
     expect(() => call.lineage?.assertReadable?.(args)).not.toThrow();
     // The scope interceptor describes the same execution again after the close.
@@ -805,15 +802,16 @@ describe("GraphQL socket classification at operation start", () => {
     expect(again.headers().get("host")).toBe("localhost:3000");
   });
 
-  it("fails closed without reading the connection when the socket is closed at the start", () => {
+  it("reads no credential of a connection whose socket is not open at the start", () => {
     const socket = openSocket(3);
     const reads = { count: 0 };
     const request = {
-      headers: counted(
-        { host: "localhost:3000", cookie: "earlier=credential" },
-        reads,
-      ),
-      rawHeaders: counted(["cookie", "earlier=credential"], reads),
+      headers: {
+        host: "localhost:3000",
+        "x-forwarded-proto": "https",
+        cookie: "earlier=credential",
+        authorization: "Bearer upgrade",
+      },
       url: "/graphql",
     };
     const carrier = {
@@ -823,33 +821,41 @@ describe("GraphQL socket classification at operation start", () => {
       },
     };
     let mapped = 0;
-    const transport = apolloTransport({
-      subscriptionCredentials: () => {
-        mapped++;
-        return { authorization: "Bearer earlier" };
+    for (const options of [
+      {},
+      {
+        subscriptionCredentials: () => {
+          mapped++;
+          return { authorization: "Bearer earlier" };
+        },
       },
-    }) as AuthTransport;
-    const { args, context } = execution(carrier);
-    const call = transport.describe(context, { http: null });
-    // No memoized principal or connection principal of the cached context answers this operation.
-    expect(call.key).not.toBe(carrier);
-    expect(call.connection).toBeUndefined();
-    socket.readyState = 1;
-    for (const read of [
-      () => call.headers(),
-      () => call.browser,
-      () => call.request,
-      () => call.clientIp,
-      () => call.cookies,
-      () => call.lineage?.assertReadable?.(args),
     ]) {
-      expect(staleCode(read)).toBe("GRAPHQL_CONTEXT_STALE_REQUEST");
+      const transport = apolloTransport(options) as AuthTransport;
+      const { args, context } = execution(carrier);
+      const call = transport.describe(context, { http: null });
+      // No memoized principal or connection principal of the context answers this operation.
+      expect(call.key).not.toBe(carrier);
+      expect(call.connection).toBeUndefined();
+      // The classification at the start holds when the socket reports open later.
+      socket.readyState = 1;
+      expect([...call.headers()]).toEqual([
+        ["host", "localhost:3000"],
+        ["x-forwarded-proto", "https"],
+      ]);
+      expect(call.clientIp).toBeNull();
+      expect(call.cookies).toBeNull();
+      expect(call.request).toEqual({
+        method: "GET",
+        url: "http://localhost:3000/graphql",
+      });
+      expect(() => call.lineage?.assertReadable?.(args)).not.toThrow();
+      socket.readyState = 3;
     }
     expect(mapped).toBe(0);
     expect(reads.count).toBe(0);
   });
 
-  it("classifies every execution of a cached context at its own start", () => {
+  it("classifies every execution of a context at its own start", () => {
     const { socket, carrier } = connection();
     const transport = apolloTransport() as AuthTransport;
     // A parsed operation can be cached across executions, so two executions may share it.
@@ -859,9 +865,36 @@ describe("GraphQL socket classification at operation start", () => {
     socket.readyState = 3;
     const later = execution(carrier, operation);
     const laterCall = transport.describe(later.context, { http: null });
-    expect(staleCode(() => laterCall.headers())).toBe(
-      "GRAPHQL_CONTEXT_STALE_REQUEST",
+    expect(laterCall.connection).toBeUndefined();
+    expect(laterCall.headers().has("cookie")).toBe(false);
+    expect(firstCall.connection).toBe(carrier.req.extra.request);
+    expect(firstCall.headers().get("cookie")).toBe("current=credential");
+  });
+
+  it("leaves Mercurius socket operations, which carry no graphql-ws extra, on the connection's credentials", () => {
+    const request = {
+      headers: { host: "localhost:3000", cookie: "current=credential" },
+      url: "/graphql",
+    };
+    // A closed graphql-ws socket beside a Mercurius subscription context does not classify it.
+    const carrier = {
+      _connectionInit: {},
+      request,
+      extra: { socket: openSocket(3), request },
+    };
+    const { context } = execution(carrier);
+    const call = (mercuriusTransport() as AuthTransport).describe(context, {
+      http: null,
+    });
+    expect(call.key).toBe(carrier);
+    expect(call.connection).toBe(request);
+    expect(call.headers().get("cookie")).toBe("current=credential");
+    // The Apollo transport classifies the same carrier by its graphql-ws socket.
+    const apollo = (apolloTransport() as AuthTransport).describe(
+      execution(carrier).context,
+      { http: null },
     );
-    expect(firstCall.headers().get("host")).toBe("localhost:3000");
+    expect(apollo.connection).toBeUndefined();
+    expect(apollo.headers().has("cookie")).toBe(false);
   });
 });

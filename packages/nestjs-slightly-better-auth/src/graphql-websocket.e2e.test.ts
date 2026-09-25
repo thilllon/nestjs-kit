@@ -114,6 +114,27 @@ function closed(client: Client): Promise<void> {
     });
   });
 }
+/** Opens a graphql-transport-ws connection and resolves once the server acknowledged its connection_init. */
+function acknowledged(
+  url: string,
+  headers: Record<string, string>,
+): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url, "graphql-transport-ws", { headers });
+    socket.once("error", reject);
+    socket.once("open", () => {
+      socket.send(JSON.stringify({ type: "connection_init", payload: {} }));
+    });
+    socket.on("message", (data) => {
+      if (
+        (JSON.parse(String(data)) as { type?: unknown }).type ===
+        "connection_ack"
+      ) {
+        resolve(socket);
+      }
+    });
+  });
+}
 function execute(client: Client, query: string): Promise<Result> {
   return new Promise((resolve, reject) => {
     let result: Result | undefined;
@@ -276,6 +297,7 @@ async function fixture(
   const clients: Client[] = [];
   try {
     await app.listen(0, "127.0.0.1");
+    const url = `${String(app.getHttpServer().address().address === "127.0.0.1" ? "ws://127.0.0.1" : "ws://localhost")}:${app.getHttpServer().address().port}/graphql`;
     const signup = await auth.api.signUpEmail({
       headers: new Headers({ host: "localhost:3000" }),
       body: {
@@ -338,6 +360,8 @@ async function fixture(
       oldUpdatedAt,
       reads: () => reads,
       sessionCalls: () => sessionCalls,
+      /** The graphql-ws endpoint of the app. */
+      url,
       /** A null connectionParams sends connection_init without a payload, like a browser client. */
       client(
         headers: Record<string, string>,
@@ -349,7 +373,7 @@ async function fixture(
           }
         }
         const client = createClient({
-          url: `${String(app.getHttpServer().address().address === "127.0.0.1" ? "ws://127.0.0.1" : "ws://localhost")}:${app.getHttpServer().address().port}/graphql`,
+          url,
           webSocketImpl: HeaderSocket,
           ...(connectionParams ? { connectionParams } : {}),
           retryAttempts: 0,
@@ -483,8 +507,47 @@ describe.each([
       await f.close();
     }
   });
+  it("runs operations of a connection that closes before they start without an ERROR log", async () => {
+    const f = await fixture(mode);
+    try {
+      for (let round = 0; round < 5; round++) {
+        const socket = await acknowledged(f.url, {
+          cookie: f.cookie,
+          origin: "http://localhost:3000",
+        });
+        const socketClosed = new Promise((resolve) => {
+          socket.once("close", resolve);
+        });
+        // One tick: graphql-ws still awaits each operation's context when the close arrives.
+        socket.send(
+          JSON.stringify({
+            id: "query",
+            type: "subscribe",
+            payload: { query: "query { who }" },
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            id: "subscription",
+            type: "subscribe",
+            payload: { query: "subscription { notice }" },
+          }),
+        );
+        socket.close();
+        await socketClosed;
+      }
+      // Let the server finish the operations of the closed connections.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(inspect(f.errors, { depth: Infinity })).not.toMatch(
+        /AUTH_MISCONFIGURED|GRAPHQL_CONTEXT_STALE_REQUEST/,
+      );
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
   it.each(["cached", "fresh"] as const)(
-    "answers a later connection under a %s context with its own principal or fails closed",
+    "answers a later connection under a %s context with its own principal or anonymously",
     async (shape) => {
       const mercurius = mode.startsWith("mercurius");
       const custom =
@@ -540,20 +603,26 @@ describe.each([
           expect(f.errors).toEqual([]);
           return;
         }
-        expect(results[0]!.data).toEqual({ who: null, optionalWho: null });
+        // The cached context carries the first connection, closed before these operations started: they read no
+        // credential of it, so required work is denied as unauthenticated and optional work runs anonymously.
+        expect(results[0]!.data).toEqual({
+          who: null,
+          optionalWho: "anonymous",
+        });
+        expect(results[0]!.errors).toHaveLength(1);
+        expect(results[1]!.errors).toHaveLength(1);
         for (const error of results.flatMap((result) => result.errors ?? [])) {
           expect(error.extensions).toMatchObject({
-            code: "INTERNAL_SERVER_ERROR",
-            reason: "AUTH_MISCONFIGURED",
+            code: "UNAUTHENTICATED",
+            statusCode: 401,
           });
         }
-        expect(results[0]!.errors).toHaveLength(2);
-        expect(results[1]!.errors).toHaveLength(1);
-        expect(inspect(f.errors, { depth: Infinity })).toContain(
-          "GRAPHQL_CONTEXT_STALE_REQUEST",
-        );
-        // The first connection's operation alone reached a resolver.
-        expect(f.calls()).toBe(1);
+        expect(await execute(second, "{ harmless }")).toEqual({
+          data: { harmless: "public" },
+        });
+        expect(f.errors).toEqual([]);
+        // The first connection's who and the later connection's optionalWho reached a resolver.
+        expect(f.calls()).toBe(2);
       } finally {
         await f.close();
       }
