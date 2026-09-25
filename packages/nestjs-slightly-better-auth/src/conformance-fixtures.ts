@@ -78,8 +78,13 @@ export interface ProbeState {
   storageFault: ((call: StorageCall) => unknown) | undefined;
   /** Milliseconds a database adapter operation waits before it runs or throws its fault (a stalled storage). */
   storageDelay: ((call: StorageCall) => number | undefined) | undefined;
-  /** Returns a value the before hook answers a path with instead of the endpoint (a short-circuit); undefined dispatches. */
-  respond: ((path: string) => unknown) | undefined;
+  /**
+   * Returns a value the before hook answers with instead of dispatching the endpoint, as a plugin's hook that
+   * short-circuits an endpoint does (apiKey's session for /get-session); undefined dispatches normally.
+   */
+  respond:
+    | ((path: string, headers: Headers | undefined) => unknown)
+    | undefined;
   /** Milliseconds the before hook waits for a path, so that concurrent sources settle in a chosen order. */
   delay: ((path: string) => number | undefined) | undefined;
   streamCancelled: boolean;
@@ -367,8 +372,10 @@ function probePlugin(
             if (fault !== undefined) {
               throw fault;
             }
-            // Better Auth returns a before hook's non-context object as the endpoint's answer.
-            return state.respond?.(ctx.path);
+            const response = state.respond?.(ctx.path, ctx.headers);
+            if (response !== undefined) {
+              return response;
+            }
           }),
         },
       ],

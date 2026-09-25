@@ -67,6 +67,8 @@ const testingKit: Readonly<Record<string, readonly string[]>> = {
   conformance: [
     "conformance-fixtures.ts",
     "conformance-http.ts",
+    "conformance-policy-harness.ts",
+    "conformance-policy-units.ts",
     "conformance-policy.ts",
     "conformance-principal.ts",
     "conformance-transport.ts",

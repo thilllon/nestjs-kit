@@ -17,6 +17,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { permission } from "./admin.js";
 import type {
   AuthHandle,
+  AuthorizationDecision,
   CookieSink,
   ExtensionRef,
   HttpPlatform,
@@ -24,6 +25,7 @@ import type {
   PrincipalResolver,
   PrincipalResult,
   PrincipalSource,
+  RequirementExpr,
   TransportCall,
 } from "./auth-contracts.js";
 import {
@@ -62,7 +64,7 @@ import {
   setCookieLines,
   settle,
 } from "./conformance-fixtures.js";
-import { judgePrincipal } from "./conformance-policy.js";
+import { harness as policyHarness } from "./conformance-policy-harness.js";
 
 /** An API key the kit's S-apikey-* cases created, and the request headers that present it. */
 export interface ConformanceApiKey {
@@ -381,6 +383,21 @@ function variantOf(
       plugins: plugins as never,
     });
   })();
+}
+
+/** Judges one principal against a requirement through the policy kit's real-evaluator harness. */
+async function judgePrincipal(
+  auth: AuthLike,
+  requirement: RequirementExpr,
+  principal: AuthPrincipal,
+): Promise<{ decision: AuthorizationDecision; evaluations: number }> {
+  const value = await policyHarness({ auth, requirement });
+  try {
+    const decision = await value.decide(principal);
+    return { decision, evaluations: value.invocations.count };
+  } finally {
+    await value.close();
+  }
 }
 
 /** A source that verifies keys of the Better Auth api-key plugin (the S-apikey-* cases). */
