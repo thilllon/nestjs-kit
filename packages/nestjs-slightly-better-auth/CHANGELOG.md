@@ -1,5 +1,11 @@
 # nestjs-slightly-better-auth
 
+## 1.5.1
+
+### Patch Changes
+
+- 0b4c59b: `transportConformance` reads each call's browser leg while its invocation runs, so transports that reject a completed request, such as the Apollo and Mercurius transports of `./graphql`, run every applicable case, including the GraphQL cases `T-inherit-no-lookup`, `T-stamp-per-plan` and `T-reference-resolver`.
+
 ## 1.5.0
 
 ### Minor Changes
