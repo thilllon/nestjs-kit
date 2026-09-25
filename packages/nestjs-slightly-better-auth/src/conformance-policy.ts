@@ -20,7 +20,6 @@ import {
   conformanceCase,
   conformanceSkip,
   type ConformanceOutcome,
-  createConformanceAuth,
   settle,
 } from "./conformance-fixtures.js";
 import {
@@ -35,11 +34,16 @@ import {
   sessionHeaders,
   sessionReads,
   staticPolicies,
+  variantOf,
   withHarness,
 } from "./conformance-policy-harness.js";
 import { unitPolicyCases } from "./conformance-policy-units.js";
 
-export type { PolicyConformanceOptions } from "./conformance-policy-harness.js";
+export type {
+  PolicyConformanceOptions,
+  PolicyDelivery,
+  PolicyDeliveryConnection,
+} from "./conformance-policy-harness.js";
 
 const noGrant = {
   description: "conformance: no grant",
@@ -548,8 +552,8 @@ export function policyConformance(
       "Z-boot-prerequisite",
       "an instance without the policy's plugin prerequisites fails boot",
       async () => {
-        const result = await settle(() =>
-          boot(createConformanceAuth(), options.requirement),
+        const result = await settle(async () =>
+          boot(await variantOf(options, {}), options.requirement),
         );
         if (result.ok) {
           await result.value.moduleRef.close();

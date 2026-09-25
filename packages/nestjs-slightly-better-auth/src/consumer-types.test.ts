@@ -641,6 +641,7 @@ import {
   principalSourceConformance,
   runConformance,
   type ConformanceCase,
+  type PolicyDelivery,
 } from "nestjs-slightly-better-auth/testing/conformance";
 
 const auth = createConformanceAuth({ plugins: [admin(), apiKey()] });
@@ -669,6 +670,18 @@ principalSourceConformance({
   variant: (overrides) => createConformanceAuth({ ...overrides, plugins: [admin(), apiKey()] }),
   http: { platform: expressPlatform(), createHttpAdapter: () => new ExpressAdapter() },
 });
+declare const delivery: PolicyDelivery;
+policyConformance({
+  requirement: permission({ user: ["list"] }),
+  auth,
+  allowingPrincipal: async () => allowed,
+  denyingPrincipal: async () => denied,
+  deliveries: [delivery, { ...delivery, connect: undefined, connectionPrincipalTtlMs: 300_000 }],
+  variant: async (overrides) => createConformanceAuth({ ...overrides }),
+});
+// @ts-expect-error A delivery answers with the transport kit's invocation results.
+const wrong: PolicyDelivery = { ...delivery, invoke: async () => true };
+void wrong;
 // @ts-expect-error A transport is not a principal source.
 principalSourceConformance({ source: rpcTransport(), auth, credentials });
 // @ts-expect-error A principal source is not an HTTP platform.

@@ -4,6 +4,7 @@ import {
   type ExecutionContext,
   Inject,
   type INestApplication,
+  type LoggerService,
   Module,
   type Type,
 } from "@nestjs/common";
@@ -27,10 +28,10 @@ import {
 import { MercuriusDriver, MercuriusFederationDriver } from "@nestjs/mercurius";
 import { ExpressAdapter } from "@nestjs/platform-express";
 import { FastifyAdapter } from "@nestjs/platform-fastify";
-import { Test } from "@nestjs/testing";
+import { Test, type TestingModuleBuilder } from "@nestjs/testing";
 import { type ValueNode, valueFromASTUntyped } from "graphql";
 import { type Client, createClient } from "graphql-ws";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import type {
   AuthTransport,
@@ -49,6 +50,7 @@ import {
   sendRaw,
   setCookieLines,
 } from "./conformance-fixtures.js";
+import type { PolicyDelivery } from "./conformance-policy-harness.js";
 import {
   type FixtureHandler,
   type GraphFixtures,
@@ -62,6 +64,7 @@ import {
   transportConformance,
 } from "./conformance-transport.js";
 import { expressPlatform } from "./express.js";
+import { RequestScope } from "./request-scope.js";
 import type { RoutePlanner } from "./route-planner.js";
 import { fastifyPlatform } from "./fastify.js";
 import {
@@ -70,12 +73,19 @@ import {
   mercuriusSubscriptionContext,
   mercuriusTransport,
 } from "./graphql.js";
+import {
+  adminPolicyOptions,
+  organizationPolicyOptions,
+  policyDeliveryCases,
+} from "./policy-kit-fixtures.js";
 
 type FixtureName = Exclude<keyof TransportFixtures, "graph">;
 type GraphField = keyof GraphFixtures["fields"];
 type Driver = "apollo-express" | "apollo-fastify" | "mercurius";
 
 const REPLY_TIMEOUT_MS = 5000;
+/** The longest timer delay: close() disposes the client before it elapses. */
+const KEEP_OPEN_MS = 2 ** 31 - 1;
 /** The kit's named inputs, exposed as nullable String arguments of every fixture field. */
 const INPUTS = ["orgId", "email", "password", "cookie"] as const;
 
@@ -547,6 +557,8 @@ function connect(
       : { connectionParams }),
     retryAttempts: 0,
     lazy: true,
+    // One socket for every operation of the connection: a lazy client otherwise closes it after each completed one.
+    lazyCloseTimeout: KEEP_OPEN_MS,
   });
   return {
     execute: (operation) =>
@@ -664,6 +676,58 @@ interface HarnessOptions {
   readonly unit?: AuthTransport;
 }
 
+/** The driver's batching and, over graphql-ws, its subscription server options. */
+function serverOptions(harness: HarnessOptions): Record<string, unknown> {
+  const socket = harness.channel === "socket";
+  return harness.driver === "mercurius"
+    ? {
+        allowBatchedQueries: true,
+        ...(socket
+          ? {
+              subscription: {
+                fullWsTransport: true,
+                ...(harness.subscriptionContext
+                  ? { context: mercuriusSubscriptionContext() }
+                  : {}),
+              },
+            }
+          : {}),
+      }
+    : {
+        allowBatchedHttpRequests: true,
+        ...(socket ? { subscriptions: { "graphql-ws": true } } : {}),
+      };
+}
+
+/** Compiles `builder` on the driver's platform, listens on an ephemeral port and records the running app. */
+async function listen(
+  harness: HarnessOptions,
+  builder: TestingModuleBuilder,
+  handlers: Map<string, FixtureHandler>,
+  logger: LoggerService | false,
+): Promise<INestApplication> {
+  const moduleRef = await builder.compile();
+  const app = moduleRef.createNestApplication(
+    harness.driver === "apollo-express"
+      ? new ExpressAdapter()
+      : new FastifyAdapter(),
+    { logger },
+  );
+  try {
+    await app.init();
+    await app.listen(0, "127.0.0.1");
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
+  apps.set(app, {
+    url: await app.getUrl(),
+    handlers,
+    omitEmptyConnectionParams: harness.omitEmptyConnectionParams ?? false,
+  });
+  return app;
+}
+
 /**
  * A built-in GraphQL transport, exposed through a real GraphQL server on a listening app: one root field per kit
  * fixture, and the graph fixtures as FixtureNode roots and fields in the boots of the GraphQL cases, which pass
@@ -730,24 +794,7 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
               : true,
             fieldResolverEnhancers: [...(options.fieldResolverEnhancers ?? [])],
             ...contextOption(options.graphqlContext, mercurius),
-            ...(mercurius
-              ? {
-                  allowBatchedQueries: true,
-                  ...(socket
-                    ? {
-                        subscription: {
-                          fullWsTransport: true,
-                          ...(harness.subscriptionContext
-                            ? { context: mercuriusSubscriptionContext() }
-                            : {}),
-                        },
-                      }
-                    : {}),
-                }
-              : {
-                  allowBatchedHttpRequests: true,
-                  ...(socket ? { subscriptions: { "graphql-ws": true } } : {}),
-                }),
+            ...serverOptions(harness),
           } as never),
           BetterAuthModule.forRoot({
             auth,
@@ -789,24 +836,7 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
       if (options.override) {
         builder = options.override(builder);
       }
-      const moduleRef = await builder.compile();
-      const app = moduleRef.createNestApplication(
-        fastify ? new FastifyAdapter() : new ExpressAdapter(),
-        { logger: options.logger ?? false },
-      );
-      try {
-        await app.init();
-        await app.listen(0, "127.0.0.1");
-      } catch (error) {
-        await app.close();
-        throw error;
-      }
-      apps.set(app, {
-        url: await app.getUrl(),
-        handlers,
-        omitEmptyConnectionParams: harness.omitEmptyConnectionParams ?? false,
-      });
-      return app;
+      return listen(harness, builder, handlers, options.logger ?? false);
     },
     async invoke(app, handler, headers, input = {}) {
       const fields = fieldsOf(handler);
@@ -921,6 +951,163 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
               },
               options?.connectionParams,
             ),
+        }
+      : {}),
+  };
+}
+
+/** The subscription field serving a policy handler over graphql-ws. */
+const policySubscription = (handler: string) => `${handler}Events`;
+
+/**
+ * The policy kit's handlers: a query field per handler whose `orgId` argument is the KitJSON scalar, so the kit's value
+ * arrives with its JSON type, and over graphql-ws a subscription field per handler with the same argument.
+ */
+function policyResolver(
+  handlers: Readonly<Record<string, FixtureHandler>>,
+  subscriptions: boolean,
+) {
+  @Resolver()
+  class PolicyKitResolver {
+    constructor(
+      @Inject(BetterAuthService) readonly service: BetterAuthService,
+    ) {}
+  }
+  const orgIdArg = () => [
+    Args("orgId", { type: () => KitJson, nullable: true }),
+  ];
+  const inputOf = (args: unknown[]) =>
+    args[0] === undefined || args[0] === null ? {} : { orgId: args[0] };
+  for (const [name, fixture] of Object.entries(handlers)) {
+    defineHandler(
+      PolicyKitResolver,
+      name,
+      fixture,
+      orgIdArg(),
+      [Query(() => KitJson, { name, nullable: true }), ...fixture.decorators],
+      function (args) {
+        return fixture.handle([], inputOf(args), { service: this.service });
+      },
+    );
+    if (!subscriptions) {
+      continue;
+    }
+    const field = policySubscription(name);
+    defineHandler(
+      PolicyKitResolver,
+      field,
+      fixture,
+      orgIdArg(),
+      [
+        Subscription(() => KitJson, { name: field, nullable: true }),
+        ...fixture.decorators,
+      ],
+      async function* (this: Host, args: unknown[]) {
+        yield {
+          [field]: await fixture.handle([], inputOf(args), {
+            service: this.service,
+          }),
+        };
+      } as (this: Host, args: unknown[]) => unknown,
+    );
+  }
+  return PolicyKitResolver;
+}
+
+function policyOperation(
+  kind: "query" | "subscription",
+  field: string,
+  input: Record<string, unknown>,
+): Operation {
+  return {
+    query: `${kind} ($orgId: KitJSON) { ${field}(orgId: $orgId) }`,
+    variables: input,
+  };
+}
+
+/** The principal TTL of the policy deliveries' graphql-ws connections (design v7 §14.1 Z-admin-banned: 300 s). */
+const DELIVERY_TTL_MS = 300_000;
+
+/**
+ * The policy kit's delivery over a built-in GraphQL transport: the kit's handlers as query fields with a JSON-scalar
+ * `orgId` argument, over HTTP or over graphql-ws. Over graphql-ws the transport reuses a connection's principal for
+ * 300 s, and a connection sends each handler as a subscription operation.
+ */
+function graphqlDelivery(
+  name: string,
+  harness: Omit<HarnessOptions, "transport">,
+): PolicyDelivery {
+  const socket = harness.channel === "socket";
+  const mercurius = harness.driver === "mercurius";
+  const transportOptions: GraphqlTransportOptions = socket
+    ? { subscriptionPrincipalTtlMs: DELIVERY_TTL_MS }
+    : {};
+  const transport =
+    harness.unit ??
+    (mercurius ? mercuriusTransport : apolloTransport)(transportOptions);
+  return {
+    name,
+    ...(socket ? { connectionPrincipalTtlMs: DELIVERY_TTL_MS } : {}),
+    async createApp(handlers, auth, options) {
+      @Module({
+        imports: [
+          GraphQLModule.forRoot({
+            driver: mercurius ? MercuriusDriver : ApolloDriver,
+            autoSchemaFile: true,
+            ...serverOptions(harness),
+          } as never),
+          BetterAuthModule.forRoot({
+            auth,
+            platforms: [
+              harness.driver === "apollo-express"
+                ? expressPlatform()
+                : fastifyPlatform(),
+            ],
+            transports: [transport],
+            globalGuard: true,
+            principals: options.principals,
+            logSummary: false,
+          } as never),
+        ],
+        providers: [KitJsonScalar, policyResolver(handlers, socket)],
+      })
+      class PolicyDeliveryModule {}
+      return listen(
+        harness,
+        Test.createTestingModule({ imports: [PolicyDeliveryModule] }),
+        new Map(Object.entries(handlers)),
+        options.logger,
+      );
+    },
+    async invoke(app, handler, headers, input = {}) {
+      const operation = policyOperation("query", handler, input);
+      const result = socket
+        ? await onConnection(app, headers, (connection) =>
+            connection.execute(operation),
+          )
+        : (await httpOperation(app, operation, headers)).result;
+      return outcomeOf({ result, setCookies: [] }, [handler]);
+    },
+    ...(socket
+      ? {
+          async connect(app: INestApplication, headers: HeadersInit) {
+            const connection = connect(app, headers);
+            return {
+              async invoke(handler: string, input = {}) {
+                const field = policySubscription(handler);
+                return outcomeOf(
+                  {
+                    result: await connection.execute(
+                      policyOperation("subscription", field, input),
+                    ),
+                    setCookies: [],
+                  },
+                  [field],
+                );
+              },
+              close: () => connection.close(),
+            };
+          },
         }
       : {}),
   };
@@ -1298,5 +1485,94 @@ describe("GraphQL transport kit mutations", () => {
         /describes a browser leg, so expectBrowserLeg must be true/,
       );
     }
+  });
+});
+
+for (const [driver, label] of drivers) {
+  for (const channel of ["http", "socket"] as const) {
+    const name = `${label} over ${channel === "http" ? "HTTP" : "graphql-ws"}`;
+    const delivery = () =>
+      graphqlDelivery(name, {
+        driver,
+        channel,
+        subscriptionContext: driver === "mercurius",
+      });
+    describe(`policy kit admin rows over the built-in ${name}`, async () => {
+      runConformance(
+        policyDeliveryCases(await adminPolicyOptions(), delivery()),
+        { describe, it },
+      );
+    });
+
+    describe(`policy kit organization rows over the built-in ${name}`, async () => {
+      runConformance(
+        policyDeliveryCases(await organizationPolicyOptions(), delivery()),
+        { describe, it },
+      );
+    });
+  }
+}
+
+describe("GraphQL policy delivery mutations", () => {
+  const delivery = () =>
+    graphqlDelivery("Apollo transport with Express over graphql-ws", {
+      driver: "apollo-express",
+      channel: "socket",
+    });
+  const bannedCase = async (value: PolicyDelivery) =>
+    policyDeliveryCases(await adminPolicyOptions(), value).find(
+      (item) => item.id === "Z-admin-banned",
+    )!;
+
+  it("fails Z-admin-banned over graphql-ws when authoritative operations reuse the connection's principal", async () => {
+    const memo = RequestScope.prototype.memoPrincipal;
+    const spy = vi
+      .spyOn(RequestScope.prototype, "memoPrincipal")
+      .mockImplementation(function (this: RequestScope, call, input, compute) {
+        return memo.call(
+          this,
+          call,
+          { ...input, freshness: "default" },
+          compute,
+        );
+      });
+    try {
+      await expect((await bannedCase(delivery())).run()).rejects.toThrow(
+        /an authoritative handler reused the connection's principal after sign-out: allowed/,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails Z-admin-banned for a graphql-ws delivery that opens a new socket for each operation", async () => {
+    const perOperation = delivery();
+    const reconnecting: PolicyDelivery = {
+      ...perOperation,
+      async connect(app, headers) {
+        return {
+          invoke: (handler, input = {}) =>
+            onConnection(app, headers, async (connection) =>
+              outcomeOf(
+                {
+                  result: await connection.execute(
+                    policyOperation(
+                      "subscription",
+                      policySubscription(handler),
+                      input,
+                    ),
+                  ),
+                  setCookies: [],
+                },
+                [policySubscription(handler)],
+              ),
+            ),
+          close: async () => undefined,
+        };
+      },
+    };
+    await expect((await bannedCase(reconnecting)).run()).rejects.toThrow(
+      /the connection did not reuse its principal within its declared 300000 ms TTL: 401/,
+    );
   });
 });
