@@ -32,6 +32,13 @@ const bootstrap = `
   class Bank { pay(amount) { return "bank:" + amount; } }
   kit.Strategy("bank")(Bank);
   Injectable()(Bank);
+  const shipping = kit.defineStrategyGroup("shipping", ["standard", "express"]);
+  class Standard {}
+  shipping.Strategy("standard")(Standard);
+  Injectable()(Standard);
+  class Express {}
+  shipping.Strategy("express")(Express);
+  Injectable()(Express);
   class AppModule {}
   Module({
     imports: [
@@ -40,6 +47,11 @@ const bootstrap = `
         strategies: [Card, Bank],
         defaultKey: "bank",
         imports: [FeesModule],
+      }),
+      kit.StrategyModule.register({
+        group: shipping,
+        strategies: [Standard, Express],
+        defaultKey: "standard",
       }),
     ],
   })(AppModule);
@@ -59,6 +71,8 @@ const bootstrap = `
       card: registry.get("card").pay(100),
       fallback: registry.get().pay(100),
       unknown,
+      grouped: app.get(shipping.token).keys(),
+      groupedDefault: app.get(shipping.token).get() instanceof Standard,
     }));
   } finally {
     await app.close();
@@ -82,12 +96,14 @@ const core = require("@nestjs/core");
 };
 
 const declarations = `import {
+  defineStrategyGroup,
   getStrategyKey,
   getStrategyRegistryToken,
   Strategy,
   StrategyModule,
   StrategyRegistry,
   UnknownStrategyError,
+  type StrategyKeyOf,
   type StrategyModuleOptions,
 } from "${packageName}";
 
@@ -124,6 +140,36 @@ for (const [name, strategy] of registry) {
 void token;
 void key;
 void keys;
+
+const payment = defineStrategyGroup("payment", ["card", "bank"]);
+type Method = StrategyKeyOf<typeof payment>;
+type Declared = Assert<Equal<Method, "card" | "bank">>;
+
+@payment.Strategy("bank")
+class Bank implements Payment {
+  pay(amount: number): string {
+    return String(amount);
+  }
+}
+
+// @ts-expect-error The group decorator accepts only declared keys.
+payment.Strategy("crypto");
+StrategyModule.register({ group: payment, strategies: [Card, Bank], defaultKey: "card" });
+// @ts-expect-error The default key must be a declared key.
+StrategyModule.register({ group: payment, strategies: [Card, Bank], defaultKey: "crypto" });
+
+declare const typed: StrategyRegistry<Payment, Method>;
+type TypedKeys = Assert<Equal<ReturnType<typeof typed.keys>, Method[]>>;
+typed.get("card");
+// @ts-expect-error A typed registry selects only declared keys.
+typed.get("crypto");
+declare const input: string;
+if (typed.has(input)) {
+  const narrowed: Method = input;
+  void narrowed;
+}
+const optional: Payment | undefined = typed.find(input);
+void optional;
 `;
 
 describe("built strategy package", () => {
@@ -145,6 +191,7 @@ describe("built strategy package", () => {
           "StrategyModule",
           "StrategyRegistry",
           "UnknownStrategyError",
+          "defineStrategyGroup",
           "getStrategyKey",
           "getStrategyRegistryToken",
         ],
@@ -153,6 +200,8 @@ describe("built strategy package", () => {
         card: "card:110",
         fallback: "bank:100",
         unknown: true,
+        grouped: ["standard", "express"],
+        groupedDefault: true,
       });
     },
   );
