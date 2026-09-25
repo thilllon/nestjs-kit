@@ -40,6 +40,7 @@ const kernel = [
   "principal-readings.ts",
   "principal-resolver.ts",
   "request-scope.ts",
+  "route-paths.ts",
   "route-planner.ts",
   "transport-registry.ts",
   "trusted-origins.ts",
@@ -126,35 +127,6 @@ const kernelLiteralExceptions = [
   },
 ];
 
-/** Nest deep specifiers in package sources; #586 tracks their removal (design v7 §12.7). */
-const nestDeepImportExceptions = [
-  {
-    file: "boot-validator.ts",
-    specifier: "@nestjs/core/router/route-path-factory.js",
-  },
-  {
-    file: "graphql-transport.ts",
-    specifier: "@nestjs/common/exceptions/intrinsic.exception.js",
-  },
-  {
-    file: "graphql-transport.ts",
-    specifier: "@nestjs/core/application-config.js",
-  },
-  {
-    file: "instance-registry.ts",
-    specifier: "@nestjs/core/injector/instance-wrapper.js",
-  },
-  {
-    file: "principal-readings.ts",
-    specifier: "@nestjs/common/exceptions/intrinsic.exception.js",
-  },
-  // ExecutionContextHost is exported only from the internal @nestjs/core/internal entry.
-  {
-    file: "ws-connection-auth.ts",
-    specifier: "@nestjs/core/helpers/execution-context-host.js",
-  },
-];
-
 const requiredPeers = [
   "@nestjs/common",
   "@nestjs/core",
@@ -162,7 +134,6 @@ const requiredPeers = [
   "rxjs",
 ];
 interface EntryPolicy {
-  /** Runtime specifiers; a listed Nest deep import counts as its package. */
   readonly specifiers: readonly string[];
   readonly nodeBuiltins: boolean;
   /** Groups besides contracts, shared helpers and kernel that the runtime graph may reach. */
@@ -682,20 +653,14 @@ describe("authentication source architecture", () => {
         throw new Error(`Declare an import policy for ${subpath}.`);
       }
       const graph = reach(source, false);
-      const deepPackages = new Map(
-        nestDeepImportExceptions.map(({ specifier }) => [
-          specifier,
-          packageOf(specifier),
-        ]),
-      );
       expect({
-        external: graph.external.filter((specifier) => {
-          const normalized = deepPackages.get(specifier) ?? specifier;
-          return !(
-            policy.specifiers.includes(normalized) ||
-            (policy.nodeBuiltins && isBuiltin(normalized))
-          );
-        }),
+        external: graph.external.filter(
+          (specifier) =>
+            !(
+              policy.specifiers.includes(specifier) ||
+              (policy.nodeBuiltins && isBuiltin(specifier))
+            ),
+        ),
         files: graph.files.filter((file) => {
           const group = groupOf(file);
           return group !== "core" && !policy.groups.includes(group);
@@ -739,7 +704,7 @@ describe("authentication source architecture", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("limits Nest deep imports to the listed exceptions and SDK imports to public entries", () => {
+  it("imports Nest packages and SDKs through their public entries only", () => {
     const external = sourceFiles.flatMap((file) =>
       [...moduleOf(file).external].map(([specifier, runtime]) => ({
         file,
@@ -747,16 +712,12 @@ describe("authentication source architecture", () => {
         runtime,
       })),
     );
+    // Nest subpaths, `@nestjs/core/internal` included, are not public API (design v7 §12.7).
     expect(
       external
         .filter(({ specifier }) => /^@nestjs\/[^/]+\/./.test(specifier))
-        .map(({ file, specifier }) => `${file} -> ${specifier}`)
-        .sort(),
-    ).toEqual(
-      nestDeepImportExceptions
-        .map(({ file, specifier }) => `${file} -> ${specifier}`)
-        .sort(),
-    );
+        .map(({ file, specifier }) => `${file} -> ${specifier}`),
+    ).toEqual([]);
     // Entry policies confine the conformance kit's instance-building imports to ./testing/conformance.
     const publicRuntime = [
       "better-auth",

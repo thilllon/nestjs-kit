@@ -1,8 +1,6 @@
 import type { IncomingHttpHeaders } from "node:http";
-import type { ExecutionContext } from "@nestjs/common";
-import { IntrinsicException } from "@nestjs/common/exceptions/intrinsic.exception.js";
-import { MetadataScanner } from "@nestjs/core";
-import { ApplicationConfig } from "@nestjs/core/application-config.js";
+import { type ExecutionContext, IntrinsicException } from "@nestjs/common";
+import { ApplicationConfig, MetadataScanner } from "@nestjs/core";
 import {
   Args,
   GRAPHQL_MODULE_OPTIONS,

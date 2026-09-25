@@ -1,5 +1,10 @@
-import { Inject, Logger } from "@nestjs/common";
-import { ExecutionContextHost } from "@nestjs/core/helpers/execution-context-host.js";
+import {
+  type ContextType,
+  type ExecutionContext,
+  Inject,
+  Logger,
+  type Type,
+} from "@nestjs/common";
 import type { PrincipalResolver, PrincipalResult } from "./auth-contracts.js";
 import {
   AuthFailures,
@@ -56,6 +61,64 @@ export function connectionErrorLog(error: unknown): {
   };
 }
 
+/**
+ * The `ws` execution context of a connection before any gateway handler runs. Nest exports no
+ * public factory for execution contexts, so this implements the public `ExecutionContext`
+ * interface with the values Nest's internal host reports for the arguments `[client, undefined]`.
+ */
+export class ConnectionExecutionContext implements ExecutionContext {
+  readonly #args: unknown[];
+
+  constructor(client: object) {
+    this.#args = [client, undefined];
+  }
+
+  getType<TContext extends string = ContextType>(): TContext {
+    return "ws" as TContext;
+  }
+
+  /** No handler runs yet, so there is no class; Nest's host reports `null` as well. */
+  getClass<T>(): Type<T> {
+    return null as unknown as Type<T>;
+  }
+
+  /** No handler runs yet; Nest's host reports `null` as well. */
+  getHandler(): ReturnType<ExecutionContext["getHandler"]> {
+    return null as unknown as ReturnType<ExecutionContext["getHandler"]>;
+  }
+
+  getArgs<T extends unknown[] = unknown[]>(): T {
+    return this.#args as T;
+  }
+
+  getArgByIndex<T>(index: number): T {
+    return this.#args[index] as T;
+  }
+
+  switchToHttp(): ReturnType<ExecutionContext["switchToHttp"]> {
+    return {
+      getRequest: <T>() => this.getArgByIndex<T>(0),
+      getResponse: <T>() => this.getArgByIndex<T>(1),
+      getNext: <T>() => this.getArgByIndex<T>(2),
+    };
+  }
+
+  switchToRpc(): ReturnType<ExecutionContext["switchToRpc"]> {
+    return {
+      getData: <T>() => this.getArgByIndex<T>(0),
+      getContext: <T>() => this.getArgByIndex<T>(1),
+    };
+  }
+
+  switchToWs(): ReturnType<ExecutionContext["switchToWs"]> {
+    return {
+      getClient: <T>() => this.getArgByIndex<T>(0),
+      getData: <T>() => this.getArgByIndex<T>(1),
+      getPattern: () => this.getArgByIndex<string>(this.#args.length - 1),
+    };
+  }
+}
+
 /** Connection authentication delegates to the same origin and principal kernel as messages. */
 export class WsConnectionAuth {
   private readonly logger = new Logger("BetterAuth");
@@ -76,8 +139,7 @@ export class WsConnectionAuth {
         "Connection authentication requires a WebSocket client.",
       );
     }
-    const context = new ExecutionContextHost([client, undefined]);
-    context.setType("ws");
+    const context = new ConnectionExecutionContext(client);
     const transport = this.transports.select(context);
     const call = this.transports.describe(context, transport);
     const entry = this.instances.get(options.instance ?? "default");

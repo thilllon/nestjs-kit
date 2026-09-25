@@ -1,6 +1,5 @@
 import { Inject, Logger } from "@nestjs/common";
 import type { AbstractHttpAdapter } from "@nestjs/core";
-import type { InstanceWrapper } from "@nestjs/core/injector/instance-wrapper.js";
 import type {
   AuthContextView,
   AuthHandle,
@@ -20,10 +19,28 @@ import { BRIDGE_HANDLE, type BridgeHandle } from "./bridge-protocol.js";
 import { OriginCheck, OriginDiagnostics } from "./origin-check.js";
 import type { RequestScope } from "./request-scope.js";
 
+/**
+ * The members of Nest's provider wrapper that the singleton rule reads. `DiscoveryService`
+ * returns the wrappers; the class itself is exported only from the internal Nest entry.
+ */
+export interface ProviderDependencyNode {
+  readonly isTransient: boolean;
+  isDependencyTreeStatic(): boolean;
+  getCtorMetadata():
+    | readonly (ProviderDependencyNode | undefined)[]
+    | undefined;
+  getPropertiesMetadata():
+    | readonly { readonly wrapper: ProviderDependencyNode }[]
+    | undefined;
+  getEnhancersMetadata(): readonly ProviderDependencyNode[] | undefined;
+}
+
 /** Nest considers transient providers static; auth collaborators require singleton trees. */
-export function isSingletonDependencyTree(root: InstanceWrapper): boolean {
+export function isSingletonDependencyTree(
+  root: ProviderDependencyNode,
+): boolean {
   const pending = [root];
-  const seen = new Set<InstanceWrapper>();
+  const seen = new Set<ProviderDependencyNode>();
   while (pending.length) {
     const wrapper = pending.pop()!;
     if (seen.has(wrapper)) {
