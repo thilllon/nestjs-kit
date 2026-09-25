@@ -20,8 +20,8 @@ export function connect(url: string, token?: string): Client {
   }
   return createClient({
     url,
-    // Without a token, connection_init carries no payload, and the connection
-    // is anonymous.
+    // Without a token, connection_init carries no payload, and operations use
+    // the upgrade request's credentials, such as a browser's session cookie.
     ...(token
       ? { connectionParams: { authorization: `Bearer ${token}` } }
       : {}),
