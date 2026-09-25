@@ -89,10 +89,27 @@ export interface HttpConformanceOptions {
   bootstrap?: readonly ("factory" | "testing")[];
   /** Enable host CORS the platform's usual way. Default: app.enableCors({ origin, credentials: true }). */
   enableHostCors?(app: INestApplication, origin: string): void | Promise<void>;
-  /** Configure trust in one forwarding hop the platform's usual way (for H-proxy-trust / H-url-trust-proxy). */
+  /**
+   * Configure trust in one forwarding hop on a created application the platform's usual way, e.g. app.set('trust proxy',
+   * 1). The trusted-hop rows (H-ip-platform, H-proxy-trust, H-url-trust-proxy, H-proxy-untrusted-warning) need this or
+   * createTrustingHttpAdapter; without either they are skipped with the reason.
+   */
   trustOneProxy?(app: INestApplication): void | Promise<void>;
-  /** HTTP/2 variant, required when the platform declares capabilities.http2. */
-  http2?: { createHttpAdapter(): AbstractHttpAdapter };
+  /**
+   * A fresh adapter that already trusts one forwarding hop, for platforms whose proxy trust is fixed when the adapter is
+   * constructed, e.g. () => new FastifyAdapter({ trustProxy: 'loopback' }). The kit's requests come from loopback, so
+   * trusting loopback is trusting one hop. Trusted-hop boots use it when given, instead of createHttpAdapter plus
+   * trustOneProxy.
+   */
+  createTrustingHttpAdapter?(): AbstractHttpAdapter;
+  /**
+   * HTTP/2 variant, required when the platform declares capabilities.http2. Its createTrustingHttpAdapter serves the
+   * HTTP/2 trusted-hop rows as createTrustingHttpAdapter serves the HTTP/1.1 ones.
+   */
+  http2?: {
+    createHttpAdapter(): AbstractHttpAdapter;
+    createTrustingHttpAdapter?(): AbstractHttpAdapter;
+  };
   /** How to obtain a base URL. Default: app.listen(0) + getUrl(). */
   listen?(app: INestApplication): Promise<string>;
   /**
@@ -156,6 +173,8 @@ interface AccessorObservation {
 interface HttpBoot {
   readonly app: INestApplication;
   readonly url: string;
+  /** Whether the app serves h2c (config.http2). */
+  readonly http2: boolean;
   readonly auth: AuthLike;
   readonly probe: ProbeState;
   readonly logger: CapturingLogger;
@@ -222,23 +241,6 @@ async function capabilitiesOf(
   const boot = await bootHttp(options, "testing", {});
   try {
     return resolvedPlatform(boot.app).capabilities;
-  } finally {
-    await boot.close();
-  }
-}
-
-/** Whether the resolved platform implements an optional member, booting a testing app when the reference cannot tell. */
-async function implementsMember(
-  options: HttpConformanceOptions,
-  name: keyof HttpPlatform,
-): Promise<boolean> {
-  const known = staticMember(options.platform, name);
-  if (known !== undefined) {
-    return known;
-  }
-  const boot = await bootHttp(options, "testing", {});
-  try {
-    return typeof Reflect.get(resolvedPlatform(boot.app), name) === "function";
   } finally {
     await boot.close();
   }
@@ -459,6 +461,33 @@ function kitModule(
   return ConformanceHttpModule;
 }
 
+/** The factory of an adapter that trusts one forwarding hop, for HTTP/1.1 or HTTP/2, when the options give one. */
+function trustingAdapterOf(
+  options: HttpConformanceOptions,
+  http2: boolean | undefined,
+): (() => AbstractHttpAdapter) | undefined {
+  const source = http2 ? options.http2 : options;
+  return source?.createTrustingHttpAdapter
+    ? () => source.createTrustingHttpAdapter!()
+    : undefined;
+}
+
+/** A fresh adapter for a boot: the trusting adapter for a trusted-hop boot when given, else the default one. */
+function createAdapter(
+  options: HttpConformanceOptions,
+  config: BootConfig,
+): AbstractHttpAdapter {
+  const trusting = config.trustProxy
+    ? trustingAdapterOf(options, config.http2)
+    : undefined;
+  if (trusting) {
+    return trusting();
+  }
+  return config.http2
+    ? options.http2!.createHttpAdapter()
+    : options.createHttpAdapter();
+}
+
 async function bootHttp(
   options: HttpConformanceOptions,
   bootstrap: Bootstrap,
@@ -471,9 +500,7 @@ async function bootHttp(
   const around: string[] = [];
   const accessor: AccessorObservation = {};
   let application: INestApplication | undefined;
-  const adapter = config.http2
-    ? options.http2!.createHttpAdapter()
-    : options.createHttpAdapter();
+  const adapter = createAdapter(options, config);
   const requests = () => resolvedPlatform(application!).requests;
   const module = kitModule(options, auth, probe, config, {
     filtered,
@@ -507,8 +534,11 @@ async function bootHttp(
     if (config.versioning) {
       app.enableVersioning({ type: VersioningType.URI });
     }
-    if (config.trustProxy) {
-      assert.ok(options.trustOneProxy, "trustOneProxy is required here");
+    if (config.trustProxy && !trustingAdapterOf(options, config.http2)) {
+      assert.ok(
+        options.trustOneProxy,
+        "trustOneProxy or createTrustingHttpAdapter is required here",
+      );
       await options.trustOneProxy(app);
     }
     await app.init();
@@ -516,6 +546,7 @@ async function bootHttp(
     return {
       app,
       url,
+      http2: config.http2 === true,
       auth,
       probe,
       logger,
@@ -759,9 +790,10 @@ type PerBootstrap = (
 /**
  * The HTTP platform kit (invariants H1–H14). Each case boots a real Nest application per bootstrap with a real Better
  * Auth instance that includes conformanceProbePlugin(), an app controller, a @BeforeAuth() hook provider, a recording
- * global filter and an `around` recorder. HTTP/2 is required when the platform declares capabilities.http2; a platform
- * without the capability, or without the optional proxyTrust() or trustOneProxy, gets a skip with the reason: before
- * the run for platform objects, at run time for classes and definitions. The microservice rows of H-no-adapter need the
+ * global filter and an `around` recorder. HTTP/2 is required when the platform declares capabilities.http2. A platform
+ * without the capability or the optional proxyTrust(), and a harness with neither trustOneProxy nor
+ * createTrustingHttpAdapter for the trusted-hop rows, get a skip with the reason: before the run for platform objects,
+ * at run time for classes and definitions. The microservice rows of H-no-adapter need the
  * `microservice` option. Production-mode rows set process.env.NODE_ENV to 'production' while they run and restore it,
  * so run the cases sequentially.
  */
@@ -810,8 +842,24 @@ export function httpPlatformConformance(
     staticMember(options.platform, "proxyTrust") === false
       ? "the platform does not implement the optional proxyTrust()"
       : undefined;
-  const noTrustHook = () =>
-    options.trustOneProxy ? undefined : "no trustOneProxy option was given";
+  /** A skip when neither trustOneProxy nor the protocol's createTrustingHttpAdapter can make a trusted-hop boot. */
+  const noTrustHook = (http2 = false) =>
+    options.trustOneProxy || trustingAdapterOf(options, http2)
+      ? undefined
+      : http2
+        ? "neither trustOneProxy nor http2.createTrustingHttpAdapter was given"
+        : "neither trustOneProxy nor createTrustingHttpAdapter was given";
+  /** The static skip of a trusted-hop row: the HTTP/2 row also needs the http2 capability. */
+  const trustedHop = (http2: boolean) => () =>
+    (http2 ? noHttp2() : undefined) ?? noTrustHook(http2);
+  /** The run-time skip of a trusted-hop row, decided from the resolved platform for HTTP/2. */
+  const trustedHopReady = async (
+    o: HttpConformanceOptions,
+    http2: boolean,
+  ): Promise<ConformanceSkip | undefined> =>
+    http2 ? http2Ready(o) : undefined;
+  const overHttp2 = (http2: boolean, title: string) =>
+    http2 ? `over HTTP/2, ${title}` : title;
 
   add(
     "H-mount-methods",
@@ -1221,13 +1269,23 @@ export function httpPlatformConformance(
         }
       }),
   );
+  /** GET /probe/ip over the boot's protocol. */
   const probeIp = async (
     boot: HttpBoot,
     headers: Record<string, string> = {},
   ): Promise<{ status: number; ip?: unknown; resolved?: unknown }> => {
-    const response = await sendRaw(`${boot.url}${AUTH}/probe/ip`, { headers });
+    const response = boot.http2
+      ? await http2Request(http2Origin(boot), {
+          ":method": "GET",
+          ":path": `${AUTH}/probe/ip`,
+          ...headers,
+        })
+      : await sendRaw(`${boot.url}${AUTH}/probe/ip`, { headers });
     return response.status === 200
-      ? { status: response.status, ...json(response) }
+      ? {
+          status: response.status,
+          ...(JSON.parse(response.body.toString("utf8")) as object),
+        }
       : { status: response.status };
   };
   add(
@@ -1307,42 +1365,51 @@ export function httpPlatformConformance(
       );
     },
   );
-  add(
-    "H-ip-platform",
-    "in production mode behind a trusted hop, every forwarded client gets its own rate-limit bucket",
-    (o, b) => {
-      const keys: string[] = [];
-      const [left, right] = ["203.0.113.30", "203.0.113.31"];
-      return inProduction(() =>
-        withBoot(
-          o,
-          b,
-          { ...rateLimited(keys), trustProxy: true },
-          async (boot) => {
-            const statuses: number[] = [];
-            for (let index = 0; index <= IP_RULE.max; index++) {
-              statuses.push(
-                (await probeIp(boot, { "x-forwarded-for": left })).status,
+  for (const http2 of [false, true]) {
+    add(
+      "H-ip-platform",
+      overHttp2(
+        http2,
+        "in production mode behind a trusted hop, every forwarded client gets its own rate-limit bucket",
+      ),
+      async (o, b) => {
+        const skip = await trustedHopReady(o, http2);
+        if (skip) {
+          return skip;
+        }
+        const keys: string[] = [];
+        const [left, right] = ["203.0.113.30", "203.0.113.31"];
+        return inProduction(() =>
+          withBoot(
+            o,
+            b,
+            { ...rateLimited(keys), trustProxy: true, http2 },
+            async (boot) => {
+              const statuses: number[] = [];
+              for (let index = 0; index <= IP_RULE.max; index++) {
+                statuses.push(
+                  (await probeIp(boot, { "x-forwarded-for": left })).status,
+                );
+              }
+              assert.deepEqual(statuses, [200, 200, 429]);
+              const other = await probeIp(boot, { "x-forwarded-for": right });
+              assert.equal(
+                other.status,
+                200,
+                "a second client shared the first client's bucket",
               );
-            }
-            assert.deepEqual(statuses, [200, 200, 429]);
-            const other = await probeIp(boot, { "x-forwarded-for": right });
-            assert.equal(
-              other.status,
-              200,
-              "a second client shared the first client's bucket",
-            );
-            assert.equal(other.resolved, right);
-            assert.deepEqual([...new Set(keys)].sort(), [
-              `${left}|/probe/ip`,
-              `${right}|/probe/ip`,
-            ]);
-          },
-        ),
-      );
-    },
-    noTrustHook,
-  );
+              assert.equal(other.resolved, right);
+              assert.deepEqual([...new Set(keys)].sort(), [
+                `${left}|/probe/ip`,
+                `${right}|/probe/ip`,
+              ]);
+            },
+          ),
+        );
+      },
+      trustedHop(http2),
+    );
+  }
   add(
     "H-ip-platform",
     "with trustedProxies covering the platform IP and trust off, Better Auth resolves no IP and B18 warns where proxyTrust() reports 'none'",
@@ -1368,29 +1435,43 @@ export function httpPlatformConformance(
         }),
       ),
   );
-  add(
-    "H-ip-platform",
-    "with trustedProxies covering the proxy and trust on, Better Auth resolves the client IP without a B18 warning",
-    (o, b) =>
-      inProduction(() =>
-        withBoot(
-          o,
-          b,
-          { ...loopbackProxies, trustProxy: true },
-          async (boot) => {
-            const value = await probeIp(boot, {
-              "x-forwarded-for": "203.0.113.41",
-            });
-            assert.equal(value.resolved, "203.0.113.41");
-            assert.deepEqual(
-              warningsWith(boot, "W_CLIENT_IP", "trustedProxies"),
-              [],
-            );
-          },
-        ),
+  for (const http2 of [false, true]) {
+    add(
+      "H-ip-platform",
+      overHttp2(
+        http2,
+        "with trustedProxies covering the proxy and trust on, Better Auth resolves the client IP without a B18 warning",
       ),
-    noTrustHook,
-  );
+      async (o, b) => {
+        const skip = await trustedHopReady(o, http2);
+        if (skip) {
+          return skip;
+        }
+        return inProduction(() =>
+          withBoot(
+            o,
+            b,
+            { ...loopbackProxies, trustProxy: true, http2 },
+            async (boot) => {
+              const value = await probeIp(boot, {
+                "x-forwarded-for": "203.0.113.41",
+              });
+              assert.equal(
+                value.resolved,
+                "203.0.113.41",
+                "Better Auth did not resolve the client IP behind the trusted hop",
+              );
+              assert.deepEqual(
+                warningsWith(boot, "W_CLIENT_IP", "trustedProxies"),
+                [],
+              );
+            },
+          ),
+        );
+      },
+      trustedHop(http2),
+    );
+  }
   add("H-ip-spoof", "client-sent client-IP headers are ignored", (o, b) =>
     withBoot(o, b, {}, async (boot) => {
       const response = await sendRaw(`${boot.url}${AUTH}/probe/ip`, {
@@ -1409,7 +1490,7 @@ export function httpPlatformConformance(
   );
   add(
     "H-proxy-trust",
-    "proxyTrust() reports the effective setting before and after trustOneProxy",
+    "proxyTrust() reports the effective setting before and after trusting one hop",
     (o, b) =>
       withBoot(o, b, {}, async (boot) => {
         const platform = resolvedPlatform(boot.app);
@@ -1420,8 +1501,21 @@ export function httpPlatformConformance(
         }
         const adapter = boot.app.getHttpAdapter() as AbstractHttpAdapter;
         const before = platform.proxyTrust(adapter);
-        await o.trustOneProxy!(boot.app);
-        const after = platform.proxyTrust(adapter);
+        let after: ReturnType<typeof platform.proxyTrust>;
+        if (o.trustOneProxy) {
+          await o.trustOneProxy(boot.app);
+          after = platform.proxyTrust(adapter);
+        } else {
+          // Trust fixed at construction: compare with an app on the trusting adapter.
+          const trusted = await bootHttp(o, b, { trustProxy: true });
+          try {
+            after = resolvedPlatform(trusted.app).proxyTrust!(
+              trusted.app.getHttpAdapter() as AbstractHttpAdapter,
+            );
+          } finally {
+            await trusted.close();
+          }
+        }
         if (before.mode === "unknown" || after.mode === "unknown") {
           assert.equal(
             before.mode,
@@ -1433,16 +1527,11 @@ export function httpPlatformConformance(
         assert.notDeepEqual(
           after,
           before,
-          "proxyTrust() did not reflect trustOneProxy",
+          "proxyTrust() did not reflect the trusted hop",
         );
         assert.notEqual(after.mode, "none");
       }),
-    () =>
-      staticMember(options.platform, "proxyTrust") === false
-        ? "the platform does not implement the optional proxyTrust()"
-        : options.trustOneProxy
-          ? undefined
-          : "no trustOneProxy option was given",
+    () => noProxyTrust() ?? noTrustHook(),
   );
   const forwarded = {
     "x-forwarded-proto": "https",
@@ -1479,8 +1568,7 @@ export function httpPlatformConformance(
       withBoot(o, b, { ...derivedBaseUrl, trustProxy: true }, async (boot) => {
         assert.equal((await probedUrl(boot)).origin, "https://proxy.example");
       }),
-    () =>
-      options.trustOneProxy ? undefined : "no trustOneProxy option was given",
+    () => noTrustHook(),
   );
   add(
     "H-h2-pseudo",
@@ -2250,26 +2338,37 @@ export function httpPlatformConformance(
       ),
     noProxyTrust,
   );
-  add(
-    "H-proxy-untrusted-warning",
-    "in production behind a trusted hop, forwarded auth requests log no W_PROXY_UNTRUSTED",
-    async (o, b) => {
-      if (!(await implementsMember(o, "proxyTrust"))) {
-        return conformanceSkip(
-          "the platform does not implement the optional proxyTrust()",
+  // Behind a trusted hop no platform may cause the warning: one without proxyTrust() must not be taken for 'none'.
+  for (const http2 of [false, true]) {
+    add(
+      "H-proxy-untrusted-warning",
+      overHttp2(
+        http2,
+        "in production behind a trusted hop, forwarded auth requests log no W_PROXY_UNTRUSTED",
+      ),
+      async (o, b) => {
+        const skip = await trustedHopReady(o, http2);
+        if (skip) {
+          return skip;
+        }
+        return inProduction(() =>
+          withBoot(o, b, { trustProxy: true, http2 }, async (boot) => {
+            const headers = { "x-forwarded-for": "203.0.113.55" };
+            const response = boot.http2
+              ? await http2Request(http2Origin(boot), {
+                  ":method": "GET",
+                  ":path": `${AUTH}/probe/html`,
+                  ...headers,
+                })
+              : await sendRaw(`${boot.url}${AUTH}/probe/html`, { headers });
+            assert.equal(response.status, 200);
+            assert.deepEqual(proxyWarnings(boot), []);
+          }),
         );
-      }
-      return inProduction(() =>
-        withBoot(o, b, { trustProxy: true }, async (boot) => {
-          await sendRaw(`${boot.url}${AUTH}/probe/html`, {
-            headers: { "x-forwarded-for": "203.0.113.55" },
-          });
-          assert.deepEqual(proxyWarnings(boot), []);
-        }),
-      );
-    },
-    () => noProxyTrust() ?? noTrustHook(),
-  );
+      },
+      trustedHop(http2),
+    );
+  }
   add(
     "H-log-hygiene",
     "session and probe cookies never appear in captured logs",
