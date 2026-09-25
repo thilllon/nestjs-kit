@@ -217,6 +217,7 @@ class SecurityRow {
   @Field(() => String, { nullable: true }) value!: string;
   @Field(() => String, { nullable: true }) session!: string;
   @Field(() => String, { nullable: true }) forwarded!: string;
+  @Field(() => String, { nullable: true }) serviceSession!: string;
 }
 @Resolver(() => SecurityRow)
 @RequireAuth()
@@ -278,6 +279,11 @@ class SecurityResolver {
   @ResolveField(() => String, { nullable: true })
   session(@CurrentSession() session: AuthSession | null) {
     return session ? "session" : "anonymous";
+  }
+
+  @ResolveField(() => String, { nullable: true })
+  async serviceSession() {
+    return (await this.auth.getSession()) ? "session" : "anonymous";
   }
 
   @ResolveField(() => String, { nullable: true })
@@ -619,6 +625,43 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
               warning.includes("W_NESTED_PRINCIPAL_PARAM"),
             ),
           ).toBe(true);
+        } finally {
+          await f.close();
+        }
+      },
+    );
+    it.each([
+      { interceptors: true, reason: "SESSION_REQUIRED", logged: 1 },
+      { interceptors: false, reason: "NO_AUTH_SCOPE", logged: 20 },
+    ])(
+      "bounds service getSession() logging by its scope across twenty list items (interceptors=$interceptors)",
+      async ({ interceptors, reason, logged }) => {
+        // A field scope gives service reads the request's surfaced-error record: one ERROR entry per request. The
+        // zero-argument service has no carrier without field interceptors, so each fresh NO_AUTH_SCOPE error is
+        // logged. [R6:NEST-r6-02, NEST-r6-03] [R7:NEST-r7-02]
+        const f = await securityFixture(driver, { interceptors });
+        try {
+          const key = await f.auth.api.createApiKey({
+            body: { userId: f.userId },
+          });
+          // A second request is observable again: the bound is per request, not per process.
+          for (const round of [1, 2]) {
+            const from = f.errors.length;
+            const { body, response } = await f.query(
+              "{ keyRows { serviceSession } }",
+              { "x-api-key": key.key },
+            );
+            expect(response.status).toBe(200);
+            expect(body.errors, `round ${round}`).toHaveLength(20);
+            expect(body.data.keyRows).toEqual(
+              Array.from({ length: 20 }, () => ({ serviceSession: null })),
+            );
+            const entries = f.errors.slice(from);
+            expect(entries, `round ${round}`).toHaveLength(logged);
+            expect(entries).toEqual(
+              entries.map(() => expect.objectContaining({ code: reason })),
+            );
+          }
         } finally {
           await f.close();
         }
@@ -1251,5 +1294,115 @@ describe.each(["apollo", "mercurius"] as const)(
         await f.close();
       }
     });
+  },
+);
+
+// W_NESTED_PRINCIPAL_PARAM reads each entry point's compiled accepted kinds, which a requirement widens without any
+// @AcceptPrincipals metadata. [R6:NEST-r6-04]
+import { Require, requirement } from "./auth-decorators.js";
+import type { AuthorizationPolicy } from "./auth-contracts.js";
+
+const apiKeyOnly: AuthorizationPolicy = {
+  id: "api-key-only",
+  requires: { principals: ["api-key"] },
+  evaluate: () => ({ effect: "allow" }),
+};
+@ObjectType()
+class WideningRow {
+  @Field(() => String, { nullable: true }) reader!: string;
+}
+@Resolver(() => WideningRow)
+class RequirementWideningResolver {
+  @Query(() => WideningRow)
+  @Require(requirement(apiKeyOnly, {}))
+  widened() {
+    return {};
+  }
+
+  @ResolveField(() => String, { nullable: true })
+  reader(@CurrentSession() session: AuthSession | null) {
+    return session?.user.id;
+  }
+}
+@Resolver(() => WideningRow)
+class SessionEntryResolver {
+  @Query(() => WideningRow)
+  @RequireAuth()
+  sessionOnly() {
+    return {};
+  }
+
+  @ResolveField(() => String, { nullable: true })
+  reader(@CurrentSession() session: AuthSession | null) {
+    return session?.user.id;
+  }
+}
+describe.each(["apollo", "mercurius"] as const)(
+  "native %s nested principal parameter advice",
+  (driver) => {
+    it.each([
+      { resolver: RequirementWideningResolver, warns: true },
+      { resolver: SessionEntryResolver, warns: false },
+    ])(
+      "warns for a session reader beneath an entry point widened by a requirement ($resolver.name)",
+      async ({ resolver, warns }) => {
+        const warnings: string[] = [];
+        const f = await startHttpFixture({
+          auth: betterAuth({
+            secret: crypto.randomUUID() + crypto.randomUUID(),
+            baseURL: "http://localhost:3000",
+            logger: { disabled: true },
+            emailAndPassword: { enabled: true },
+            advanced: { disableOriginCheck: false },
+            database: memoryAdapter({
+              user: [],
+              session: [],
+              account: [],
+              verification: [],
+              apikey: [],
+            }),
+            plugins: [apiKey(), nestjs()],
+          }),
+          adapter:
+            driver === "apollo" ? new ExpressAdapter() : new FastifyAdapter(),
+          platform: driver === "apollo" ? expressPlatform() : fastifyPlatform(),
+          transports: [
+            driver === "apollo" ? apolloTransport() : mercuriusTransport(),
+          ],
+          principals: [apiKeyPrincipal()],
+          controllers: [],
+          providers: [resolver],
+          moduleOptions: { logSummary: false },
+          imports: [
+            GraphQLModule.forRoot({
+              driver: driver === "apollo" ? ApolloDriver : MercuriusDriver,
+              autoSchemaFile: true,
+              fieldResolverEnhancers: ["guards", "interceptors", "filters"],
+            }),
+          ],
+          configure: (app) => {
+            app.useLogger({
+              log: () => {},
+              error: () => {},
+              warn: (...values: unknown[]) => {
+                warnings.push(values.map(String).join(" "));
+              },
+            });
+          },
+        });
+        try {
+          expect(
+            warnings.some(
+              (warning) =>
+                warning.includes("W_NESTED_PRINCIPAL_PARAM") &&
+                warning.includes(`${resolver.name}.reader`),
+            ),
+            warnings.join("\n"),
+          ).toBe(warns);
+        } finally {
+          await f.close();
+        }
+      },
+    );
   },
 );

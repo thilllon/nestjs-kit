@@ -239,6 +239,7 @@ describe("native SDK endpoint hook parity", () => {
 
   it("compares router delivery separately from direct APIError header preservation", async () => {
     const execute = async (native: boolean) => {
+      let afterRuns = 0;
       const { auth } = setup(
         native,
         [
@@ -247,8 +248,17 @@ describe("native SDK endpoint hook parity", () => {
             throw new APIError("FORBIDDEN", { message: "blocked" });
           }),
         ],
-        [],
+        [
+          hook(() => {
+            afterRuns++;
+          }),
+        ],
       );
+      // A thrown before-hook skips every after-hook, so the cookie bridge never sees its headers. [R7:BA-r7-02]
+      await expect(auth.api.probe({ body: {} })).rejects.toMatchObject({
+        statusCode: 403,
+        message: "blocked",
+      });
       const response = await auth.handler(
         new Request("https://auth.test/api/auth/probe", {
           method: "POST",
@@ -263,12 +273,29 @@ describe("native SDK endpoint hook parity", () => {
         status: response.status,
         cookies: response.headers.getSetCookie(),
         body: await response.json(),
+        afterRuns,
       };
     };
     const native = await execute(true);
     expect(await execute(false)).toEqual(native);
     expect(native.status).toBe(403);
     expect(native.cookies).toEqual([]);
+    expect(native.afterRuns).toBe(0);
+    // Control: the same after-hook runs on both paths when no before-hook throws.
+    for (const nativeHooks of [true, false]) {
+      let runs = 0;
+      const { auth } = setup(
+        nativeHooks,
+        [],
+        [
+          hook(() => {
+            runs++;
+          }),
+        ],
+      );
+      await auth.api.probe({ body: {} });
+      expect(runs).toBe(1);
+    }
   });
 
   it("replaces after values and exposes earlier replacement to later hooks", async () => {
