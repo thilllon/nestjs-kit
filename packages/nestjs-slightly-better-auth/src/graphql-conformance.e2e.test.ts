@@ -436,10 +436,11 @@ function entitiesOperation(
   };
 }
 
-/** A running app: its URL and fixture handlers. */
+/** A running app: its URL, fixture handlers and graphql-ws connection_init form. */
 interface Booted {
   readonly url: string;
   readonly handlers: Map<string, FixtureHandler>;
+  readonly omitEmptyConnectionParams: boolean;
 }
 
 const apps = new WeakMap<object, Booted>();
@@ -503,7 +504,7 @@ interface Connection {
 }
 
 function connect(app: INestApplication, headers: HeadersInit): Connection {
-  const { url } = apps.get(app)!;
+  const { url, omitEmptyConnectionParams } = apps.get(app)!;
   const { headers: upgrade, connectionParams } = handshake(headers);
   class HandshakeSocket extends WebSocket {
     constructor(address: string | URL, protocols?: string | string[]) {
@@ -513,7 +514,10 @@ function connect(app: INestApplication, headers: HeadersInit): Connection {
   const client: Client = createClient({
     url: `${url.replace(/^http/, "ws")}/graphql`,
     webSocketImpl: HandshakeSocket,
-    connectionParams,
+    // Without connectionParams, graphql-ws sends connection_init without a payload.
+    ...(omitEmptyConnectionParams && Object.keys(connectionParams).length === 0
+      ? {}
+      : { connectionParams }),
     retryAttempts: 0,
     lazy: true,
   });
@@ -575,6 +579,11 @@ interface HarnessOptions {
   readonly transport?: GraphqlTransportOptions;
   /** Mercurius sockets: register mercuriusSubscriptionContext(). */
   readonly subscriptionContext?: boolean;
+  /**
+   * 'socket': a handshake that moves no credential into connectionParams sends connection_init without a payload,
+   * as a browser graphql-ws client without connectionParams does.
+   */
+  readonly omitEmptyConnectionParams?: boolean;
   /** The Apollo Federation version of federation boots (default 2). */
   readonly federationVersion?: 1 | 2;
   /** A transport unit to run instead of the driver's production transport (mutation tests). */
@@ -703,7 +712,11 @@ function graphqlHarness(harness: HarnessOptions): TransportConformanceOptions {
         await app.close();
         throw error;
       }
-      apps.set(app, { url: await app.getUrl(), handlers });
+      apps.set(app, {
+        url: await app.getUrl(),
+        handlers,
+        omitEmptyConnectionParams: harness.omitEmptyConnectionParams ?? false,
+      });
       return app;
     },
     async invoke(app, handler, headers, input = {}) {
@@ -855,6 +868,20 @@ for (const [driver, label] of drivers) {
     );
   });
 
+  describe(`transport kit on the built-in ${label} over graphql-ws omitting empty connection_init payloads`, () => {
+    runConformance(
+      transportConformance(
+        graphqlHarness({
+          driver,
+          channel: "socket",
+          subscriptionContext: driver === "mercurius",
+          omitEmptyConnectionParams: true,
+        }),
+      ),
+      { describe, it },
+    );
+  });
+
   describe(`transport kit on the built-in ${label} over graphql-ws with a principal TTL`, () => {
     runConformance(
       transportConformance(
@@ -874,6 +901,19 @@ describe("transport kit on the built-in Mercurius transport over graphql-ws with
   runConformance(
     transportConformance(
       graphqlHarness({ driver: "mercurius", channel: "socket" }),
+    ),
+    { describe, it },
+  );
+});
+
+describe("transport kit on the built-in Mercurius transport over graphql-ws without its subscription context, omitting empty connection_init payloads", () => {
+  runConformance(
+    transportConformance(
+      graphqlHarness({
+        driver: "mercurius",
+        channel: "socket",
+        omitEmptyConnectionParams: true,
+      }),
     ),
     { describe, it },
   );

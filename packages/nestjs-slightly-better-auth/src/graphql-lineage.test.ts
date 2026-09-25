@@ -592,8 +592,11 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
       for (const carrier of [
         // Nest's default context: the graphql-ws Context at context.req.
         { req: { connectionParams: {}, extra } },
+        // graphql-ws omits connectionParams for a connection_init without a payload.
+        { req: { extra } },
         // A custom context keeping graphql-ws extra beside its own req.
         { req: request, extra, connectionParams: {} },
+        { req: request, extra },
         { req: { connectionParams: {}, extra: closed } },
       ]) {
         const call = (apolloTransport() as AuthTransport).describe(
@@ -603,6 +606,7 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         expect(call.connection).toBe(request);
         expect(call.clientIp).toBeNull();
         expect(call.cookies).toBeNull();
+        expect(call.headers().get("host")).toBe("localhost:3000");
       }
     },
   );
@@ -620,6 +624,8 @@ describe("GraphQL HTTP classification with a client Upgrade header", () => {
         { req: { raw: request } },
         { extra: { request } },
         { req: { connectionParams: {}, extra: { request } } },
+        { req: { extra: { request } } },
+        { req: { extra: { socket: { send: "", close: "" }, request } } },
         { req: request, extra: { socket: {}, request } },
         { req: request, extra: { socket: { send: "", close: "" }, request } },
       ]) {

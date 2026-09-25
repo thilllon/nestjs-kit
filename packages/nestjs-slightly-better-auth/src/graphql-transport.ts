@@ -199,13 +199,11 @@ function carrierDetails(
       ? http?.isRequest(req) === true ||
         http?.isRequest(extra?.request) === true
       : platformReply(http, carrier.reply);
-  // Nest assigns the graphql-ws Context to context.req unless a custom context sets req.
+  // Nest assigns the graphql-ws Context to context.req unless a custom context sets req. Its
+  // server-created extra identifies it: graphql-ws sets connectionParams only for an object
+  // connection_init payload, and an absent payload presents no connection credentials.
   const wsContext =
-    driver === "apollo" &&
-    !httpRequest &&
-    req &&
-    "connectionParams" in req &&
-    graphqlWsUpgrade(req.extra)
+    driver === "apollo" && !httpRequest && graphqlWsUpgrade(req?.extra)
       ? req
       : undefined;
   const socket = httpRequest

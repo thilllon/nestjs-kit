@@ -20,10 +20,11 @@ export function connect(url: string, token?: string): Client {
   }
   return createClient({
     url,
-    // Send an object payload even without a token: the Apollo transport
-    // recognizes a graphql-ws operation only when connection_init carries one
-    // (#601).
-    connectionParams: token ? { authorization: `Bearer ${token}` } : {},
+    // Without a token, connection_init carries no payload, and operations use
+    // the upgrade request's credentials, such as a browser's session cookie.
+    ...(token
+      ? { connectionParams: { authorization: `Bearer ${token}` } }
+      : {}),
     // Report a closed connection instead of reconnecting with the same token.
     retryAttempts: 0,
   });

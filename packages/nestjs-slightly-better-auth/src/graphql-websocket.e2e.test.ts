@@ -290,9 +290,10 @@ async function fixture(
       oldUpdatedAt,
       reads: () => reads,
       sessionCalls: () => sessionCalls,
+      /** A null connectionParams sends connection_init without a payload, like a browser client. */
       client(
         headers: Record<string, string>,
-        connectionParams: Record<string, unknown> = {},
+        connectionParams: Record<string, unknown> | null = {},
       ) {
         class HeaderSocket extends WebSocket {
           constructor(address: string | URL, protocols?: string | string[]) {
@@ -302,7 +303,7 @@ async function fixture(
         const client = createClient({
           url: `${String(app.getHttpServer().address().address === "127.0.0.1" ? "ws://127.0.0.1" : "ws://localhost")}:${app.getHttpServer().address().port}/graphql`,
           webSocketImpl: HeaderSocket,
-          connectionParams,
+          ...(connectionParams ? { connectionParams } : {}),
           retryAttempts: 0,
         });
         clients.push(client);
@@ -551,6 +552,65 @@ describe.each([
     } finally {
       await f.close();
     }
+  });
+  describe.each([
+    ["without a connection_init payload", null],
+    ["with an empty connection_init payload", {}],
+  ] as const)("%s", (_payload, connectionParams) => {
+    it("authenticates upgrade-request cookies for queries, mutations and subscriptions", async () => {
+      const f = await fixture(mode);
+      try {
+        const client = f.client(
+          { cookie: f.cookie, origin: "http://localhost:3000" },
+          connectionParams,
+        );
+        expect(await execute(client, "{ who }")).toEqual({
+          data: { who: f.userId },
+        });
+        expect(await execute(client, "mutation { change }")).toEqual({
+          data: { change: f.userId },
+        });
+        expect(await execute(client, "subscription { notice }")).toEqual({
+          data: { notice: f.userId },
+        });
+        expect(f.reads()).toBe(3);
+        expect(f.errors).toEqual([]);
+      } finally {
+        await f.close();
+      }
+    });
+    it("treats a connection without credentials as anonymous", async () => {
+      const f = await fixture(mode);
+      try {
+        const client = f.client(
+          { origin: "http://localhost:3000" },
+          connectionParams,
+        );
+        expect(await execute(client, "{ harmless }")).toEqual({
+          data: { harmless: "public" },
+        });
+        expect(await execute(client, "{ optionalWho }")).toEqual({
+          data: { optionalWho: "anonymous" },
+        });
+        for (const query of [
+          "{ who }",
+          "mutation { change }",
+          "subscription { notice }",
+        ]) {
+          const result = await execute(client, query);
+          expect(result.errors, JSON.stringify(result)).toHaveLength(1);
+          expect(result.errors?.[0]?.extensions).toMatchObject({
+            code: "UNAUTHENTICATED",
+            statusCode: 401,
+          });
+        }
+        expect(f.calls()).toBe(1);
+        expect(f.reads()).toBe(0);
+        expect(f.errors).toEqual([]);
+      } finally {
+        await f.close();
+      }
+    });
   });
   it("preserves host metadata when custom credential extraction uses dynamic SDK base URLs", async () => {
     let cookie = "";
