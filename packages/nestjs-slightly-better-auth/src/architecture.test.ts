@@ -21,6 +21,7 @@ const shared = [
   "auth-tokens.ts",
   "error-redactor.ts",
   "platform.ts",
+  "set-cookies.ts",
 ];
 const kernel = [
   "auth-core-module.ts",

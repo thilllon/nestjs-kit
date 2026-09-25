@@ -47,6 +47,8 @@ class PlatformProbeController {
     const response = accessorPlatform.requests.responseFor?.(request);
     const sink = accessorPlatform.requests.cookieSink(request, undefined);
     sink?.append(["controller=one; Path=/", "controller=two; Path=/"]);
+    // A second delivery of the same lines (bridge after-hook plus a source's own append) is de-duplicated.
+    sink?.append(["controller=two; Path=/"]);
     return {
       isRequest: accessorPlatform.requests.isRequest(request),
       isLive: accessorPlatform.requests.isLive(request),
