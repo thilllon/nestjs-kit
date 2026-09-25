@@ -83,7 +83,7 @@ curl --cookie user.txt --header "content-type: application/json" \
   --data '{"query":"{ operator { email } }"}' http://localhost:3000/graphql
 ```
 
-Browser clients can authenticate graphql-ws operations with the session cookie of the upgrade request instead of a token. The upgrade request must then come from one of Better Auth's trusted origins, and the client still sends an object `connection_init` payload, such as `connectionParams: {}` ([#601](https://github.com/thilllon/nestjs-kit/issues/601)).
+Browser clients can authenticate graphql-ws operations with the session cookie of the upgrade request instead of a token. The upgrade request must then come from one of Better Auth's trusted origins; the client needs no `connectionParams`.
 
 ## Files
 
