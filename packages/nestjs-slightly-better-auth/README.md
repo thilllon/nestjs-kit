@@ -407,7 +407,11 @@ The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Buil
 
 ## Examples
 
-The [Express](../../examples/better-auth-express/README.md) and [Fastify](../../examples/better-auth-fastify/README.md) example applications register a default and a named instance, guard routes and read the signed-in user through a principal parameter. They start without external services.
+Each example application registers a default and a named instance, reads the signed-in user through the `@CurrentUser()` principal parameter and starts without external services:
+
+- [Express](../../examples/better-auth-express/README.md) and [Fastify](../../examples/better-auth-fastify/README.md) guard HTTP routes on their platforms.
+- [Socket.IO](../../examples/better-auth-websockets/README.md) authenticates gateway connections and every message, with the named instance on its own namespace.
+- [TCP microservice](../../examples/better-auth-rpc/README.md) authenticates the messages of a hybrid application through the payload credential carrier.
 
 ## Releases
 
