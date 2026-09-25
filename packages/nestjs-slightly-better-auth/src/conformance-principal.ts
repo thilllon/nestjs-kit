@@ -46,7 +46,12 @@ import {
   getExtensionToken,
   PRINCIPAL_RESOLVER,
 } from "./auth-tokens.js";
-import type { AuthLike, AuthPrincipal, PrincipalKind } from "./auth-types.js";
+import type {
+  AdminPermissions,
+  AuthLike,
+  AuthPrincipal,
+  PrincipalKind,
+} from "./auth-types.js";
 import {
   bootIssueCodes,
   type ConformanceCase,
@@ -1581,7 +1586,11 @@ function apiKeyCases(
         if (outcome && typeof outcome.skipped === "string") {
           return outcome;
         }
-        const permissions = { user: ["list"] };
+        // The kit judges the instance under test, not the program's registered instance, whose
+        // admin() statements type permission() and may name other resources.
+        const permissions = { user: ["list"] } as Readonly<
+          Record<string, readonly string[]>
+        > as AdminPermissions;
         const optedIn = await judgePrincipal(
           options.auth,
           permission(permissions, { principals: ["session", "api-key"] }),

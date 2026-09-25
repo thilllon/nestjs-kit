@@ -726,4 +726,110 @@ permission({ user: ["ban"] }, { principals: ["api-key"] });
       rootOnly: "",
     });
   });
+
+  it("compiles every public entry and keeps database hook types under plugin-augmented registrations", {
+    timeout: 60_000,
+  }, async () => {
+    // Every entry, including ./plugin with its database hook dispatcher, compiles in the program.
+    const entries = Object.keys(publicPaths)
+      .map((specifier) => `import "${specifier}";`)
+      .join("\n");
+    const [registered, customStatements] = await Promise.all([
+      diagnostics(`
+import { apiKey } from "@better-auth/api-key";
+import { betterAuth, type GenericEndpointContext } from "better-auth";
+import { admin, organization } from "better-auth/plugins";
+import {
+  BeforeAuth,
+  BeforeDatabase,
+  AfterDatabase,
+  type AuthHookContext,
+  type DatabaseHookData,
+} from "nestjs-slightly-better-auth";
+${entries}
+
+const primary = betterAuth({
+  user: { additionalFields: { department: { type: "string", required: true } } },
+  plugins: [admin(), organization(), apiKey()],
+});
+
+declare module "nestjs-slightly-better-auth" {
+  interface Register {
+    auth: typeof primary;
+  }
+}
+
+type CreatedBan = Assert<Equal<DatabaseHookData<"user.create">["banned"], boolean | null | undefined>>;
+type SessionOrganization = Assert<Equal<DatabaseHookData<"session.create", "after">["activeOrganizationId"], string | null | undefined>>;
+
+export class Hooks {
+  @BeforeAuth("/admin/ban-user")
+  ban(ctx: AuthHookContext<"/admin/ban-user">) {
+    const userId: unknown = ctx.body.userId;
+    // @ts-expect-error Before-hooks see the plugin endpoint body before validation.
+    const trusted: string = ctx.body.userId;
+    void userId;
+    void trusted;
+  }
+
+  @BeforeDatabase("user.create")
+  create(user: DatabaseHookData<"user.create">) {
+    const department: string = user.department;
+    void department;
+    return { data: { banned: false } };
+  }
+
+  @BeforeDatabase("user.update")
+  update(data: DatabaseHookData<"user.update">) {
+    const banned: boolean | null | undefined = data.banned;
+    // @ts-expect-error Update payloads contain only the changed fields.
+    const department: string = data.department;
+    void banned;
+    void department;
+  }
+
+  // @ts-expect-error Delete hooks can only abort; the SDK ignores replacement data.
+  @BeforeDatabase("user.delete")
+  replace(user: DatabaseHookData<"user.delete">) {
+    return { data: { banned: user.banned } };
+  }
+
+  @AfterDatabase("session.create")
+  audit(session: DatabaseHookData<"session.create", "after">, ctx: GenericEndpointContext | null | undefined): void {
+    void session.activeOrganizationId;
+    void ctx?.path;
+  }
+
+  // @ts-expect-error Database hooks must handle SDK writes outside an endpoint.
+  @AfterDatabase("session.create")
+  assumesEndpoint(session: DatabaseHookData<"session.create", "after">, ctx: GenericEndpointContext): void {
+    void session.userId;
+    void ctx.path;
+  }
+}
+`),
+      diagnostics(`
+import { apiKey } from "@better-auth/api-key";
+import { betterAuth } from "better-auth";
+import { admin, organization } from "better-auth/plugins";
+import { createAccessControl } from "better-auth/plugins/access";
+${entries}
+
+const projects = createAccessControl({ project: ["archive"] } as const);
+const primary = betterAuth({
+  plugins: [admin({ ac: projects, roles: { owner: projects.newRole({ project: ["archive"] }) } }), organization(), apiKey()],
+});
+
+declare module "nestjs-slightly-better-auth" {
+  interface Register {
+    auth: typeof primary;
+  }
+}
+`),
+    ]);
+    expect({ registered, customStatements }).toEqual({
+      registered: "",
+      customStatements: "",
+    });
+  });
 });
