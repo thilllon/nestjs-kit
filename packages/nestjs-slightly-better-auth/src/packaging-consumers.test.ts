@@ -195,10 +195,20 @@ async function install(
     'allowBuilds:\n  "@apollo/protobufjs": false\n',
   );
   // CI enables frozen lockfiles by default; a fresh consumer has no lockfile.
-  await run("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], {
-    cwd: directory,
-    timeout: 240_000,
-  });
+  // Pinned consumers may resolve from cached metadata; a consumer that installs
+  // peer ranges refreshes it, so it gets the newest versions inside them.
+  const pinned = Object.values(dependencies).every((version) =>
+    /^\d+\.\d+\.\d+$/.test(version),
+  );
+  await run(
+    "pnpm",
+    [
+      "install",
+      ...(pinned ? ["--prefer-offline"] : []),
+      "--no-frozen-lockfile",
+    ],
+    { cwd: directory, timeout: 240_000 },
+  );
   return directory;
 }
 
