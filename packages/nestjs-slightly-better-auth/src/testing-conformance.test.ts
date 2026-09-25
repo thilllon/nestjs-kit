@@ -1215,6 +1215,35 @@ describe("principal source kit mutations", () => {
       expect.objectContaining({ code: "CONFORMANCE_SESSION_REFRESH" }),
     );
   });
+
+  it("fails S-dynamic-base-url, instead of skipping it, for a variant() without session.updateAge 0", async () => {
+    const { auth, ...credentials } = sessionCredentials(
+      createConformanceAuth(),
+    );
+    const cases = principalSourceConformance({
+      source: sessionPrincipal(),
+      auth,
+      credentials,
+      variant: (overrides) => {
+        const variant = createConformanceAuth(overrides);
+        void (
+          variant.$context as Promise<{
+            options: { session: { updateAge?: number } };
+          }>
+        ).then((context) => {
+          context.options.session.updateAge = 86_400;
+        });
+        return variant;
+      },
+    });
+    for (const item of cases.filter(
+      (value) => value.id === "S-dynamic-base-url",
+    )) {
+      await expect(item.run()).rejects.toThrow(
+        expect.objectContaining({ code: "CONFORMANCE_SESSION_REFRESH" }),
+      );
+    }
+  });
 });
 
 function sessionPrincipalOf(user: {

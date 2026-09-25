@@ -1214,6 +1214,8 @@ function dynamicBaseUrlCases(
       "a dynamic baseURL without fallback fails boot for hostless sources and never answers 500 for the others",
       async () => {
         const auth = await variantOf(options, dynamic as never);
+        // A misconfigured variant fails the case; only the source's boot errors skip it.
+        await assertKitInstance(auth);
         const booted = await settle(() => harness(options, { auth }));
         if (!booted.ok) {
           const codes = bootIssueCodes(booted.error);
@@ -1263,6 +1265,8 @@ function dynamicBaseUrlCases(
           ...dynamic,
           advanced: { trustedProxyHeaders: true },
         } as never);
+        // A misconfigured variant fails the case; only the source's boot errors skip it.
+        await assertKitInstance(auth);
         const booted = await settle(() => harness(options, { auth }));
         if (!booted.ok) {
           const codes = bootIssueCodes(booted.error);
