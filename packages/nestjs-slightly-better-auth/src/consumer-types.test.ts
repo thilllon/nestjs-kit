@@ -259,6 +259,49 @@ rpcTransport({ carriers: [{ id: "numeric", matches: () => true, headers: () => (
     ).toBe("");
   });
 
+  it("fits the Mercurius subscription context and keeps GraphQL credential mappers synchronous", {
+    timeout: 30_000,
+  }, async () => {
+    expect(
+      await diagnostics(`
+import { GraphQLModule } from "@nestjs/graphql";
+import { MercuriusDriver, type MercuriusDriverConfig } from "@nestjs/mercurius";
+import { betterAuth } from "better-auth";
+import { BetterAuthModule } from "nestjs-slightly-better-auth";
+import { expressPlatform } from "nestjs-slightly-better-auth/express";
+import { fastifyPlatform } from "nestjs-slightly-better-auth/fastify";
+import {
+  apolloTransport,
+  mercuriusSubscriptionContext,
+  mercuriusTransport,
+  type GraphqlTransportOptions,
+} from "nestjs-slightly-better-auth/graphql";
+
+const auth = betterAuth({});
+GraphQLModule.forRoot<MercuriusDriverConfig>({
+  driver: MercuriusDriver,
+  autoSchemaFile: true,
+  subscription: { fullWsTransport: true, context: mercuriusSubscriptionContext() },
+});
+const options: GraphqlTransportOptions = {
+  connectionParamHeaders: ["authorization", "x-api-key"],
+  subscriptionCredentials: (connectionContext) =>
+    typeof connectionContext === "object" && connectionContext !== null ? { authorization: "Bearer token" } : undefined,
+  subscriptionPrincipalTtlMs: 5_000,
+  fieldResolverCoverage: "warn",
+  federationCoverage: "off",
+};
+BetterAuthModule.forRoot({ auth, platforms: [expressPlatform()], transports: [apolloTransport(options)] });
+BetterAuthModule.forRootAsync({ platforms: [fastifyPlatform()], transports: [mercuriusTransport()], useFactory: () => ({ auth }) });
+
+// @ts-expect-error Socket credentials are mapped synchronously for every operation.
+apolloTransport({ subscriptionCredentials: async () => ({ authorization: "Bearer token" }) });
+// @ts-expect-error Unknown coverage modes cannot silently disable reference resolver checks.
+mercuriusTransport({ federationCoverage: "ignore" });
+`),
+    ).toBe("");
+  });
+
   it("types registered default and named instances, their permissions and custom principal kinds", {
     timeout: 30_000,
   }, async () => {

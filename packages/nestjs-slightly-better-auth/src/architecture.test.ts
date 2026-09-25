@@ -78,6 +78,7 @@ const units: Readonly<Record<string, readonly string[]>> = {
   http: ["http-transport.ts"],
   express: ["express-platform.ts", "express.ts"],
   fastify: ["fastify-platform.ts", "fastify.ts"],
+  graphql: ["graphql-lineage.ts", "graphql-transport.ts", "graphql.ts"],
   websockets: [
     "socket-io-transport.ts",
     "websockets.ts",
@@ -132,6 +133,14 @@ const nestDeepImportExceptions = [
     specifier: "@nestjs/core/router/route-path-factory.js",
   },
   {
+    file: "graphql-transport.ts",
+    specifier: "@nestjs/common/exceptions/intrinsic.exception.js",
+  },
+  {
+    file: "graphql-transport.ts",
+    specifier: "@nestjs/core/application-config.js",
+  },
+  {
     file: "instance-registry.ts",
     specifier: "@nestjs/core/injector/instance-wrapper.js",
   },
@@ -181,6 +190,12 @@ const entryPolicies: Readonly<Record<string, EntryPolicy>> = {
     specifiers: requiredPeers,
     nodeBuiltins: true,
     groups: ["unit:fastify"],
+  },
+  // graphql is a peer of @nestjs/graphql; the unit's sources never import it.
+  "./graphql": {
+    specifiers: [...requiredPeers, "@nestjs/graphql"],
+    nodeBuiltins: true,
+    groups: ["unit:graphql"],
   },
   "./websockets": {
     specifiers: [...requiredPeers, "@nestjs/websockets"],
@@ -240,6 +255,8 @@ const extensionNames = new Set([
   "express",
   "fastify",
   "graphql",
+  "apollo",
+  "mercurius",
   "socket.io",
   "ws",
   "rpc",
