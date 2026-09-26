@@ -57,7 +57,7 @@ To publish a held package:
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
-   PACKAGE=<package> FOLDER=<folder> VERSION=<first release> # the held package, its packages/ folder and the version it publishes
+   PACKAGE='<package>' FOLDER='<folder>' VERSION='<first release>' # replace each value: the held package, its packages/ folder and its first version
    mise install &&
      pnpm install --frozen-lockfile &&
      cd "packages/$FOLDER" &&
