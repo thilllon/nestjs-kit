@@ -9,11 +9,12 @@ it("resolves each registration's own configuration through its public options he
     dataResidency: "eu" as const,
     impersonateSubuser: "second-subuser",
   };
-  const first = api.SendGridModule.register(firstOptions);
+  const first = api.SendGridModule.register({ ...firstOptions, global: true });
   const second = api.SendGridModule.registerAsync({
     alias: "second",
     useFactory: async () => secondOptions,
   });
+  expect(first.global).toBe(true);
   const probe = Symbol("options probe");
   for (const registration of [first, second]) {
     registration.providers = [

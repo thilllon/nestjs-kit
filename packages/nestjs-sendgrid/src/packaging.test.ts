@@ -34,7 +34,7 @@ const options: SendGridModuleOptions = {
   timeout: 10_000,
   impersonateSubuser: "subuser",
 };
-SendGridModule.register({ ...options, alias: "eu", isGlobal: true });
+SendGridModule.register({ ...options, alias: "eu", global: true });
 SendGridModule.registerAsync({ alias: "eu", useFactory: async () => options });
 // @ts-expect-error Only the "global" and "eu" regions exist.
 SendGridModule.register({ apiKey: "SG.key", dataResidency: "us" });

@@ -75,11 +75,11 @@ SendGridModule.registerAsync({
 });
 ```
 
-`registerAsync()` also accepts `useClass` and `useExisting`. These factories implement `create()` and return `SendGridModuleOptions` or a promise of it. Set `isGlobal: true` in either registration to make it global; the default is local to its importing module.
+`registerAsync()` also accepts `useClass` and `useExisting`. These factories implement `create()` and return `SendGridModuleOptions` or a promise of it. Set `global: true` in either registration to make it global; the default is local to its importing module.
 
 ## Multiple accounts
 
-Give each registration a unique `alias` and inject the matching service with `@Inject(getSendGridToken(alias))`. `alias` and `isGlobal` are Nest module settings: place them beside `useFactory` for asynchronous registration, not inside its returned options. For synchronous registration, include them alongside the SendGrid options in the same object.
+Give each registration a unique `alias` and inject the matching service with `@Inject(getSendGridToken(alias))`. `alias` and `global` are Nest module settings: place them beside `useFactory` for asynchronous registration, not inside its returned options. For synchronous registration, include them alongside the SendGrid options in the same object.
 
 ```ts
 import { Inject, Injectable, Module } from "@nestjs/common";
