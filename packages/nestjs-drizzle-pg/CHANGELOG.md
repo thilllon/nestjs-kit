@@ -1,5 +1,11 @@
 # nestjs-drizzle-pg
 
+## 7.0.0
+
+### Major Changes
+
+- 9206294: The `isGlobal` registration option is now `global`.
+
 ## 6.0.0
 
 ### Major Changes
