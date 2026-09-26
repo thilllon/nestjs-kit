@@ -74,7 +74,7 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B 
 type Assert<T extends true> = T;
 
 const options: SendbirdModuleOptions = { appId: "app", apiToken: "token" };
-SendbirdModule.register({ ...options, alias: "primary", isGlobal: true });
+SendbirdModule.register({ ...options, alias: "primary", global: true });
 SendbirdModule.registerAsync({ alias: "secondary", useFactory: async () => options });
 SendbirdModule.register({ ...options, configuration: { promiseMiddleware: [] } });
 // @ts-expect-error Authentication belongs to the registration.
