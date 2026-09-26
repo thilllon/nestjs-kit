@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-kit/redis",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Client-agnostic Redis and Valkey connections for NestJS with isolated named registrations",
   "license": "ISC",
   "author": "thilllon",
