@@ -7,7 +7,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Write repository documentation, code comments, automated reviews, commit messages, and issue/PR titles and bodies in English. The project does not plan Korean-language support or localized documentation.
 - Keep conversation language independent: respond to the user in their preferred language without applying it to repository content.
 - Write repository content technically. Commit messages, issue and PR titles and bodies, READMEs, code comments and docs state what the code does and its technical reasons in the present tense. Do not add narratives about earlier implementations, past incidents, former owners, or the PRs and issues that led to the current state; Git history holds that record. Generated changelogs and the design material other rules preserve are exempt.
-- Keep issue and PR bodies short: the technical change, its reason, the checklist and the verification. Omit background, commentary and restated context.
+- Keep issue and PR bodies short. Planning issues and PRs state the technical change, its reason, the checklist and the verification; bug and feature reports fill only their issue form fields. Omit background, commentary and restated context.
 - Keep the root README to repository-wide information and a short package list. Package-specific details belong in that package's README.
 
 ## Package identities
