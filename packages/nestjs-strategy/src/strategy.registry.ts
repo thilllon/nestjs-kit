@@ -15,16 +15,19 @@ export class UnknownStrategyError extends Error {
   }
 }
 
-/** Strategies of one group, keyed by their `@Strategy()` names. */
-export class StrategyRegistry<T = unknown>
-  implements Iterable<[key: string, strategy: T]>
+/**
+ * Strategies of one group, keyed by their `@Strategy()` names. `K` narrows
+ * the keys when the group is declared with `defineStrategyGroup()`.
+ */
+export class StrategyRegistry<T = unknown, K extends string = string>
+  implements Iterable<[key: K, strategy: T]>
 {
   private readonly strategies: ReadonlyMap<string, T>;
 
   constructor(
     readonly name: string,
-    strategies: Iterable<readonly [key: string, strategy: T]>,
-    readonly defaultKey?: string,
+    strategies: Iterable<readonly [key: K, strategy: T]>,
+    readonly defaultKey?: K,
   ) {
     const entries = new Map<string, T>();
     for (const [key, strategy] of strategies) {
@@ -51,7 +54,7 @@ export class StrategyRegistry<T = unknown>
    * Returns the strategy registered for `key`, or the default strategy when
    * `key` is omitted. Throws `UnknownStrategyError` for an unregistered key.
    */
-  get(key?: string): T {
+  get(key?: K): T {
     const selected = key ?? this.defaultKey;
     if (selected !== undefined && this.strategies.has(selected)) {
       return this.strategies.get(selected) as T;
@@ -60,28 +63,29 @@ export class StrategyRegistry<T = unknown>
   }
 
   /** Returns the strategy registered for `key`, or `undefined`. */
-  find(key: string): T | undefined {
+  find(key: K | (string & {})): T | undefined {
     return this.strategies.get(key);
   }
 
-  has(key: string): boolean {
+  /** Reports whether `key` is registered and narrows it to a registered key. */
+  has(key: string): key is K {
     return this.strategies.has(key);
   }
 
   /** Keys in registration order. */
-  keys(): string[] {
-    return [...this.strategies.keys()];
+  keys(): K[] {
+    return [...this.strategies.keys()] as K[];
   }
 
   values(): T[] {
     return [...this.strategies.values()];
   }
 
-  entries(): [key: string, strategy: T][] {
-    return [...this.strategies.entries()];
+  entries(): [key: K, strategy: T][] {
+    return [...this.strategies.entries()] as [key: K, strategy: T][];
   }
 
-  [Symbol.iterator](): Iterator<[key: string, strategy: T]> {
-    return this.strategies.entries();
+  [Symbol.iterator](): Iterator<[key: K, strategy: T]> {
+    return this.strategies.entries() as Iterator<[key: K, strategy: T]>;
   }
 }
