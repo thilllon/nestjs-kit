@@ -11,7 +11,7 @@ export interface DrizzlePgModuleOptions {
 
 export type DrizzlePgModuleExtras = {
   alias?: string;
-  isGlobal?: boolean;
+  global?: boolean;
 };
 
 export const defaultTokenAlias = "default";

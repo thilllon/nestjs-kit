@@ -116,7 +116,7 @@ The factory may also return a promise. `registerAsync()` supports `useClass` and
 
 ## Multiple databases
 
-Give each additional registration a distinct alias. Both `alias` and `isGlobal` belong at the top level of the registration, including for `registerAsync()`; they do not belong inside its `useFactory` result.
+Give each additional registration a distinct alias. Both `alias` and `global` belong at the top level of the registration, including for `registerAsync()`; they do not belong inside its `useFactory` result.
 
 ```ts
 import { Inject, Injectable, Module } from "@nestjs/common";
@@ -186,7 +186,7 @@ Set both database URLs for this example. The raw connection, Drizzle database an
 
 Omitted, empty (`""`) and `"default"` aliases identify the default registration. Inject its database with `@Inject(getDrizzlePgToken())`, raw connection with `@Inject(getPgConnectionToken())`, and health service with `@Inject(getDrizzlePgServiceToken())` or directly as `DrizzlePgService`. `getDrizzlePgServiceToken()` now resolves these default aliases to that service class. Register once per alias; use another alias for a different database or connection configuration.
 
-Modules are local by default. Set `isGlobal: true` only when the registered providers should be available throughout the application; otherwise import the registration into the module containing its consumers, or re-export it through a shared module.
+Modules are local by default. Set `global: true` only when the registered providers should be available throughout the application; otherwise import the registration into the module containing its consumers, or re-export it through a shared module.
 
 ## Connection lifecycle
 
@@ -232,7 +232,7 @@ Package-specific injection decorators have been removed; import `Inject` from `@
 | `getPgConnectionToken(alias?)`           | Get the exported raw-connection token.                           |
 | `getDrizzlePgServiceToken(alias?)`       | Get the service token; defaults resolve to `DrizzlePgService`.   |
 | `drizzleConfig`                          | Forward Drizzle configuration, such as `schema` and `logger`.    |
-| `alias` / `isGlobal`                     | Choose a registration name and whether its providers are global. |
+| `alias` / `global`                       | Choose a registration name and whether its providers are global. |
 
 Use Drizzle itself for queries, transactions and migrations. This package supplies Nest registration, injection and connection lifecycle management.
 
