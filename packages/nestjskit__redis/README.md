@@ -103,7 +103,7 @@ RedisModule.register({
 
 ## Named and async registrations
 
-`alias` and `global` are module extras. Each alias gets its own client and shutdown; clients injected together need distinct aliases. `global: true` makes the client injectable in modules that do not import the registration.
+`alias` and `global` are module extras. Each alias gets its own client and shutdown, and an alias may be registered only once per application. `global: true` makes the client injectable in modules that do not import the registration.
 
 ```ts
 RedisModule.registerAsync<Redis>({
@@ -131,7 +131,6 @@ An alias belongs to one registration. To share a client without `global`, create
 
 - A rejected `connect` fails bootstrap with its error. A `connect` that returns no client object fails with a `TypeError` naming the alias.
 - Two modules that register one alias fail bootstrap before any client connects, with an `Error` naming the alias.
-- When a registration fails during bootstrap, the clients that other registrations connected are disconnected, best effort, before its error propagates; shutdown does not disconnect them again. A registration still connecting disconnects its client once `connect` resolves, and one that has not called `connect` yet fails with the same error without connecting.
-- A registration in a lazily loaded module fails only its own load and disconnects no other client.
+- Nest runs no shutdown hooks when bootstrap fails, so clients that other registrations already connected stay open. With the default `abortOnError: true` the process exits; with `abortOnError: false` or in tests, end the process or close those clients yourself.
 - Nest logs a rejected `disconnect` and continues shutting down other registrations; `app.close()` resolves, and the next `close()` calls `disconnect` again.
 - A client that replaces the registration's provider, such as a test double from `overrideProvider(getRedisToken())`, is not passed to `disconnect`.

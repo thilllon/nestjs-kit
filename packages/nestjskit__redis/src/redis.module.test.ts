@@ -6,7 +6,6 @@ import {
   Module,
   type OnModuleDestroy,
 } from "@nestjs/common";
-import { LazyModuleLoader } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RedisModule } from "./redis.module";
@@ -34,14 +33,6 @@ function fakeRegistration(name: string, log: string[]) {
       await client.quit();
     },
   };
-}
-
-function gate() {
-  let open!: () => void;
-  const opened = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  return { open, opened };
 }
 
 describe("RedisModule", () => {
@@ -247,181 +238,6 @@ describe("RedisModule", () => {
       expect(moduleRef.get("first")).toBe(moduleRef.get("second"));
       await moduleRef.close();
       expect(log).toEqual(["connect:cache", "disconnect:cache"]);
-    },
-  );
-
-  it("disconnects connected clients when another registration fails", async () => {
-    const log: string[] = [];
-    const failure = new Error("connect ECONNREFUSED 127.0.0.1:6380");
-    const defaultClient = fakeRegistration("default", log);
-    const connected = gate();
-
-    await expect(
-      Test.createTestingModule({
-        imports: [
-          RedisModule.register({
-            ...defaultClient,
-            connect: async () => {
-              const client = await defaultClient.connect();
-              setImmediate(connected.open);
-              return client;
-            },
-          }),
-          RedisModule.register({
-            alias: "cache",
-            connect: async () => {
-              await connected.opened;
-              throw failure;
-            },
-            disconnect: () => log.push("disconnect:cache"),
-          }),
-        ],
-      }).compile(),
-    ).rejects.toBe(failure);
-    expect(log).toEqual(["connect:default", "disconnect:default"]);
-  });
-
-  it("disconnects a client that connects after another registration failed", async () => {
-    const log: string[] = [];
-    const defaultClient = fakeRegistration("default", log);
-    const started = gate();
-    const released = gate();
-
-    await expect(
-      Test.createTestingModule({
-        imports: [
-          RedisModule.register({
-            ...defaultClient,
-            connect: async () => {
-              started.open();
-              await released.opened;
-              return defaultClient.connect();
-            },
-          }),
-          RedisModule.register({
-            alias: "cache",
-            connect: async () => {
-              await started.opened;
-              return undefined;
-            },
-            disconnect: () => undefined,
-          }),
-        ],
-      }).compile(),
-    ).rejects.toThrow(
-      'Redis registration "cache" connect() returned no client.',
-    );
-
-    released.open();
-    await vi.waitFor(() =>
-      expect(log).toEqual(["connect:default", "disconnect:default"]),
-    );
-  });
-
-  it("does not connect a registration whose options resolve after another registration failed", async () => {
-    const log: string[] = [];
-    const failure = new Error("connect ECONNREFUSED 127.0.0.1:6379");
-    const released = gate();
-
-    await expect(
-      Test.createTestingModule({
-        imports: [
-          RedisModule.register({
-            connect: async () => Promise.reject(failure),
-            disconnect: () => undefined,
-          }),
-          RedisModule.registerAsync<FakeClient>({
-            alias: "cache",
-            useFactory: async () => {
-              await released.opened;
-              return fakeRegistration("cache", log);
-            },
-          }),
-        ],
-      }).compile(),
-    ).rejects.toBe(failure);
-
-    released.open();
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(log).toEqual([]);
-  });
-
-  it.each([
-    { order: "before", bootstrap: ["default"] },
-    { order: "after", bootstrap: ["default"] },
-    { order: "before", bootstrap: [] },
-    { order: "after", bootstrap: [] },
-  ] as const)(
-    "keeps the client of a concurrent lazy load when another lazy load fails $order it connects, with bootstrap clients $bootstrap",
-    async ({ order, bootstrap }) => {
-      const log: string[] = [];
-      const failure = new Error("connect ECONNREFUSED 127.0.0.1:6380");
-      const reports = fakeRegistration("reports", log);
-      const reportsConnected = gate();
-      const billingFailed = gate();
-
-      @Module({
-        imports: [
-          RedisModule.register({
-            alias: "reports",
-            ...reports,
-            connect: async () => {
-              if (order === "before") {
-                await billingFailed.opened;
-              }
-              const client = await reports.connect();
-              setImmediate(reportsConnected.open);
-              return client;
-            },
-          }),
-        ],
-        providers: [
-          {
-            provide: "reports",
-            inject: [getRedisToken("reports")],
-            useFactory: (client: FakeClient) => client,
-          },
-        ],
-      })
-      class ReportsModule {}
-
-      @Module({
-        imports: [
-          RedisModule.register({
-            alias: "billing",
-            connect: async () => {
-              if (order === "after") {
-                await reportsConnected.opened;
-              }
-              throw failure;
-            },
-            disconnect: () => undefined,
-          }),
-        ],
-      })
-      class BillingModule {}
-
-      const moduleRef = await Test.createTestingModule({
-        imports: bootstrap.map((alias) =>
-          RedisModule.register({ alias, ...fakeRegistration(alias, log) }),
-        ),
-      }).compile();
-      const loader = moduleRef.get(LazyModuleLoader);
-      const reportsLoad = loader.load(() => ReportsModule);
-
-      await expect(loader.load(() => BillingModule)).rejects.toBe(failure);
-      billingFailed.open();
-      const client = (await reportsLoad).get<FakeClient>("reports");
-      await new Promise((resolve) => setImmediate(resolve));
-
-      expect(client.open).toBe(true);
-      const connected = [...bootstrap, "reports"];
-      expect(log).toEqual(connected.map((alias) => `connect:${alias}`));
-
-      await moduleRef.close();
-      expect(log.slice(connected.length).sort()).toEqual(
-        connected.map((alias) => `disconnect:${alias}`).sort(),
-      );
     },
   );
 
