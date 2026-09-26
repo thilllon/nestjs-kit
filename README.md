@@ -43,7 +43,7 @@ Each package README covers installation and usage.
 
 ## Develop locally
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then:
+Install [mise](https://mise.jdx.dev/getting-started.html) and [activate it in your shell](https://mise.jdx.dev/getting-started.html#activate-mise), then:
 
 ```sh
 mise trust
