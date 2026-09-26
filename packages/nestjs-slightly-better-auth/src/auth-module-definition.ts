@@ -66,7 +66,7 @@ export function defineTransport<T extends AuthTransport>(transport: T): T {
 
 const STATIC_KEYS = [
   "name",
-  "isGlobal",
+  "global",
   "globalGuard",
   "globalScope",
   "principals",
@@ -89,7 +89,7 @@ export function moduleDefinition(
   const registrationToken = Symbol(`registration:${name}`);
   const staticOptions: BetterAuthStaticOptions = {
     name,
-    isGlobal: definition.isGlobal,
+    global: definition.global,
     globalGuard: definition.globalGuard,
     globalScope: definition.globalScope,
     principals: definition.principals,
@@ -281,7 +281,7 @@ export function moduleDefinition(
   );
   return {
     module,
-    global: definition.isGlobal ?? true,
+    global: definition.global ?? true,
     imports,
     providers,
     exports,
