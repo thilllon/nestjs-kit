@@ -28,7 +28,7 @@ declare class Client {
 
 RedisModule.register({
   alias: "cache",
-  isGlobal: true,
+  global: true,
   connect: () => new Client(),
   disconnect: (client) => client.quit(),
 });

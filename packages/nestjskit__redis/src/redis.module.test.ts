@@ -6,6 +6,7 @@ import {
   Module,
   type OnModuleDestroy,
 } from "@nestjs/common";
+import { LazyModuleLoader } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RedisModule } from "./redis.module";
@@ -135,7 +136,7 @@ describe("RedisModule", () => {
       imports: [
         RedisModule.register({
           alias: "shared",
-          isGlobal: true,
+          global: true,
           ...fakeRegistration("shared", []),
         }),
         FeatureModule,
@@ -145,6 +146,229 @@ describe("RedisModule", () => {
     expect(moduleRef.get(Reader).client.name).toBe("shared");
     await moduleRef.close();
   });
+
+  it("rejects an alias registered by two modules before any client connects", async () => {
+    const log: string[] = [];
+
+    @Module({
+      imports: [
+        RedisModule.register({
+          alias: "cache",
+          ...fakeRegistration("first", log),
+        }),
+      ],
+    })
+    class FirstModule {}
+
+    @Module({
+      imports: [
+        RedisModule.registerAsync<FakeClient>({
+          alias: "cache",
+          useFactory: () => fakeRegistration("second", log),
+        }),
+      ],
+    })
+    class SecondModule {}
+
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          RedisModule.register(fakeRegistration("default", log)),
+          FirstModule,
+          SecondModule,
+        ],
+      }).compile(),
+    ).rejects.toThrow(
+      'Redis alias "cache" is registered by more than one RedisModule. Use distinct aliases, or import one registration module wherever the client is shared.',
+    );
+    expect(log).toEqual([]);
+  });
+
+  it("rejects identical registrations of one alias under deep-hash module ids", async () => {
+    const connect = vi.fn(() => new FakeClient("default"));
+    const registration = () =>
+      RedisModule.register({ connect, disconnect: () => undefined });
+
+    await expect(
+      Test.createTestingModule(
+        { imports: [registration(), registration()] },
+        { moduleIdGeneratorAlgorithm: "deep-hash" },
+      ).compile(),
+    ).rejects.toThrow('Redis alias "default" is registered by more than one');
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it.each(["reference", "deep-hash"] as const)(
+    "shares one registration imported by several modules with %s module ids",
+    async (moduleIdGeneratorAlgorithm) => {
+      const log: string[] = [];
+      const shared = RedisModule.register({
+        alias: "cache",
+        ...fakeRegistration("cache", log),
+      });
+
+      @Module({
+        imports: [shared],
+        providers: [
+          {
+            provide: "first",
+            inject: [getRedisToken("cache")],
+            useFactory: (client: FakeClient) => client,
+          },
+        ],
+      })
+      class FirstModule {}
+
+      @Module({
+        imports: [shared],
+        providers: [
+          {
+            provide: "second",
+            inject: [getRedisToken("cache")],
+            useFactory: (client: FakeClient) => client,
+          },
+        ],
+      })
+      class SecondModule {}
+
+      const moduleRef = await Test.createTestingModule(
+        { imports: [FirstModule, SecondModule] },
+        { moduleIdGeneratorAlgorithm },
+      ).compile();
+
+      expect(moduleRef.get("first")).toBe(moduleRef.get("second"));
+      await moduleRef.close();
+      expect(log).toEqual(["connect:cache", "disconnect:cache"]);
+    },
+  );
+
+  it("disconnects connected clients when another registration fails", async () => {
+    const log: string[] = [];
+    const failure = new Error("connect ECONNREFUSED 127.0.0.1:6380");
+    const defaultClient = fakeRegistration("default", log);
+    let markConnected!: () => void;
+    const connected = new Promise<void>((resolve) => {
+      markConnected = resolve;
+    });
+
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          RedisModule.register({
+            ...defaultClient,
+            connect: async () => {
+              const client = await defaultClient.connect();
+              setImmediate(markConnected);
+              return client;
+            },
+          }),
+          RedisModule.register({
+            alias: "cache",
+            connect: async () => {
+              await connected;
+              throw failure;
+            },
+            disconnect: () => log.push("disconnect:cache"),
+          }),
+        ],
+      }).compile(),
+    ).rejects.toBe(failure);
+    expect(log).toEqual(["connect:default", "disconnect:default"]);
+  });
+
+  it("disconnects a client that connects after another registration failed", async () => {
+    const log: string[] = [];
+    const defaultClient = fakeRegistration("default", log);
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          RedisModule.register({
+            ...defaultClient,
+            connect: async () => {
+              markStarted();
+              await released;
+              return defaultClient.connect();
+            },
+          }),
+          RedisModule.register({
+            alias: "cache",
+            connect: async () => {
+              await started;
+              return undefined;
+            },
+            disconnect: () => undefined,
+          }),
+        ],
+      }).compile(),
+    ).rejects.toThrow(
+      'Redis registration "cache" connect() returned no client.',
+    );
+
+    release();
+    await vi.waitFor(() =>
+      expect(log).toEqual(["connect:default", "disconnect:default"]),
+    );
+  });
+
+  it("disconnects only the clients of a failed lazy load, once", async () => {
+    const log: string[] = [];
+    const failure = new Error("connect ECONNREFUSED 127.0.0.1:6380");
+    const lazyClient = fakeRegistration("lazy", log);
+    let markConnected!: () => void;
+    const connected = new Promise<void>((resolve) => {
+      markConnected = resolve;
+    });
+
+    @Module({
+      imports: [
+        RedisModule.register({
+          alias: "lazy",
+          ...lazyClient,
+          connect: async () => {
+            const client = await lazyClient.connect();
+            setImmediate(markConnected);
+            return client;
+          },
+        }),
+        RedisModule.register({
+          alias: "broken",
+          connect: async () => {
+            await connected;
+            throw failure;
+          },
+          disconnect: () => undefined,
+        }),
+      ],
+    })
+    class LazyFeatureModule {}
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [RedisModule.register(fakeRegistration("default", log))],
+    }).compile();
+
+    await expect(
+      moduleRef.get(LazyModuleLoader).load(() => LazyFeatureModule),
+    ).rejects.toBe(failure);
+    expect(log).toEqual(["connect:default", "connect:lazy", "disconnect:lazy"]);
+
+    await moduleRef.close();
+    expect(log).toEqual([
+      "connect:default",
+      "connect:lazy",
+      "disconnect:lazy",
+      "disconnect:default",
+    ]);
+  });
+
   it("logs a failed disconnect and retries it on the next close", async () => {
     const failure = new Error("quit failed");
     const logged = vi

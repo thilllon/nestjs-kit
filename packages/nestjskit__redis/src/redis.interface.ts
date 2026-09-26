@@ -8,5 +8,5 @@ export interface RedisModuleOptions<TClient = unknown> {
 
 export interface RedisModuleExtras {
   alias: string;
-  isGlobal: boolean;
+  global: boolean;
 }
