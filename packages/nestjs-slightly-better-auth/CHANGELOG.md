@@ -1,5 +1,12 @@
 # nestjs-slightly-better-auth
 
+## 1.12.1
+
+### Patch Changes
+
+- 34fef52: Expose only the upgrade URL's path, without its query string or fragment, as the request URL of an Apollo graphql-ws operation whose socket is not open when the operation starts. Principal sources receive that URL as `PrincipalRequest.request` and policies as the context's `request`, so a cached GraphQL context of a closed connection no longer hands them the closed connection's query-string credential, such as `?access_token=`. Operations of an open connection keep the full upgrade URL, the origin check still reads the connection's handshake, and Mercurius socket operations are unchanged.
+- e752255: Run an Apollo graphql-ws operation anonymously when its graphql-ws socket is not open at the start of the operation. The transport classifies the socket once per operation; an operation whose socket is closed or closing then reads no connection parameter, `subscriptionCredentials`, upgrade-header or cookie credential of that connection, so required operations answer the unauthenticated denial, optional and public operations run without a principal, and nothing is logged at ERROR. A cached GraphQL context of a closed connection therefore authenticates nothing, and a client that closes its connection while graphql-ws prepares an operation no longer logs a configuration error. An operation whose socket closes after it started keeps its connection's credentials, and Mercurius socket operations are unchanged. `T-stale-context` now runs its cached-context row on connection-shaped legs, where a later caller must never receive the first caller's principal and nothing may be logged at ERROR, and `invokeConnection` resolves after the server has observed the connection's close.
+
 ## 1.12.0
 
 ### Minor Changes
