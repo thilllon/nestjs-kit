@@ -28,7 +28,7 @@ declare class Client {
 
 RedisModule.register({
   alias: "cache",
-  isGlobal: true,
+  global: true,
   connect: () => new Client(),
   disconnect: (client) => client.quit(),
 });
@@ -108,11 +108,29 @@ describe("built Redis package", () => {
            });
            const { primary, cache } = app.get("consumer");
            await app.close();
+           const feature = (label) => {
+             class Feature {}
+             Module({
+               imports: [
+                 kit.RedisModule.register({ alias: "cache", ...fake(label) }),
+               ],
+             })(Feature);
+             return Feature;
+           };
+           class DuplicateModule {}
+           Module({
+             imports: [feature("first"), feature("second")],
+           })(DuplicateModule);
+           const duplicate = await NestFactory.createApplicationContext(
+             DuplicateModule,
+             { logger: false, abortOnError: false },
+           ).then(() => "bootstrapped", (error) => error.message);
            console.log(JSON.stringify({
              entry: ${resolve}.split("/").at(-1),
              exports: Object.keys(kit).sort(),
              clients: [primary.label, cache.label],
              open: [primary.open, cache.open],
+             duplicate,
            }));`,
         ],
         { cwd: root, encoding: "utf8" },
@@ -128,6 +146,8 @@ describe("built Redis package", () => {
         ],
         clients: ["default", "cache"],
         open: [false, false],
+        duplicate:
+          'Redis alias "cache" is registered by more than one RedisModule. Use distinct aliases, or import one registration module wherever the client is shared.',
       });
     },
   );

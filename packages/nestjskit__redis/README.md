@@ -8,17 +8,15 @@
 
 ## Install
 
-Install the module and the client library you use:
+Install the module with one of the client libraries below. Requires **Node.js 24+** and **NestJS 12** (`@nestjs/common` and `@nestjs/core`). Ships ESM, CommonJS, and TypeScript declarations. No client library is bundled or selected by default.
+
+`connect` creates the client; bootstrap waits for it. `disconnect` closes it during application shutdown, after every `onModuleDestroy` and `beforeApplicationShutdown` hook. Call `app.enableShutdownHooks()` to also shut down on `SIGTERM` and other termination signals. Nest runs no lifecycle hooks in modules loaded lazily after `app.init()`, so close their clients yourself.
+
+## [ioredis](https://www.npmjs.com/package/ioredis)
 
 ```sh
 pnpm add @nestjs-kit/redis ioredis
 ```
-
-Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript declarations. No client library is bundled or selected by default.
-
-## Register a client
-
-`connect` creates the client; bootstrap waits for it. `disconnect` closes it during application shutdown, after every `onModuleDestroy` and `beforeApplicationShutdown` hook.
 
 ```ts
 import { RedisModule } from "@nestjs-kit/redis";
@@ -30,24 +28,7 @@ RedisModule.register({
 });
 ```
 
-```ts
-import { getRedisToken } from "@nestjs-kit/redis";
-
-constructor(@Inject(getRedisToken()) private readonly redis: Redis) {}
-```
-
-## Client libraries
-
-| Client               | `connect`                                                    | `disconnect`                 |
-| -------------------- | ------------------------------------------------------------ | ---------------------------- |
-| ioredis              | `() => new Redis(url)`                                       | `(client) => client.quit()`  |
-| iovalkey             | `() => new Valkey(url)`                                      | `(client) => client.quit()`  |
-| redis                | `() => createClient({ url }).on("error", onError).connect()` | `(client) => client.close()` |
-| @valkey/valkey-glide | `() => GlideClient.createClient(config)`                     | `(client) => client.close()` |
-
-node-redis emits socket errors as `error` events, which end the process without a listener. With a listener, `connect()` retries an unreachable server, and bootstrap waits until `socket.reconnectStrategy` returns an `Error`.
-
-ioredis and iovalkey connect in the background, so an unreachable server does not fail bootstrap. To fail it, connect explicitly:
+ioredis connects in the background, so an unreachable server does not fail bootstrap. To fail it, connect explicitly:
 
 ```ts
 connect: async () => {
@@ -60,14 +41,74 @@ connect: async () => {
 },
 ```
 
+## [iovalkey](https://www.npmjs.com/package/iovalkey)
+
+```sh
+pnpm add @nestjs-kit/redis iovalkey
+```
+
+```ts
+import { RedisModule } from "@nestjs-kit/redis";
+import { Valkey } from "iovalkey";
+
+RedisModule.register({
+  connect: () => new Valkey(process.env.VALKEY_URL ?? "redis://localhost:6379"),
+  disconnect: (client) => client.quit(),
+});
+```
+
+iovalkey also connects in the background. To fail bootstrap on an unreachable server, use the ioredis `lazyConnect` snippet with `new Valkey(url, { lazyConnect: true })`.
+
+## [redis](https://www.npmjs.com/package/redis) (node-redis)
+
+```sh
+pnpm add @nestjs-kit/redis redis
+```
+
+```ts
+import { RedisModule } from "@nestjs-kit/redis";
+import { createClient } from "redis";
+
+RedisModule.register({
+  connect: () =>
+    createClient({ url: process.env.REDIS_URL })
+      .on("error", (error: Error) => console.error(error))
+      .connect(),
+  disconnect: (client) => client.close(),
+});
+```
+
+node-redis emits socket errors as `error` events, which end the process without a listener. With a listener, `connect()` retries an unreachable server, and bootstrap waits until `socket.reconnectStrategy` returns an `Error`.
+
+## [@valkey/valkey-glide](https://www.npmjs.com/package/@valkey/valkey-glide)
+
+```sh
+pnpm add @nestjs-kit/redis @valkey/valkey-glide
+```
+
+```ts
+import { RedisModule } from "@nestjs-kit/redis";
+import { GlideClient } from "@valkey/valkey-glide";
+
+RedisModule.register({
+  connect: () =>
+    GlideClient.createClient({
+      addresses: [{ host: "localhost", port: 6379 }],
+    }),
+  disconnect: (client) => client.close(),
+});
+```
+
+`createClient` resolves once connected. An unreachable server fails bootstrap after `advancedConfiguration.connectionTimeout`, 2000 ms by default.
+
 ## Named and async registrations
 
-`alias` and `isGlobal` are module extras. Each alias gets its own client and shutdown; clients injected together need distinct aliases.
+`alias` and `global` are module extras. Each alias gets its own client and shutdown, and an alias may be registered only once per application. `global: true` makes the client injectable in modules that do not import the registration.
 
 ```ts
 RedisModule.registerAsync<Redis>({
   alias: "cache",
-  isGlobal: true,
+  global: true,
   inject: [ConfigService],
   useFactory: (config: ConfigService) => ({
     connect: () => new Redis(config.getOrThrow("CACHE_REDIS_URL")),
@@ -78,6 +119,10 @@ RedisModule.registerAsync<Redis>({
 constructor(@Inject(getRedisToken("cache")) private readonly cache: Redis) {}
 ```
 
+An alias belongs to one registration. To share a client without `global`, create the registration once and import that `DynamicModule` object in every module that injects it.
+
+## Tokens
+
 `getRedisToken()` is `REDIS_CLIENT`; `getRedisToken("cache")` is `REDIS_CLIENT_cache`.
 
 `getRedisOptionsToken()` returns the module-local configuration token for custom providers inside a registration. The options provider is not exported to parent or importing modules; use this helper only for providers added inside that registration or for registration-local tests. The generated builder token is private and is not exported from the package entry point.
@@ -85,5 +130,7 @@ constructor(@Inject(getRedisToken("cache")) private readonly cache: Redis) {}
 ## Errors
 
 - A rejected `connect` fails bootstrap with its error. A `connect` that returns no client object fails with a `TypeError` naming the alias.
+- Two modules that register one alias fail bootstrap before any client connects, with an `Error` naming the alias.
+- Nest runs no shutdown hooks when bootstrap fails, so clients that other registrations already connected stay open. With the default `abortOnError: true` the process exits; with `abortOnError: false` or in tests, end the process or close those clients yourself.
 - Nest logs a rejected `disconnect` and continues shutting down other registrations; `app.close()` resolves, and the next `close()` calls `disconnect` again.
 - A client that replaces the registration's provider, such as a test double from `overrideProvider(getRedisToken())`, is not passed to `disconnect`.

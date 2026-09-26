@@ -1,3 +1,4 @@
+import { ModulesContainer } from "@nestjs/core";
 import { describe, expect, it, vi } from "vitest";
 import type { RedisModuleOptions } from "./redis.interface";
 import { connectRedisClient, RedisConnection } from "./redis.connection";
@@ -7,7 +8,11 @@ interface Client {
 }
 
 async function open(options: RedisModuleOptions<Client>) {
-  const client = await connectRedisClient(options, "default");
+  const client = await connectRedisClient(
+    options,
+    "default",
+    new ModulesContainer(),
+  );
   return new RedisConnection(client, options);
 }
 
@@ -59,7 +64,11 @@ describe("RedisConnection", () => {
 describe("connectRedisClient", () => {
   it("rejects a registration without connect or disconnect", async () => {
     await expect(
-      connectRedisClient({ connect: () => ({}) } as never, "cache"),
+      connectRedisClient(
+        { connect: () => ({}) } as never,
+        "cache",
+        new ModulesContainer(),
+      ),
     ).rejects.toThrow(
       new TypeError(
         'Redis registration "cache" requires connect and disconnect functions.',
@@ -74,6 +83,7 @@ describe("connectRedisClient", () => {
         connectRedisClient(
           { connect: async () => value, disconnect: () => undefined },
           "default",
+          new ModulesContainer(),
         ),
       ).rejects.toThrow(
         new TypeError(

@@ -45,14 +45,16 @@ describe("RedisModule with real clients", () => {
     const valkey = moduleRef.get<Valkey>(getRedisToken("valkey"));
 
     try {
-      await ioredis.set(key, "shared");
-      expect(await nodeRedis.get(key)).toBe("shared");
-      await valkey.set(key, "valkey");
-      expect(await valkey.get(key)).toBe("valkey");
-      expect(await valkey.info("server")).toMatch(/^valkey_version:/m);
+      try {
+        await ioredis.set(key, "shared");
+        expect(await nodeRedis.get(key)).toBe("shared");
+        await valkey.set(key, "valkey");
+        expect(await valkey.get(key)).toBe("valkey");
+        expect(await valkey.info("server")).toMatch(/^valkey_version:/m);
+      } finally {
+        await Promise.all([ioredis.del(key), valkey.del(key)]);
+      }
     } finally {
-      await ioredis.del(key);
-      await valkey.del(key);
       await moduleRef.close();
     }
 
@@ -63,15 +65,14 @@ describe("RedisModule with real clients", () => {
   });
 
   it("fails bootstrap for an unreachable server with lazyConnect", async () => {
+    const url = "redis://127.0.0.1:1";
+
     await expect(
       Test.createTestingModule({
         imports: [
           RedisModule.register({
             connect: async () => {
-              const client = new Redis("redis://127.0.0.1:1", {
-                lazyConnect: true,
-                retryStrategy: () => null,
-              });
+              const client = new Redis(url, { lazyConnect: true });
               await client.connect().catch((error: unknown) => {
                 client.disconnect();
                 throw error;
