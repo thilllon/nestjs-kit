@@ -1,5 +1,11 @@
 # nestjs-sendbird
 
+## 2.0.0
+
+### Major Changes
+
+- 9206294: The `isGlobal` registration option is now `global`.
+
 ## 1.0.0
 
 ### Major Changes

@@ -1,5 +1,11 @@
 # nestjs-slightly-better-auth
 
+## 2.0.0
+
+### Major Changes
+
+- 9206294: The `isGlobal` registration option is now `global`.
+
 ## 1.12.1
 
 ### Patch Changes

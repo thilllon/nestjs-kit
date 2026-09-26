@@ -1,6 +1,6 @@
 {
   "name": "nestjs-sendgrid",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Twilio SendGrid mail and Web API clients for NestJS with isolated named accounts",
   "license": "ISC",
   "author": "thilllon",

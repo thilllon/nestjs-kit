@@ -1,6 +1,6 @@
 {
   "name": "nestjs-strategy",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Strategy pattern registries for NestJS providers, selected by key",
   "license": "ISC",
   "author": "thilllon",
