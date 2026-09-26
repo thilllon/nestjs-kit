@@ -5,11 +5,12 @@ import * as api from "./index";
 it("resolves each registration's own configuration through its public options helper", async () => {
   const firstOptions = { userId: "first", subscribeKey: "first" };
   const secondOptions = { userId: "second", subscribeKey: "second" };
-  const first = api.PubNubModule.register(firstOptions);
+  const first = api.PubNubModule.register({ ...firstOptions, global: true });
   const second = api.PubNubModule.registerAsync({
     alias: "second",
     useFactory: async () => secondOptions,
   });
+  expect(first.global).toBe(true);
   const probe = Symbol("options probe");
   for (const registration of [first, second]) {
     registration.providers = [

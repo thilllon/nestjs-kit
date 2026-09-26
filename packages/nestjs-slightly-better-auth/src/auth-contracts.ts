@@ -53,7 +53,7 @@ export interface BetterAuthStaticOptions {
   /** Instance name. Default 'default'. Named instances get their own tokens and mount (§5.5). */
   name?: string;
   /** Register the module as global. Default true. */
-  isGlobal?: boolean;
+  global?: boolean;
   /**
    * Register BetterAuthGuard as APP_GUARD (via useExisting). Default true for the default instance, false for named instances.
    * Since v6 this no longer controls APP_INTERCEPTOR: see globalScope.
@@ -231,7 +231,7 @@ export interface ExtensionDefinition<T> {
     | { readonly useExisting: InjectionToken<T> };
   readonly providers?: readonly Provider[]; // e.g. the extension's own options provider
   readonly imports?: ModuleMetadata["imports"];
-  /** Tokens (from `providers`) the forRoot module re-exports, globally when isGlobal: helper services for users. */
+  /** Tokens (from `providers`) the forRoot module re-exports, globally unless `global` is false: helper services for users. */
   readonly exports?: readonly InjectionToken[];
 }
 

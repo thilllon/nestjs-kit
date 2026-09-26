@@ -174,7 +174,7 @@ export const shipping = defineStrategyGroup("shipping", [
 export class OrdersModule {}
 ```
 
-Inject each registry with `@Inject(payment.token)` or `@Inject(shipping.token)`; for groups registered by `name`, use `@Inject(getStrategyRegistryToken(name))`. Use a distinct name for every group injected together. Set `isGlobal: true` to make a group's registry injectable everywhere.
+Inject each registry with `@Inject(payment.token)` or `@Inject(shipping.token)`; for groups registered by `name`, use `@Inject(getStrategyRegistryToken(name))`. Use a distinct name for every group injected together. Set `global: true` to make a group's registry injectable everywhere.
 
 ## Validation
 

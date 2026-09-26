@@ -10,12 +10,12 @@ const {
   ASYNC_OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<SendGridModuleOptions>()
   .setExtras(
-    { alias: "default", isGlobal: false },
+    { alias: "default", global: false },
     (definition, extras): DynamicModule => {
       const token = getSendGridToken(extras.alias);
       return {
         ...definition,
-        global: extras.isGlobal,
+        global: extras.global,
         providers: [
           ...(definition.providers ?? []),
           {

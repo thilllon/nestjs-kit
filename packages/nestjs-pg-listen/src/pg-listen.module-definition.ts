@@ -21,7 +21,7 @@ export interface PgListenModuleOptions {
 
 export interface PgListenModuleExtras {
   alias?: string;
-  isGlobal?: boolean;
+  global?: boolean;
 }
 
 const {
@@ -31,13 +31,13 @@ const {
   ASYNC_OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<PgListenModuleOptions>()
   .setExtras<PgListenModuleExtras>(
-    { alias: "default", isGlobal: false },
+    { alias: "default", global: false },
     (definition, extras): DynamicModule => {
       const serviceToken = getPgListenServiceToken(extras.alias);
       const subscriberToken = getPgListenSubscriberToken(extras.alias);
       return {
         ...definition,
-        global: extras.isGlobal,
+        global: extras.global,
         providers: [
           ...(definition.providers ?? []),
           {

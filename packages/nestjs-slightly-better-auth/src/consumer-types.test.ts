@@ -180,7 +180,7 @@ import { socketIoTransport, wsTransport } from "nestjs-slightly-better-auth/webs
 
 const auth = betterAuth({});
 BetterAuthModule.forRootAsync({ platforms: [expressPlatform()], transports: [rpcTransport(), socketIoTransport(), wsTransport()], principals: [], globalScope: true, useFactory: async () => ({ auth, http: { mount: false } }) });
-BetterAuthModule.forRootAsync({ name: "worker", isGlobal: false, globalGuard: false, useFactory: () => ({ auth }) });
+BetterAuthModule.forRootAsync({ name: "worker", global: false, globalGuard: false, useFactory: () => ({ auth }) });
 // @ts-expect-error The registration alias is static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, name: "worker" }) });
 // @ts-expect-error App platforms are static.
@@ -191,6 +191,8 @@ BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, transports: [rpcTrans
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, principals: [] }) });
 // @ts-expect-error Enhancer registration is static.
 BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, globalScope: false }) });
+// @ts-expect-error Module scope is static.
+BetterAuthModule.forRootAsync({ useFactory: () => ({ auth, global: false }) });
 // @ts-expect-error Named registrations cannot own app platforms.
 BetterAuthModule.forRootAsync({ name: "worker", platforms: [expressPlatform()], useFactory: () => ({ auth }) });
 // @ts-expect-error Named registrations cannot own app transports.

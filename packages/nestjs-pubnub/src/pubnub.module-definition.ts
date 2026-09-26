@@ -12,12 +12,12 @@ const {
   ASYNC_OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<PubNubModuleOptions>()
   .setExtras(
-    { alias: "default", isGlobal: false },
+    { alias: "default", global: false },
     (definition, extras): DynamicModule => {
       const token = getPubNubClientToken(extras.alias);
       return {
         ...definition,
-        global: extras.isGlobal,
+        global: extras.global,
         providers: [
           ...(definition.providers ?? []),
           {

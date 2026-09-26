@@ -18,7 +18,7 @@ const {
   OPTIONS_TYPE,
 } = new ConfigurableModuleBuilder<DrizzlePgModuleOptions>()
   .setExtras<DrizzlePgModuleExtras>(
-    { alias: defaultTokenAlias, isGlobal: false },
+    { alias: defaultTokenAlias, global: false },
     (definition, extras) => {
       const connectionToken = getPgConnectionToken(extras.alias);
       const drizzleToken = getDrizzlePgToken(extras.alias);
@@ -65,7 +65,7 @@ const {
       });
       definition.exports.push(connectionToken, drizzleToken, serviceToken);
 
-      definition.global = extras.isGlobal;
+      definition.global = extras.global;
 
       return definition;
     },

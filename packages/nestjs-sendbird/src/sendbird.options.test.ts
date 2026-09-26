@@ -5,11 +5,12 @@ import * as api from "./index";
 it("resolves each registration's own configuration through its public options helper", async () => {
   const firstOptions = { appId: "first", apiToken: "first-token" };
   const secondOptions = { appId: "second", apiToken: "second-token" };
-  const first = api.SendbirdModule.register(firstOptions);
+  const first = api.SendbirdModule.register({ ...firstOptions, global: true });
   const second = api.SendbirdModule.registerAsync({
     alias: "second",
     useFactory: async () => secondOptions,
   });
+  expect(first.global).toBe(true);
   const probe = Symbol("options probe");
   for (const registration of [first, second]) {
     registration.providers = [

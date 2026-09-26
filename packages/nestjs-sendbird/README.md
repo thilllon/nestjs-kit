@@ -90,7 +90,7 @@ SendbirdModule.registerAsync({
 });
 ```
 
-`registerAsync()` also accepts `useClass` and `useExisting`. These factories implement `create()` and return `SendbirdModuleOptions` or a promise of it. Set `isGlobal: true` in either registration to make the module global; by default it is local to its importing module.
+`registerAsync()` also accepts `useClass` and `useExisting`. These factories implement `create()` and return `SendbirdModuleOptions` or a promise of it. Set `global: true` in either registration to make the module global; by default it is local to its importing module.
 
 ## Multiple applications
 
@@ -132,7 +132,7 @@ class RegionalChat {
 export class MultiApplicationModule {}
 ```
 
-`alias` and `isGlobal` are Nest module settings. For asynchronous registration, place them beside `useFactory`, not inside the options it returns. For synchronous registration, include them in the same object as the Sendbird options.
+`alias` and `global` are Nest module settings. For asynchronous registration, place them beside `useFactory`, not inside the options it returns. For synchronous registration, include them in the same object as the Sendbird options.
 
 Each registration has its own application host, API token, SDK configuration and API objects. A named registration exports only its named token, `getSendbirdToken(alias)`. Omit `alias` (or use `""` or the reserved `"default"` alias) to keep ordinary `SendbirdService` injection. Other aliases are exact, opaque names. Registrations injected together need distinct aliases: two registrations with the same alias provide the same token, so a consumer cannot tell which one it receives.
 

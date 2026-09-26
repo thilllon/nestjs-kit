@@ -79,7 +79,7 @@ PgListenModule.registerAsync({
 });
 ```
 
-Both registration methods accept `alias` and `isGlobal` at the top level. These are module registration settings, not values returned by `useFactory`.
+Both registration methods accept `alias` and `global` at the top level. These are module registration settings, not values returned by `useFactory`.
 
 ## Multiple connections
 
@@ -142,7 +142,7 @@ Set both database URLs for this example. Use unique aliases for additional conne
 | `getPgListenSubscriberToken(alias?)` | Resolve the subscriber token for `@Inject()` or module lookups.   |
 | `getPgListenServiceToken(alias?)`    | Resolve the service token; the default returns `PgListenService`. |
 
-Registrations are local to their importing module. Re-export a shared registration module to make it available to consumers elsewhere, or set `isGlobal: true` for application-wide access. Each registration connects, subscribes and closes independently. Applications should let Nest own subscriber shutdown rather than calling the raw subscriber's `close()` themselves.
+Registrations are local to their importing module. Re-export a shared registration module to make it available to consumers elsewhere, or set `global: true` for application-wide access. Each registration connects, subscribes and closes independently. Applications should let Nest own subscriber shutdown rather than calling the raw subscriber's `close()` themselves.
 
 ## Logging
 

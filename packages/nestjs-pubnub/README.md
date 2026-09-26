@@ -55,7 +55,7 @@ PubNubModule.registerAsync({
 
 ## Multiple clients
 
-Give each registration a unique `alias` and inject the matching client. `alias` and `isGlobal` are Nest module settings: place them beside `useFactory` for async registration, not inside its returned PubNub SDK configuration. For synchronous registration, include them alongside the SDK options in the same object.
+Give each registration a unique `alias` and inject the matching client. `alias` and `global` are Nest module settings: place them beside `useFactory` for async registration, not inside its returned PubNub SDK configuration. For synchronous registration, include them alongside the SDK options in the same object.
 
 ```ts
 import { Inject, Injectable, Module } from "@nestjs/common";
@@ -96,7 +96,7 @@ class AccountNotifications {
 export class MultiAccountModule {}
 ```
 
-Each registration owns its SDK configuration, client and shutdown hook. SDK options such as `origin` remain available per registration. `getPubNubClientToken(alias)` supports custom provider factories and testing. Named registrations export only their named token; omit `alias` (or use `""` or the reserved `"default"` alias) to retain ordinary `PubNubService` injection. Other aliases are exact, opaque names; use a unique name for each registration. The module stays local unless `isGlobal: true` is requested.
+Each registration owns its SDK configuration, client and shutdown hook. SDK options such as `origin` remain available per registration. `getPubNubClientToken(alias)` supports custom provider factories and testing. Named registrations export only their named token; omit `alias` (or use `""` or the reserved `"default"` alias) to retain ordinary `PubNubService` injection. Other aliases are exact, opaque names; use a unique name for each registration. The module stays local unless `global: true` is requested.
 
 ### Major release note
 
