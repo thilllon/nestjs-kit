@@ -20,6 +20,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 ## Toolchain and builds
 
 - Use mise and the current Node.js LTS. pnpm has no LTS channel: pin a supported stable version and keep the lockfile current.
+- Write commands without a `mise exec --` prefix in documentation, hooks and scripts: activated mise puts the pinned toolchain on `PATH`, and CI gets it from `jdx/mise-action`. Use `mise exec <tool>@<version> --` only to run a version other than the pinned one, such as the engines-floor Node.js step in CI.
 - Install Git hooks through mise's `postinstall = "lefthook install"` hook; do not introduce a redundant package prepare wrapper.
 - Order existing package.json scripts with `typecheck`, `build`, then `dev` first in the root and every package; do not add missing commands just for ordering.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.

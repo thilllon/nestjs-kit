@@ -15,9 +15,9 @@ The example shows:
 From the repository root:
 
 ```sh
-mise exec -- pnpm install
-mise exec -- pnpm exec turbo run build --filter better-auth-websockets-example
-mise exec -- pnpm --filter better-auth-websockets-example start
+pnpm install
+pnpm exec turbo run build --filter better-auth-websockets-example
+pnpm --filter better-auth-websockets-example start
 ```
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. HTTP and Socket.IO share port 3000.
@@ -35,9 +35,9 @@ The Turbo build compiles `nestjs-slightly-better-auth` before the example. HTTP 
 Guests connect to the default namespace. The `status` and `greeting` messages accept them, and `profile` answers `401`:
 
 ```sh
-mise exec -- node examples/better-auth-websockets/dist/call.js status
-mise exec -- node examples/better-auth-websockets/dist/call.js greeting
-mise exec -- node examples/better-auth-websockets/dist/call.js profile
+node examples/better-auth-websockets/dist/call.js status
+node examples/better-auth-websockets/dist/call.js greeting
+node examples/better-auth-websockets/dist/call.js profile
 ```
 
 Sign up an application user and keep the session token from the response body in `SESSION_TOKEN`; the client sends it with the handshake:
@@ -46,7 +46,7 @@ Sign up an application user and keep the session token from the response body in
 export SESSION_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Ada","email":"ada@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/auth/sign-up/email | jq --raw-output .token)
-mise exec -- node examples/better-auth-websockets/dist/call.js profile
+node examples/better-auth-websockets/dist/call.js profile
 ```
 
 Operators sign up through the named instance's mount at `/api/admin-auth`. The `/admin` namespace rejects a handshake without an operator session, including one with the application user's token, with a `401` `connect_error`:
@@ -55,8 +55,8 @@ Operators sign up through the named instance's mount at `/api/admin-auth`. The `
 OPERATOR_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Grace","email":"grace@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/admin-auth/sign-up/email | jq --raw-output .token)
-SESSION_TOKEN="$OPERATOR_TOKEN" mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin
-mise exec -- node examples/better-auth-websockets/dist/call.js me --namespace admin
+SESSION_TOKEN="$OPERATOR_TOKEN" node examples/better-auth-websockets/dist/call.js me --namespace admin
+node examples/better-auth-websockets/dist/call.js me --namespace admin
 ```
 
 The transport resolves the session again for every message, so signing out also ends access on connections that stay open. After sign-out, `profile` answers `401` for the same token. `curl --header @-` reads the header from standard input, which keeps the token out of its arguments:
@@ -64,7 +64,7 @@ The transport resolves the session again for every message, so signing out also 
 ```sh
 printf 'authorization: Bearer %s\n' "$SESSION_TOKEN" |
   curl --header @- --request POST http://localhost:3000/api/auth/sign-out
-mise exec -- node examples/better-auth-websockets/dist/call.js profile
+node examples/better-auth-websockets/dist/call.js profile
 ```
 
 Browsers can authenticate with the session cookie instead of a token. The handshake must then come from one of Better Auth's trusted origins; otherwise the connection fails with `403`.
@@ -76,7 +76,7 @@ Browsers can authenticate with the session cookie instead of a token. The handsh
 - `src/account.gateway.ts` and `src/admin.gateway.ts` define the default and `/admin` namespaces and their connection middleware.
 - `src/create-app.ts` creates the Nest application on the Express adapter with Nest's Socket.IO adapter; `src/main.ts` starts it.
 - `src/client.ts` connects and sends messages with `socket.io-client`; `src/call.ts` is its command-line entry.
-- `src/create-app.test.ts` boots the application and checks both namespaces. Run it from the repository root with `mise exec -- pnpm test examples/better-auth-websockets`.
+- `src/create-app.test.ts` boots the application and checks both namespaces. Run it from the repository root with `pnpm test examples/better-auth-websockets`.
 
 ## Deploy
 

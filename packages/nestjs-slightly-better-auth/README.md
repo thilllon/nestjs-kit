@@ -1037,10 +1037,10 @@ From the repository root:
 
 ```sh
 mise install
-mise exec -- pnpm install
-mise exec -- pnpm --filter nestjs-slightly-better-auth typecheck
-mise exec -- pnpm --filter nestjs-slightly-better-auth build
-mise exec -- pnpm test:packaging
+pnpm install
+pnpm --filter nestjs-slightly-better-auth typecheck
+pnpm --filter nestjs-slightly-better-auth build
+pnpm test:packaging
 ```
 
 The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Builds produce ESM and CommonJS artifacts with declarations, checked by strict publint and attw.

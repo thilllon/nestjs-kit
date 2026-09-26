@@ -48,9 +48,9 @@ Install [mise](https://mise.jdx.dev/getting-started.html), then:
 ```sh
 mise trust
 mise install
-mise exec -- pnpm install
-mise exec -- pnpm build
-mise exec -- pnpm test
+pnpm install
+pnpm build
+pnpm test
 ```
 
 `mise.toml` defines the toolchain. Development tracks the latest Node.js LTS (currently 24) and uses a pinned stable pnpm release; pnpm does not publish an LTS channel. Turbo uses streaming output without its terminal UI.

@@ -9,12 +9,12 @@ git clone https://github.com/thilllon/nestjs-kit.git
 cd nestjs-kit
 mise trust
 mise install
-mise exec -- pnpm install
+pnpm install
 ```
 
-Use `mise exec --` before commands, or activate mise in your shell. The repository selects the latest Node.js LTS and pins stable pnpm, Lefthook, and Gitleaks. Do not update the lockfile with another package manager.
+`mise.toml` selects the latest Node.js LTS and pins stable pnpm, Lefthook, and Gitleaks; with mise activated in your shell, every command uses these versions. Do not update the lockfile with another package manager.
 
-The mise `postinstall` hook runs `lefthook install`, including on a repeated `mise install` when the tools are already present. `mise run setup` installs dependencies and refreshes hooks; `mise exec -- lefthook install` can repair hooks explicitly.
+The mise `postinstall` hook runs `lefthook install`, including on a repeated `mise install` when the tools are already present. `mise run setup` installs dependencies and refreshes hooks; `lefthook install` can repair hooks explicitly.
 
 ## Checks
 
