@@ -10,7 +10,7 @@
 
 Install the module with one of the client libraries below. Requires **Node.js 24+** and **NestJS 12** (`@nestjs/common` and `@nestjs/core`). Ships ESM, CommonJS, and TypeScript declarations. No client library is bundled or selected by default.
 
-`connect` creates the client; bootstrap waits for it. `disconnect` closes it during application shutdown, after every `onModuleDestroy` and `beforeApplicationShutdown` hook. Call `app.enableShutdownHooks()` to also shut down on `SIGTERM` and other termination signals.
+`connect` creates the client; bootstrap waits for it. `disconnect` closes it during application shutdown, after every `onModuleDestroy` and `beforeApplicationShutdown` hook. Call `app.enableShutdownHooks()` to also shut down on `SIGTERM` and other termination signals. Nest runs no lifecycle hooks in modules loaded lazily after `app.init()`, so close their clients yourself.
 
 ## [ioredis](https://www.npmjs.com/package/ioredis)
 
@@ -131,6 +131,7 @@ An alias belongs to one registration. To share a client without `global`, create
 
 - A rejected `connect` fails bootstrap with its error. A `connect` that returns no client object fails with a `TypeError` naming the alias.
 - Two modules that register one alias fail bootstrap before any client connects, with an `Error` naming the alias.
-- When a registration fails, the clients that other registrations connected in the same bootstrap or lazy load are disconnected, best effort, before its error propagates; shutdown does not disconnect them again. A registration still connecting disconnects its client once `connect` resolves.
+- When a registration fails during bootstrap, the clients that other registrations connected are disconnected, best effort, before its error propagates; shutdown does not disconnect them again. A registration still connecting disconnects its client once `connect` resolves, and one that has not called `connect` yet fails with the same error without connecting.
+- A registration in a lazily loaded module fails only its own load and disconnects no other client.
 - Nest logs a rejected `disconnect` and continues shutting down other registrations; `app.close()` resolves, and the next `close()` calls `disconnect` again.
 - A client that replaces the registration's provider, such as a test double from `overrideProvider(getRedisToken())`, is not passed to `disconnect`.
