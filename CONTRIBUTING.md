@@ -53,8 +53,9 @@ Compose starts isolated services, binds their client ports to `127.0.0.1`, and w
 | RabbitMQ   | 55672        | `RABBITMQ_PORT` |
 | MQTT 5     | 51883        | `MQTT_PORT`     |
 | Redis      | 56379        | `REDIS_PORT`    |
+| Valkey     | 56380        | `VALKEY_PORT`   |
 
-Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, and native RPC credential carriers over TCP, gRPC and each broker. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis persistence is disabled, and `docker:down` removes the fixture volumes.
+Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, native RPC credential carriers over TCP, gRPC and each broker, and Redis client registrations against Redis and Valkey. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis and Valkey persistence is disabled, and `docker:down` removes the fixture volumes.
 
 Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
 
