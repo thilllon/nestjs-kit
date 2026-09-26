@@ -2,11 +2,12 @@ import {
   type BeforeApplicationShutdown,
   Inject,
   Injectable,
+  Logger,
   Module,
   type OnModuleDestroy,
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RedisModule } from "./redis.module";
 import { getRedisToken } from "./redis.tokens";
 
@@ -143,5 +144,50 @@ describe("RedisModule", () => {
 
     expect(moduleRef.get(Reader).client.name).toBe("shared");
     await moduleRef.close();
+  });
+  it("logs a failed disconnect and retries it on the next close", async () => {
+    const failure = new Error("quit failed");
+    const logged = vi
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    const disconnect = vi
+      .fn<(client: FakeClient) => Promise<void>>()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(undefined);
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        RedisModule.register({
+          connect: () => new FakeClient("default"),
+          disconnect,
+        }),
+      ],
+    }).compile();
+
+    await expect(moduleRef.close()).resolves.toBeUndefined();
+    expect(logged).toHaveBeenCalledWith(failure, failure.stack);
+
+    await moduleRef.close();
+    expect(disconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not disconnect a client that replaces the registration in tests", async () => {
+    const logged = vi
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    const log: string[] = [];
+    const mock = new FakeClient("mock");
+    const moduleRef = await Test.createTestingModule({
+      imports: [RedisModule.register(fakeRegistration("default", log))],
+    })
+      .overrideProvider(getRedisToken())
+      .useValue(mock)
+      .compile();
+
+    expect(moduleRef.get(getRedisToken())).toBe(mock);
+    await moduleRef.close();
+
+    expect(log).toEqual([]);
+    expect(mock.open).toBe(true);
+    expect(logged).not.toHaveBeenCalled();
   });
 });

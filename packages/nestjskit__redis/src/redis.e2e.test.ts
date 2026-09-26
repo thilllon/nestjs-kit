@@ -14,6 +14,7 @@ const valkeyUrl = `redis://127.0.0.1:${process.env.VALKEY_PORT ?? "56380"}`;
 describe("RedisModule with real clients", () => {
   it("serves ioredis, node-redis and iovalkey registrations and closes them", async () => {
     const key = `nestjs-kit:redis:e2e:${process.pid}`;
+    const socketErrors: unknown[] = [];
     const moduleRef = await Test.createTestingModule({
       imports: [
         RedisModule.register({
@@ -22,7 +23,12 @@ describe("RedisModule with real clients", () => {
         }),
         RedisModule.register({
           alias: "node",
-          connect: () => createClient({ url: redisUrl }).connect(),
+          connect: () =>
+            createClient({ url: redisUrl })
+              .on("error", (error: unknown) => {
+                socketErrors.push(error);
+              })
+              .connect(),
           disconnect: (client) => client.close(),
         }),
         RedisModule.registerAsync<Valkey>({
@@ -52,6 +58,7 @@ describe("RedisModule with real clients", () => {
 
     await expect(ioredis.ping()).rejects.toThrow("Connection is closed");
     expect(nodeRedis.isOpen).toBe(false);
+    expect(socketErrors).toEqual([]);
     await expect(valkey.ping()).rejects.toThrow("Connection is closed");
   });
 

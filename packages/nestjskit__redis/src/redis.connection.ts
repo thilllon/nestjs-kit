@@ -1,6 +1,10 @@
 import type { OnApplicationShutdown } from "@nestjs/common";
 import type { RedisModuleOptions } from "./redis.interface";
 
+// Clients created by a registration's connect(). A client that replaces the
+// provider, such as a test double, is not disconnected by the registration.
+const connectedClients = new WeakSet<object>();
+
 export async function connectRedisClient<TClient>(
   options: RedisModuleOptions<TClient>,
   alias: string,
@@ -14,11 +18,15 @@ export async function connectRedisClient<TClient>(
     );
   }
   const client = await options.connect();
-  if (client == null) {
+  if (
+    client === null ||
+    (typeof client !== "object" && typeof client !== "function")
+  ) {
     throw new TypeError(
       `Redis registration "${alias}" connect() returned no client.`,
     );
   }
+  connectedClients.add(client);
   return client;
 }
 
@@ -31,6 +39,9 @@ export class RedisConnection<TClient> implements OnApplicationShutdown {
   ) {}
 
   onApplicationShutdown(): Promise<void> {
+    if (!connectedClients.has(this.client as object)) {
+      return Promise.resolve();
+    }
     this.closing ??= Promise.resolve()
       .then(() => this.options.disconnect(this.client))
       .then(
