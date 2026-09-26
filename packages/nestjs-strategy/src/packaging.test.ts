@@ -122,7 +122,7 @@ class Card implements Payment {
 }
 
 const options: StrategyModuleOptions = { name: "payment", strategies: [Card], defaultKey: "card" };
-StrategyModule.register({ ...options, isGlobal: true, imports: [] });
+StrategyModule.register({ ...options, global: true, imports: [] });
 // @ts-expect-error A strategy group needs a name.
 StrategyModule.register({ strategies: [Card] });
 

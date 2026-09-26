@@ -15,7 +15,7 @@ interface StrategyModuleBaseOptions {
   /** Modules whose exported providers the strategies inject. */
   imports?: ModuleMetadata["imports"];
   /** Registers the module globally. Defaults to `false`. */
-  isGlobal?: boolean;
+  global?: boolean;
 }
 
 export interface StrategyModuleOptions extends StrategyModuleBaseOptions {
@@ -47,7 +47,7 @@ export class StrategyModule {
   static register<K extends string>(
     options: StrategyModuleOptions | StrategyGroupModuleOptions<K>,
   ): DynamicModule {
-    const { group, defaultKey, imports = [], isGlobal } = options;
+    const { group, defaultKey, imports = [] } = options;
     if (group !== undefined && !isStrategyGroup(group)) {
       throw new Error(
         "StrategyModule requires a group created by defineStrategyGroup()",
@@ -96,7 +96,7 @@ export class StrategyModule {
     }
     return {
       module: StrategyModule,
-      global: isGlobal ?? false,
+      global: options.global ?? false,
       imports,
       providers: [
         ...strategies,
