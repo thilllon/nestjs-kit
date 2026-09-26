@@ -11,6 +11,9 @@ reviews:
     drafts: false
     # The default branch (main) is reviewed without adding other targets.
     base_branches: []
+    # Changesets version PRs contain only generated versions and changelogs.
+    ignore_title_keywords:
+      - version changed packages
 knowledge_base:
   code_guidelines:
     enabled: true
