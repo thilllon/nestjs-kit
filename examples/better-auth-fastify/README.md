@@ -14,9 +14,9 @@ The example shows:
 From the repository root:
 
 ```sh
-mise exec -- pnpm install
-mise exec -- pnpm exec turbo run build --filter better-auth-fastify-example
-mise exec -- pnpm --filter better-auth-fastify-example start
+pnpm install
+pnpm exec turbo run build --filter better-auth-fastify-example
+pnpm --filter better-auth-fastify-example start
 ```
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. The application listens on port 3000 of `localhost`, the Fastify default; pass a host such as `0.0.0.0` to `app.listen()` in `src/main.ts` to accept external connections.
@@ -63,7 +63,7 @@ curl --cookie user.txt --header "origin: http://localhost:3000" \
 - `src/app.module.ts` registers the default instance synchronously and the named instance asynchronously. The instance name stays next to `useFactory`, which returns runtime options only.
 - `src/account.controller.ts` and `src/admin.controller.ts` define the routes for each instance.
 - `src/create-app.ts` creates the Nest application on the Fastify adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `mise exec -- pnpm test examples/better-auth-fastify`.
+- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm test examples/better-auth-fastify`.
 
 ## Deploy
 

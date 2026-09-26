@@ -14,9 +14,9 @@ The example shows:
 From the repository root:
 
 ```sh
-mise exec -- pnpm install
-mise exec -- pnpm exec turbo run build --filter better-auth-express-example
-mise exec -- pnpm --filter better-auth-express-example start
+pnpm install
+pnpm exec turbo run build --filter better-auth-express-example
+pnpm --filter better-auth-express-example start
 ```
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. The application listens on port 3000.
@@ -63,7 +63,7 @@ curl --cookie user.txt --header "origin: http://localhost:3000" \
 - `src/app.module.ts` registers the default and named instances.
 - `src/account.controller.ts` and `src/admin.controller.ts` define the routes for each instance.
 - `src/create-app.ts` creates the Nest application on the Express adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `mise exec -- pnpm test examples/better-auth-express`.
+- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm test examples/better-auth-express`.
 
 ## Deploy
 

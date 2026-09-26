@@ -65,14 +65,14 @@ Run these commands from the monorepo root after installing its dependencies:
 
 ```sh
 # Render prompts for a future revision when an implementation finding requires one.
-mise exec -- pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/prompts.mts --round 7 --from 7 --to 8 --out /tmp/nsba/prompts
+pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/prompts.mts --round 7 --from 7 --to 8 --out /tmp/nsba/prompts
 
 # Check that all v7 sections reproduce the authoritative document.
-mise exec -- pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/sync-parts.mts design-v7.md v7-parts --check
+pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/sync-parts.mts design-v7.md v7-parts --check
 
 # Replace one section after editing its corresponding part, then resynchronize.
-mise exec -- pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/splice.mts design-v7.md '## 3. Architecture' '## 4. Extension points' v7-parts/p03-s3.md
-mise exec -- pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/sync-parts.mts design-v7.md v7-parts
+pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/splice.mts design-v7.md '## 3. Architecture' '## 4. Extension points' v7-parts/p03-s3.md
+pnpm exec tsx packages/nestjs-slightly-better-auth/docs/design/tools/sync-parts.mts design-v7.md v7-parts
 ```
 
 The section tools resolve relative document and part paths from this design directory,

@@ -15,9 +15,9 @@ The example shows:
 From the repository root:
 
 ```sh
-mise exec -- pnpm install
-mise exec -- pnpm exec turbo run build --filter better-auth-graphql-example
-mise exec -- pnpm --filter better-auth-graphql-example start
+pnpm install
+pnpm exec turbo run build --filter better-auth-graphql-example
+pnpm --filter better-auth-graphql-example start
 ```
 
 The Turbo build compiles `nestjs-slightly-better-auth` before the example. GraphQL over HTTP and graphql-ws share `http://localhost:3000/graphql`.
@@ -51,7 +51,7 @@ curl --cookie user.txt --header "content-type: application/json" \
 `dist/subscribe.js` subscribes to `noteAdded` over graphql-ws and prints every note, or the failure with a non-zero exit code. It reads the session token from the `SESSION_TOKEN` environment variable rather than from its arguments, which other local users can usually list. Its `--url` option defaults to `ws://localhost:$PORT/graphql`; the client sends a token only over `wss://` or to a loopback host. Without a token, the subscription fails with `UNAUTHENTICATED`:
 
 ```sh
-mise exec -- node examples/better-auth-graphql/dist/subscribe.js
+node examples/better-auth-graphql/dist/subscribe.js
 ```
 
 In a second terminal, add a note. Better Auth's origin check applies to mutations over HTTP: a request that carries the session cookie needs a trusted `Origin` header and otherwise fails with `FORBIDDEN` and `reason: "MISSING_OR_NULL_ORIGIN"`. Browsers send the header; other clients set it explicitly:
@@ -93,7 +93,7 @@ Browser clients can authenticate graphql-ws operations with the session cookie o
 - `src/create-app.ts` creates the Nest application on the Express adapter; `src/main.ts` starts it.
 - `src/client.ts` opens a graphql-ws client with the session token; `src/subscribe.ts` is its command-line entry.
 - `src/client.test.ts` checks which URLs receive the token.
-- `src/create-app.test.ts` boots the application and checks HTTP operations for both instances and a subscription over graphql-ws. Run it from the repository root with `mise exec -- pnpm test examples/better-auth-graphql`.
+- `src/create-app.test.ts` boots the application and checks HTTP operations for both instances and a subscription over graphql-ws. Run it from the repository root with `pnpm test examples/better-auth-graphql`.
 
 ## Deploy
 
