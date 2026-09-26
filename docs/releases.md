@@ -47,7 +47,7 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-No package is currently held.
+- `@nestjs-kit/redis` (`packages/nestjskit__redis`)
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
@@ -57,21 +57,21 @@ To publish a held package:
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
 
    ```sh
-   PACKAGE=<package> VERSION=<first release> # the held package and the version it publishes
+   PACKAGE='<package>' FOLDER='<folder>' VERSION='<first release>' # replace each value: the held package, its packages/ folder and its first version
    mise install &&
      pnpm install --frozen-lockfile &&
-     cd "packages/$PACKAGE" &&
+     cd "packages/$FOLDER" &&
      pnpm pkg set "version=$VERSION" &&
      pnpm build &&
-     pnpm pack --out "/tmp/$PACKAGE.tgz" &&
-     tar --list --gzip --file "/tmp/$PACKAGE.tgz"
+     pnpm pack --out "/tmp/$FOLDER.tgz" &&
+     tar --list --gzip --file "/tmp/$FOLDER.tgz"
    ```
 
    Inspect the listed files: only `dist`, `README.md`, `LICENSE` and `package.json` belong in the archive. Then publish it with the owner's npm authentication from the same directory and restore the version edit. `--no-git-checks` is needed only because of that edit:
 
    ```sh
    pnpm login &&
-     pnpm publish "/tmp/$PACKAGE.tgz" --access public --provenance=false --no-git-checks
+     pnpm publish "/tmp/$FOLDER.tgz" --access public --provenance=false --no-git-checks
    git checkout -- package.json
    ```
 

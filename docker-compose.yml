@@ -123,6 +123,17 @@ services:
       timeout: 3s
       retries: 20
 
+  valkey:
+    image: valkey/valkey:9.1.2-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${VALKEY_PORT:-56380}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 configs:
   mqtt:
     content: |
