@@ -19,6 +19,8 @@ Each package README covers installation and usage.
   - Signed uploads and media uploads with Cloudinary transformation options.
 - [`@nestjs-kit/nodemailer`](packages/nestjskit__nodemailer/README.md) [![npm version of @nestjs-kit/nodemailer](https://img.shields.io/npm/v/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer) [![Monthly npm downloads of @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)
   - Email delivery through configurable Nodemailer transports.
+- [`@nestjs-kit/redis`](packages/nestjskit__redis/README.md) [![npm version of @nestjs-kit/redis](https://img.shields.io/npm/v/%40nestjs-kit%2Fredis)](https://www.npmjs.com/package/@nestjs-kit/redis) [![Monthly npm downloads of @nestjs-kit/redis](https://img.shields.io/npm/dm/%40nestjs-kit%2Fredis)](https://www.npmjs.com/package/@nestjs-kit/redis)
+  - Redis and Valkey clients from any client library, injected by alias.
 - [`@nestjs-kit/s3`](packages/nestjskit__s3/README.md) [![npm version of @nestjs-kit/s3](https://img.shields.io/npm/v/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3) [![Monthly npm downloads of @nestjs-kit/s3](https://img.shields.io/npm/dm/%40nestjs-kit%2Fs3)](https://www.npmjs.com/package/@nestjs-kit/s3)
   - S3-compatible storage clients, including AWS, NetApp and Ceph.
 - [`nestjs-pg-listen`](packages/nestjs-pg-listen/README.md) [![npm version of nestjs-pg-listen](https://img.shields.io/npm/v/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen) [![Monthly npm downloads of nestjs-pg-listen](https://img.shields.io/npm/dm/nestjs-pg-listen)](https://www.npmjs.com/package/nestjs-pg-listen)
