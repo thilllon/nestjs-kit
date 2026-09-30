@@ -44,7 +44,7 @@ SHA-256 is `a653719b8a48ff049b9c47ef9cf9a03d845948dab0314e083ee350041706175b`.
 The design's draft-time pending-review notes are preserved; these final reports
 and the ledger record its current review status.
 
-The [implementation plan](../../../../docs/superpowers/plans/2026-09-21-better-auth.md)
+The [implementation plan](../plans/2026-09-21-better-auth.md)
 covers all 13 entry points in linked issues #535–#545. No implementation or
 publication is claimed by the design approval. Original findings and their
 re-review evidence remain available; the complete library remains the scope.

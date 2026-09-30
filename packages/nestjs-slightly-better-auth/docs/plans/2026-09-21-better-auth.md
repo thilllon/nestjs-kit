@@ -8,7 +8,7 @@
 
 **Tech Stack:** mise Node 24 LTS (`>=24.11.0`), pnpm 12.4.2, TypeScript 7.0.2, tsdown 0.23.0, Vitest 5.0.1, Nest 12.0.3, Better Auth 1.7.5, `@nestjs/graphql`/Apollo/Mercurius 14.0.2, Apollo subgraph 2.15.1, defu 6.1.7. Proposed Nest 11 and Better Auth 1.7.0 compatibility remain test gates. Mercurius requires GraphQL 16.
 
-**Spec:** [Design v7](../../../packages/nestjs-slightly-better-auth/docs/design/design-v7.md), especially §§2–14 and §17.3; [parent issue #534](https://github.com/thilllon/nestjs-kit/issues/534). The three independent round-7 reports approve the final design snapshot. Neither this plan nor historical experiments establish an implemented authentication API.
+**Spec:** [Design v7](../design/design-v7.md), especially §§2–14 and §17.3; [parent issue #534](https://github.com/thilllon/nestjs-kit/issues/534). The three independent round-7 reports approve the final design snapshot. Neither this plan nor historical experiments establish an implemented authentication API.
 
 ## Global Constraints
 
