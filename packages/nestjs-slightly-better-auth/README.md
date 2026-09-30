@@ -1051,10 +1051,10 @@ The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Buil
 
 Each example application registers a default and a named instance, reads the signed-in user through the `@CurrentUser()` principal parameter and starts without external services:
 
-- [Express](../../examples/better-auth-express/README.md) and [Fastify](../../examples/better-auth-fastify/README.md) guard HTTP routes on their platforms.
-- [Apollo GraphQL](../../examples/better-auth-graphql/README.md) authenticates queries and mutations over HTTP and every graphql-ws operation, with the named instance bound to its own resolver.
-- [Socket.IO](../../examples/better-auth-websockets/README.md) authenticates gateway connections and every message, with the named instance on its own namespace.
-- [TCP microservice](../../examples/better-auth-rpc/README.md) authenticates the messages of a hybrid application through the payload credential carrier.
+- [Express](examples/express/README.md) and [Fastify](examples/fastify/README.md) guard HTTP routes on their platforms.
+- [Apollo GraphQL](examples/graphql/README.md) authenticates queries and mutations over HTTP and every graphql-ws operation, with the named instance bound to its own resolver.
+- [Socket.IO](examples/websockets/README.md) authenticates gateway connections and every message, with the named instance on its own namespace.
+- [TCP microservice](examples/rpc/README.md) authenticates the messages of a hybrid application through the payload credential carrier.
 
 ## Releases
 

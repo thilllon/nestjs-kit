@@ -1,6 +1,6 @@
 # Better Auth on NestJS with Fastify
 
-A NestJS application on the Fastify platform that authenticates requests with [`nestjs-slightly-better-auth`](../../packages/nestjs-slightly-better-auth/README.md). Better Auth's in-memory adapter stores its users and sessions, so the application starts without a database or other external services.
+A NestJS application on the Fastify platform that authenticates requests with [`nestjs-slightly-better-auth`](../../README.md). Better Auth's in-memory adapter stores its users and sessions, so the application starts without a database or other external services.
 
 The example shows:
 
@@ -63,7 +63,7 @@ curl --cookie user.txt --header "origin: http://localhost:3000" \
 - `src/app.module.ts` registers the default instance synchronously and the named instance asynchronously. The instance name stays next to `useFactory`, which returns runtime options only.
 - `src/account.controller.ts` and `src/admin.controller.ts` define the routes for each instance.
 - `src/create-app.ts` creates the Nest application on the Fastify adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm test examples/better-auth-fastify`.
+- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/fastify`.
 
 ## Deploy
 
