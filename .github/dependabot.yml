@@ -17,6 +17,9 @@ updates:
         update-types: ["version-update:semver-major"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+    # Matches pnpm minimumReleaseAge so version updates pass the lockfile policy.
+    cooldown:
+      default-days: 7
     groups:
       security:
         applies-to: security-updates
