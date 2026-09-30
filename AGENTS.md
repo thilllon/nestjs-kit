@@ -85,6 +85,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - npm publishing uses trusted-publisher OIDC and provenance. Keep the established integrations' configured release gate enabled. New packages need an owner-authenticated first publication and trusted-publisher setup before joining automated publication; do not disable established releases merely because an unfinished package remains private.
 - Every package's npm trusted publisher is registered with the workflow filename `release.yml`, and npm checks the calling workflow file of an OIDC publication. Never rename or move `.github/workflows/release.yml`; run publication only in it or in a reusable workflow it calls.
 - Group npm and GitHub Actions Dependabot version updates in one multi-ecosystem PR. Keep Node type declarations aligned with the selected LTS major; security updates may follow GitHub's separate grouping behavior.
+- Keep pnpm `minimumReleaseAge` at seven days and the Dependabot npm `cooldown` at the same seven days. Add `minimumReleaseAgeExclude` entries only for exact versions that must land earlier, such as security fixes, and remove each entry once the version is seven days old.
 - Keep README badges, package entry points, licenses and release instructions accurate. Never claim an unpublished package is already available on npm.
 
 - Package README headers must contain exactly three badges in this order: npm version, npm monthly downloads, CI. The root README header keeps only CI and License badges.

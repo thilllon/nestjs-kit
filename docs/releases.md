@@ -92,6 +92,8 @@ See the upstream [Changesets command documentation](https://github.com/changeset
 
 Dependabot groups npm and GitHub Actions version updates into one weekly multi-ecosystem PR. GitHub's security-update handling is separate and may create additional PRs; security updates are grouped within each ecosystem where supported.
 
+pnpm resolves only versions published at least seven days earlier (`minimumReleaseAge` in `pnpm-workspace.yaml`) and checks the lockfile against that policy on every install, including CI's frozen install. Dependabot version updates wait the same seven days (`cooldown`). Security updates skip the cooldown; to merge one earlier, add the exact patched version to `minimumReleaseAgeExclude` in its PR and remove the entry once the version is seven days old.
+
 The owner handles any retirement or deletion of `@nestjs-tools/*` separately. This automation publishes only the current workspace packages.
 
 ## Protected main branch
