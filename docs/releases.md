@@ -37,8 +37,6 @@ Trusted publishing exchanges the workflow's OIDC identity for publish access; th
 
 All twelve established package identities, including `@nestjs-kit/redis`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
-`nestjs-slightly-better-auth` published `1.0.0` on September 24, 2026, covering the HTTP scope of its reviewed design; its later transports ship as minor versions. Importing its old repository's release instructions does not transfer npm trust.
-
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
 For that local first publication only, use `--provenance=false` to override the package's CI-oriented `publishConfig.provenance`; subsequent CI publications retain provenance. Configure its trusted publisher and verify the registry identity before enabling automated publication. Existing packages must continue through the release workflow instead of repeating this bootstrap.
