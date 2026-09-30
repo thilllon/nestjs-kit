@@ -1,6 +1,6 @@
 # Better Auth on NestJS microservices over TCP
 
-A hybrid NestJS application whose TCP microservice authenticates every message with [`nestjs-slightly-better-auth`](../../packages/nestjs-slightly-better-auth/README.md). The Express platform serves Better Auth's HTTP routes for sign-up and sign-in, and Better Auth's in-memory adapter stores its users and sessions, so the application starts without a database, a message broker or other external services.
+A hybrid NestJS application whose TCP microservice authenticates every message with [`nestjs-slightly-better-auth`](../../README.md). The Express platform serves Better Auth's HTTP routes for sign-up and sign-in, and Better Auth's in-memory adapter stores its users and sessions, so the application starts without a database, a message broker or other external services.
 
 The example shows:
 
@@ -37,9 +37,9 @@ The Turbo build compiles `nestjs-slightly-better-auth` before the example. The H
 `account.status` and `account.greeting` accept messages without credentials, and `account.profile` answers `401`:
 
 ```sh
-node examples/better-auth-rpc/dist/call.js account.status
-node examples/better-auth-rpc/dist/call.js account.greeting
-node examples/better-auth-rpc/dist/call.js account.profile
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.status
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.greeting
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.profile
 ```
 
 Sign up an application user over HTTP and keep the session token from the response body in `SESSION_TOKEN`; the client sends it with each message:
@@ -48,7 +48,7 @@ Sign up an application user over HTTP and keep the session token from the respon
 export SESSION_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Ada","email":"ada@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/auth/sign-up/email | jq --raw-output .token)
-node examples/better-auth-rpc/dist/call.js account.profile
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.profile
 ```
 
 Operators sign up through the named instance's mount at `/api/admin-auth`. Their token authenticates the `admin.*` messages, and the application user's token does not:
@@ -57,8 +57,8 @@ Operators sign up through the named instance's mount at `/api/admin-auth`. Their
 OPERATOR_TOKEN=$(curl --silent --header "content-type: application/json" \
   --data '{"name":"Grace","email":"grace@example.com","password":"correct horse battery staple"}' \
   http://localhost:3000/api/admin-auth/sign-up/email | jq --raw-output .token)
-SESSION_TOKEN="$OPERATOR_TOKEN" node examples/better-auth-rpc/dist/call.js admin.me
-node examples/better-auth-rpc/dist/call.js admin.me
+SESSION_TOKEN="$OPERATOR_TOKEN" node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js admin.me
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js admin.me
 ```
 
 Each message resolves the session again. After sign-out, the same token answers `401`. `curl --header @-` reads the header from standard input, which keeps the token out of its arguments:
@@ -66,7 +66,7 @@ Each message resolves the session again. After sign-out, the same token answers 
 ```sh
 printf 'authorization: Bearer %s\n' "$SESSION_TOKEN" |
   curl --header @- --request POST http://localhost:3000/api/auth/sign-out
-node examples/better-auth-rpc/dist/call.js account.profile
+node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.profile
 ```
 
 ## Files
@@ -76,7 +76,7 @@ node examples/better-auth-rpc/dist/call.js account.profile
 - `src/account.controller.ts` and `src/admin.controller.ts` define the message handlers for each instance.
 - `src/create-app.ts` creates the Nest application on the Express adapter and connects the TCP microservice; `src/main.ts` starts both.
 - `src/client.ts` sends messages with the token in the payload envelope; `src/call.ts` is its command-line entry.
-- `src/create-app.test.ts` boots the application, connects a TCP client and checks both instances. Run it from the repository root with `pnpm test examples/better-auth-rpc`.
+- `src/create-app.test.ts` boots the application, connects a TCP client and checks both instances. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/rpc`.
 
 ## Deploy
 
