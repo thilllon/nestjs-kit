@@ -52,11 +52,34 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm test:packaging
-      - name: Test Better Auth packed consumers on the Node.js engines floor
+      - name: Test packed consumers on each package's Node.js engines floor
         run: |
-          floor="$(node --print 'require("./packages/nestjs-slightly-better-auth/package.json").engines.node.match(/\d+\.\d+\.\d+/)[0]')"
-          test "$(mise exec "node@$floor" -- node --version)" = "v$floor"
-          mise exec "node@$floor" -- pnpm test:packaging packages/nestjs-slightly-better-auth/src
+          # One line per engines.node floor: the floor, then the source
+          # directory of every package with packaging tests that declares it.
+          groups="$(node --eval '
+            const { existsSync, readdirSync, readFileSync } = require("node:fs");
+            const groups = new Map();
+            for (const directory of readdirSync("packages").sort()) {
+              const source = `packages/${directory}/src`;
+              const tested =
+                existsSync(source) &&
+                readdirSync(source).some((file) => /^packaging.*\.test\.ts$/.test(file));
+              if (!tested) {
+                continue;
+              }
+              const manifest = readFileSync(`packages/${directory}/package.json`, "utf8");
+              const [floor] = JSON.parse(manifest).engines.node.match(/\d+\.\d+\.\d+/);
+              groups.set(floor, [...(groups.get(floor) ?? []), source]);
+            }
+            for (const [floor, sources] of groups) {
+              console.log(floor, ...sources);
+            }
+          ')"
+          while read -r -a group; do
+            floor="${group[0]}"
+            test "$(mise exec "node@$floor" -- node --version)" = "v$floor"
+            mise exec "node@$floor" -- pnpm test:packaging "${group[@]:1}"
+          done <<< "$groups"
       - name: Start integration services
         run: pnpm docker:up
       - name: Test HTTP, database, socket, and broker integrations
