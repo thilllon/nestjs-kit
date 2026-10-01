@@ -95,6 +95,4 @@ Each workspace project declares its own dependencies. The root `devDependencies`
 
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
 
-The authentication workspace additionally puts `module-sync` first in its exports. Supported Node consumers then share one ESM identity for both `import` and `require()`, while the real CJS branch remains available when synchronous ESM loading is disabled. Keep its legacy code outside the active source graph and package archive; historical tests are reference material, not executed coverage.
-
 Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root tooling uses `tsconfig.tools.json` for its different source layout.
