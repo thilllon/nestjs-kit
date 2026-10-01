@@ -91,7 +91,7 @@ function routerOptions(
 }
 
 function routeMayOverlapMount(path: string, basePath: string): boolean {
-  const tokens = parse(path).tokens;
+  const { tokens } = parse(path);
   let literalPrefix = "";
   let dynamic = false;
   for (const token of tokens) {
