@@ -113,7 +113,7 @@ Every entry ships ESM and CommonJS builds with declarations. The `module-sync` e
 | `./testing`             | `overrideAuthGuard()`, `overridePrincipal()`, `overrideDecisions()`, `stampPrincipal()`, `testPrincipal()`, `authHeadersFor()`, `initTestApp()`                                                                                                   | `@nestjs/testing`            |
 | `./testing/conformance` | Runner-agnostic conformance kits for platforms, transports, principal sources and policies                                                                                                                                                        | `@nestjs/testing`            |
 
-The [design workspace](docs/design/README.md) holds the reviewed [specification](docs/design/design-v7.md), its [review ledger](docs/design/ledger.md) and the [implementation plan](../../docs/superpowers/plans/2026-09-21-better-auth.md).
+The [design workspace](docs/design/README.md) holds the reviewed [specification](docs/design/design-v7.md), its [review ledger](docs/design/ledger.md) and the [implementation plan](docs/plans/2026-09-21-better-auth.md).
 
 ## Construct the Better Auth instance
 

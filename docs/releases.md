@@ -35,9 +35,7 @@ The workflow filename is part of every package's trusted-publisher registration,
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All twelve established package identities, including `@nestjs-kit/redis`, already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
-
-`nestjs-slightly-better-auth` published `1.0.0` on September 24, 2026, covering the HTTP scope of its reviewed design; its later transports ship as minor versions. Importing its old repository's release instructions does not transfer npm trust.
+All twelve established package identities already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 

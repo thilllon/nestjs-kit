@@ -33,7 +33,7 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the built ESM and CJS artifacts of every package with a `src/packaging.test.ts`. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`.
+Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the built ESM and CJS artifacts of every package with a `src/packaging.test.ts`. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs them again on the Node.js version at the floor of each package's `engines.node` range.
 
 For integration tests against real databases and message brokers, install Docker with Compose and run:
 
@@ -74,25 +74,25 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 ## Repository layout
 
-- `packages/nestjs-azure-storage-blob`: the existing Azure npm package.
-- `packages/nestjs-drizzle-pg`: the existing Drizzle npm package.
-- `packages/nestjskit__*`: packages published under `@nestjs-kit/*`.
+- `packages/nestjs-azure-storage-blob`: the Azure Blob Storage adapter.
+- `packages/nestjs-drizzle-pg`: the Drizzle ORM adapter for PostgreSQL.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
 - `packages/nestjs-pubnub`: the PubNub realtime messaging adapter.
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
-- `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference.
-- `packages/nestjs-slightly-better-auth/examples/*`: private example applications for `nestjs-slightly-better-auth` on Express, Fastify, Apollo GraphQL, Socket.IO and a TCP microservice. Their unit tests boot each application, and releases skip them.
+- `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference. Its `examples` directory holds private Express, Fastify, Apollo GraphQL, Socket.IO and TCP microservice applications; their unit tests boot each application, and releases skip them.
 - `packages/nestjs-strategy`: strategy-pattern registries for Nest providers.
+- `packages/nestjskit__cloudinary`: `@nestjs-kit/cloudinary`, the Cloudinary upload adapter.
+- `packages/nestjskit__nodemailer`: `@nestjs-kit/nodemailer`, the Nodemailer email adapter.
+- `packages/nestjskit__redis`: `@nestjs-kit/redis`, Redis and Valkey client registrations.
+- `packages/nestjskit__s3`: `@nestjs-kit/s3`, the S3-compatible storage adapter.
 - `.github/workflows`: CI, dependency maintenance, and releases.
 - `docs`: maintainer guides.
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
 
-A workspace package resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The root `devDependencies` therefore include every optional peer of `@nestjs/core` (`@nestjs/microservices`, `@nestjs/platform-express` and `@nestjs/websockets`); pnpm resolves peers from the workspace root, so every project links the same variant. The example tests fail to boot when the variants diverge.
+Each workspace project declares its own dependencies. The root `devDependencies` hold only shared tooling: the tools that root scripts, configuration files, Git hooks and workflows run, and the compiler, bundler and script runner that packages invoke from the root. A project resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The example tests fail to boot when the variants diverge.
 
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
-
-The authentication workspace additionally puts `module-sync` first in its exports. Supported Node consumers then share one ESM identity for both `import` and `require()`, while the real CJS branch remains available when synchronous ESM loading is disabled. Keep its legacy code outside the active source graph and package archive; historical tests are reference material, not executed coverage.
 
 Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root tooling uses `tsconfig.tools.json` for its different source layout.

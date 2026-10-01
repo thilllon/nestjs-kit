@@ -1,6 +1,6 @@
 packages:
   - "packages/*"
-  - "packages/nestjs-slightly-better-auth/examples/*"
+  - "packages/*/examples/*"
 allowBuilds:
   "@apollo/protobufjs": false
   "@swc/core": true
