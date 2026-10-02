@@ -24,6 +24,6 @@ The root `AGENTS.md` applies. All package code, documentation and automation are
 
 ## Working here
 
-Run commands from the repository root with mise. This package uses the shared tsdown, TypeScript, Vitest, Biome and release setup. Design utilities live in `docs/design/tools/*.mts` and run through `pnpm exec tsx`.
+Run commands from the repository root with mise. This package uses the shared tsdown, TypeScript, Vitest, Biome and release setup. Design utilities live in `docs/design/tools/*.mts`. The package declares `tsx` for them, so they run from the package directory with `pnpm exec tsx docs/design/tools/<tool>.mts`, or from the repository root with `pnpm --filter nestjs-slightly-better-auth exec tsx docs/design/tools/<tool>.mts`.
 
 Artifact tests run with `pnpm --filter nestjs-slightly-better-auth test:packaging` after `pnpm build`. E2E tests run with the package's `docker:up`, `test:e2e` and `docker:down` scripts against the services in `compose.yaml`. A change to an entry's exported names updates `fixtures/public-api.json` in the same pull request; `src/packaging-archive.test.ts` compares every entry's runtime and declaration exports with it. Default unit tests must work without prebuilt artifacts or services. Legacy tests remain reference-only and must not pull obsolete dependencies into the workspace.

@@ -93,7 +93,7 @@ Browser clients can authenticate graphql-ws operations with the session cookie o
 - `src/create-app.ts` creates the Nest application on the Express adapter; `src/main.ts` starts it.
 - `src/client.ts` opens a graphql-ws client with the session token; `src/subscribe.ts` is its command-line entry.
 - `src/client.test.ts` checks which URLs receive the token.
-- `src/create-app.test.ts` boots the application and checks HTTP operations for both instances and a subscription over graphql-ws. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/graphql`.
+- `src/create-app.test.ts` boots the application and checks HTTP operations for both instances and a subscription over graphql-ws. Run it from the repository root with `pnpm --filter better-auth-graphql-example test`.
 
 ## Deploy
 

@@ -76,7 +76,7 @@ Browsers can authenticate with the session cookie instead of a token. The handsh
 - `src/account.gateway.ts` and `src/admin.gateway.ts` define the default and `/admin` namespaces and their connection middleware.
 - `src/create-app.ts` creates the Nest application on the Express adapter with Nest's Socket.IO adapter; `src/main.ts` starts it.
 - `src/client.ts` connects and sends messages with `socket.io-client`; `src/call.ts` is its command-line entry.
-- `src/create-app.test.ts` boots the application and checks both namespaces. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/websockets`.
+- `src/create-app.test.ts` boots the application and checks both namespaces. Run it from the repository root with `pnpm --filter better-auth-websockets-example test`.
 
 ## Deploy
 
