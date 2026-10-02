@@ -109,6 +109,7 @@ export const testProjects = [
     // neither the source aliases nor the decorator transform. The tests start
     // Node, pnpm, compiler and bundler processes, and the test files run in
     // parallel; the unit-test default of 5 s is too short.
+    extends: false as const,
     test: {
       name: "packaging",
       environment: "node",
