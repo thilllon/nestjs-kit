@@ -232,7 +232,11 @@
   ],
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
-    "build": "tsdown"
+    "build": "tsdown",
+    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts",
+    "docker:up": "docker compose up --detach --wait",
+    "docker:down": "docker compose down --volumes --remove-orphans",
+    "test:e2e": "vitest run --config ../../vitest.e2e.config.mts"
   },
   "peerDependenciesMeta": {
     "@nestjs/graphql": {

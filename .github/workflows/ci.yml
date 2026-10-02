@@ -51,41 +51,43 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm test:packaging
+      - run: pnpm exec turbo run test:packaging
       - name: Test packed consumers on each package's Node.js engines floor
         run: |
-          # One line per engines.node floor: the floor, then the source
-          # directory of every package with packaging tests that declares it.
-          groups="$(node --eval '
-            const { existsSync, readdirSync, readFileSync } = require("node:fs");
-            const groups = new Map();
-            for (const directory of readdirSync("packages").sort()) {
-              const source = `packages/${directory}/src`;
-              const tested =
-                existsSync(source) &&
-                readdirSync(source).some((file) => /^packaging.*\.test\.ts$/.test(file));
-              if (!tested) {
+          # One line per package with a test:packaging script: its engines.node
+          # floor, then its directory.
+          floors="$(node --eval '
+            const { readdirSync, readFileSync } = require("node:fs");
+            for (const name of readdirSync("packages").sort()) {
+              const directory = `packages/${name}`;
+              const manifest = JSON.parse(readFileSync(`${directory}/package.json`, "utf8"));
+              if (!manifest.scripts?.["test:packaging"]) {
                 continue;
               }
-              const manifest = readFileSync(`packages/${directory}/package.json`, "utf8");
-              const [floor] = JSON.parse(manifest).engines.node.match(/\d+\.\d+\.\d+/);
-              groups.set(floor, [...(groups.get(floor) ?? []), source]);
-            }
-            for (const [floor, sources] of groups) {
-              console.log(floor, ...sources);
+              const [floor] = manifest.engines.node.match(/\d+\.\d+\.\d+/);
+              console.log(floor, directory);
             }
           ')"
-          while read -r -a group; do
-            floor="${group[0]}"
+          while read -r floor directory; do
             test "$(mise exec "node@$floor" -- node --version)" = "v$floor"
-            mise exec "node@$floor" -- pnpm test:packaging "${group[@]:1}"
-          done <<< "$groups"
-      - name: Start integration services
-        run: pnpm docker:up
-      - name: Test HTTP, database, socket, and broker integrations
-        run: pnpm test:e2e
+            mise exec "node@$floor" -- pnpm --dir "$directory" test:packaging
+          done <<< "$floors"
+      - name: Test each package's HTTP, database, socket, and broker integrations
+        run: |
+          # One package at a time: start its Compose services, run its E2E
+          # tests, then remove the services before the next package starts.
+          status=0
+          for file in packages/*/compose.yaml; do
+            directory="$(dirname "$file")"
+            pnpm --dir "$directory" docker:up && pnpm --dir "$directory" test:e2e || status=1
+            pnpm --dir "$directory" docker:down || status=1
+          done
+          exit "$status"
       - name: Stop integration services
         if: always()
-        run: pnpm docker:down
+        run: |
+          for file in packages/*/compose.yaml; do
+            pnpm --dir "$(dirname "$file")" docker:down
+          done
       - name: Scan tracked files for secrets
         run: gitleaks git --redact --no-banner --log-opts='--max-count=1' .

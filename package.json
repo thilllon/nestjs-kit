@@ -11,10 +11,6 @@
     "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
     "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
     "test": "vitest run",
-    "test:packaging": "vitest run --config vitest.packaging.config.mts",
-    "docker:up": "docker compose up --detach --wait",
-    "docker:down": "docker compose down --volumes --remove-orphans",
-    "test:e2e": "vitest run --config vitest.e2e.config.mts",
     "release:publish": "changeset publish"
   },
   "devDependencies": {
