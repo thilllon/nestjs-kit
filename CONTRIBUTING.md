@@ -33,7 +33,7 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 `pnpm test` runs every workspace project's `test` script through Turbo. Run a single project's unit tests with, for example, `pnpm --filter @nestjs-kit/s3 test`, and a single file with `pnpm --filter @nestjs-kit/s3 test src/s3.module.test.ts`. Each project's `vitest.config.mts` combines the options in root `vitest.shared.mts` with the project's own `vitest` and `unplugin-swc`, and defines the `unit`, `e2e` and `packaging` Vitest projects that the `test`, `test:e2e` and `test:packaging` scripts select. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Each package with `src/packaging*.test.ts` files has a `test:packaging` script that checks real Node consumers of its built ESM and CJS artifacts. `pnpm exec turbo run test:packaging` builds and checks every such package; `pnpm --filter nestjs-strategy test:packaging` checks one package after its build. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs them again on the Node.js version at the floor of each package's `engines.node` range.
+Each package with `src/packaging*.test.ts` files has a `test:packaging` script that checks real Node consumers of its built ESM and CJS artifacts. `pnpm exec turbo run test:packaging` builds and checks every such package; `pnpm --filter nestjs-strategy test:packaging` checks one package after its build. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs each package's script again on the Node.js version at the floor of that package's `engines.node` range.
 
 Each package with `*.e2e.test.ts` files has a `compose.yaml` that declares only the services its tests use, and `docker:up`, `docker:down` and `test:e2e` scripts. For integration tests against real databases and message brokers, install Docker with Compose and run one package at a time:
 
@@ -62,9 +62,25 @@ Packages share the default ports, so stop one package's services before starting
 | Redis      | 56379        | `REDIS_PORT`    |
 | Valkey     | 56380        | `VALKEY_PORT`   |
 
-Set an override consistently for Compose and the test command if a port is occupied. The suites cover Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, native RPC credential carriers over TCP, gRPC and each broker, and Redis client registrations against Redis and Valkey. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI runs each package in turn and stops its services even on failure. PostgreSQL and RabbitMQ data are temporary, Redis and Valkey persistence is disabled, and `docker:down` removes the fixture volumes.
+Set an override consistently for Compose and the test command if a port is occupied. The suites cover Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, native RPC credential carriers over TCP, gRPC and each broker, and Redis client registrations against Redis and Valkey. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI runs each package's services in that package's own E2E job and stops them even on failure. PostgreSQL and RabbitMQ data are temporary, Redis and Valkey persistence is disabled, and `docker:down` removes the fixture volumes.
 
-Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
+Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI uses the same mise toolchain.
+
+### CI
+
+`.github/workflows/ci.yml` runs on pull requests, pushes to `main` and Release workflow dispatches:
+
+| Job                                           | Runs                                                                                                                                                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Detect affected packages`                    | Builds the package and E2E matrices                                                                                                                            |
+| `Repository checks`                           | PR title, `pnpm lint`, `pnpm format:check`, `tsc --project tsconfig.tools.json`, Gitleaks                                                                      |
+| One job per package                           | The Turbo `typecheck`, `test`, `build` and `test:packaging` tasks for the package and its examples, then `test:packaging` on the engines-floor Node.js version |
+| One E2E job per package with a `compose.yaml` | Build, `docker:up`, `test:e2e`, `docker:down`                                                                                                                  |
+| `Validate`                                    | Fails unless every job above succeeds; a matrix job may be skipped only when its matrix is empty                                                               |
+
+Package and E2E jobs run in parallel. A pull request runs only the packages that `turbo ls --affected` reports against its base, which includes the dependents of a changed package; a change in an example selects its package. A pull request that changes a file outside `packages/` runs every package, unless the file is Markdown or is in `docs/`, `LICENSE`, `.github/ISSUE_TEMPLATE/` or `.github/dependabot.yml`. A pull request that changes only Markdown runs no package or E2E job. Pushes to `main` and Release dispatches run every package.
+
+Branch protection requires `Validate` only. A new push to a pull request cancels that pull request's running checks.
 
 ## Pull requests and commits
 

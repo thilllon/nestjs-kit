@@ -17,17 +17,127 @@ on:
         type: string
         required: true
 
+# A new push to a pull request cancels that pull request's running checks.
+# Pushes to main and dispatched runs each get their own group and always finish.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+env:
+  LEFTHOOK: "0"
+  TURBO_UI: stream
+
 jobs:
-  validate:
-    name: Validate
+  affected:
+    name: Detect affected packages
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      LEFTHOOK: "0"
-      TURBO_UI: stream
+    timeout-minutes: 10
+    outputs:
+      packages: ${{ steps.packages.outputs.packages }}
+      e2e: ${{ steps.packages.outputs.e2e }}
+    steps:
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - name: Classify the change
+        id: scope
+        run: |
+          # all: every package runs. none: no package runs. turbo: Turbo selects
+          # the changed packages and their dependents.
+          # Pushes to main and dispatched runs check every package. A pull
+          # request checks every package when it changes a file outside
+          # packages/ that is not listed here as unable to affect a package.
+          # The checkout is the pull request merge commit, so its first parent
+          # is the base and the diff holds exactly the pull request's changes.
+          scope=all
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            changed="$(git diff --name-only --no-renames 'HEAD^1' HEAD)"
+            shared="$(grep --invert-match --extended-regexp '^packages/|\.md$|^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)' <<< "$changed" || true)"
+            code="$(grep --invert-match --extended-regexp '\.md$' <<< "$changed" || true)"
+            if [ -n "$shared" ]; then
+              printf 'Shared files changed:\n%s\n' "$shared"
+            elif [ -z "$code" ]; then
+              scope=none
+            else
+              scope=turbo
+            fi
+          fi
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+      - if: steps.scope.outputs.scope == 'turbo'
+        run: pnpm install --frozen-lockfile
+      - name: List affected workspace projects
+        if: steps.scope.outputs.scope == 'turbo'
+        env:
+          TURBO_SCM_BASE: HEAD^1
+          TURBO_SCM_HEAD: HEAD
+        run: pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/affected.json"
+      - name: Build the package matrix
+        id: packages
+        env:
+          SCOPE: ${{ steps.scope.outputs.scope }}
+        run: |
+          # One matrix entry per affected directory in packages/. An affected
+          # example selects the package that contains it. The e2e matrix holds
+          # the affected packages that have a Compose file.
+          node --eval '
+            const { appendFileSync, existsSync, readdirSync, readFileSync } = require("node:fs");
+            const scope = process.env.SCOPE;
+            const affected = new Set();
+            if (scope === "turbo") {
+              const listing = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/affected.json`, "utf8"));
+              for (const { path } of listing.packages.items) {
+                const [root, name] = path.split("/");
+                if (root === "packages" && name) {
+                  affected.add(name);
+                }
+              }
+            }
+            const packages = [];
+            for (const name of readdirSync("packages").sort()) {
+              const directory = `packages/${name}`;
+              if (!existsSync(`${directory}/package.json`)) {
+                continue;
+              }
+              if (scope !== "all" && !affected.has(name)) {
+                continue;
+              }
+              const manifest = JSON.parse(readFileSync(`${directory}/package.json`, "utf8"));
+              const [floor] = manifest.engines.node.match(/\d+\.\d+\.\d+/);
+              packages.push({
+                name: manifest.name,
+                directory,
+                floor,
+                packaging: Boolean(manifest.scripts?.["test:packaging"]),
+                e2e: existsSync(`${directory}/compose.yaml`),
+              });
+            }
+            const e2e = packages.filter((entry) => entry.e2e);
+            appendFileSync(
+              process.env.GITHUB_OUTPUT,
+              `packages=${JSON.stringify(packages)}\ne2e=${JSON.stringify(e2e)}\n`,
+            );
+            const names = packages.map((entry) => `- \`${entry.name}\``).join("\n");
+            appendFileSync(
+              process.env.GITHUB_STEP_SUMMARY,
+              `Scope: \`${scope}\`\n\nAffected packages: ${packages.length}\n\n${names}\n`,
+            );
+          '
+
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify dispatched commit
         if: github.event_name == 'workflow_dispatch'
@@ -48,46 +158,112 @@ jobs:
         run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
       - run: pnpm lint
       - run: pnpm format:check
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-      - run: pnpm exec turbo run test:packaging
-      - name: Test packed consumers on each package's Node.js engines floor
-        run: |
-          # One line per package with a test:packaging script: its engines.node
-          # floor, then its directory.
-          floors="$(node --eval '
-            const { readdirSync, readFileSync } = require("node:fs");
-            for (const name of readdirSync("packages").sort()) {
-              const directory = `packages/${name}`;
-              const manifest = JSON.parse(readFileSync(`${directory}/package.json`, "utf8"));
-              if (!manifest.scripts?.["test:packaging"]) {
-                continue;
-              }
-              const [floor] = manifest.engines.node.match(/\d+\.\d+\.\d+/);
-              console.log(floor, directory);
-            }
-          ')"
-          while read -r floor directory; do
-            test "$(mise exec "node@$floor" -- node --version)" = "v$floor"
-            mise exec "node@$floor" -- pnpm --dir "$directory" test:packaging
-          done <<< "$floors"
-      - name: Test each package's HTTP, database, socket, and broker integrations
-        run: |
-          # One package at a time: start its Compose services, run its E2E
-          # tests, then remove the services before the next package starts.
-          status=0
-          for file in packages/*/compose.yaml; do
-            directory="$(dirname "$file")"
-            pnpm --dir "$directory" docker:up && pnpm --dir "$directory" test:e2e || status=1
-            pnpm --dir "$directory" docker:down || status=1
-          done
-          exit "$status"
-      - name: Stop integration services
-        if: always()
-        run: |
-          for file in packages/*/compose.yaml; do
-            pnpm --dir "$(dirname "$file")" docker:down
-          done
+      - name: Typecheck root and package configuration files
+        run: pnpm exec tsc --project tsconfig.tools.json
       - name: Scan tracked files for secrets
         run: gitleaks git --redact --no-banner --log-opts='--max-count=1' .
+
+  package:
+    name: ${{ matrix.package.name }}
+    needs: affected
+    if: needs.affected.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.affected.outputs.packages) }}
+    env:
+      DIRECTORY: ${{ matrix.package.directory }}
+      FLOOR: ${{ matrix.package.floor }}
+    steps:
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      # Each filter selects the package and its dependents, which include its
+      # examples. The tasks run as separate steps so that unit tests do not
+      # compete with builds and packed consumer installs for the runner.
+      - run: pnpm exec turbo run typecheck --filter="...{./$DIRECTORY}"
+      - run: pnpm exec turbo run test --filter="...{./$DIRECTORY}"
+      - run: pnpm exec turbo run build --filter="...{./$DIRECTORY}"
+      - run: pnpm exec turbo run test:packaging --filter="...{./$DIRECTORY}"
+      - name: Test packed consumers on the package's Node.js engines floor
+        if: matrix.package.packaging
+        run: |
+          test "$(mise exec "node@$FLOOR" -- node --version)" = "v$FLOOR"
+          mise exec "node@$FLOOR" -- pnpm --dir "$DIRECTORY" test:packaging
+
+  e2e:
+    name: ${{ matrix.package.name }} E2E
+    needs: affected
+    if: needs.affected.outputs.e2e != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.affected.outputs.e2e) }}
+    env:
+      DIRECTORY: ${{ matrix.package.directory }}
+    steps:
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run build --filter="...{./$DIRECTORY}"
+      - name: Start integration services
+        run: pnpm --dir "$DIRECTORY" docker:up
+      - name: Test the package's HTTP, database, socket, and broker integrations
+        run: pnpm --dir "$DIRECTORY" test:e2e
+      - name: Stop integration services
+        if: always()
+        run: pnpm --dir "$DIRECTORY" docker:down
+
+  # Branch protection and the Release workflow require this job by name. It
+  # runs even when an earlier job fails or is cancelled, because GitHub accepts
+  # a skipped required check as passing.
+  validate:
+    name: Validate
+    needs: [affected, repository, package, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed, or to be skipped because its matrix is empty
+        env:
+          AFFECTED: ${{ needs.affected.result }}
+          REPOSITORY: ${{ needs.repository.result }}
+          PACKAGE: ${{ needs.package.result }}
+          E2E: ${{ needs.e2e.result }}
+          PACKAGE_MATRIX: ${{ needs.affected.outputs.packages }}
+          E2E_MATRIX: ${{ needs.affected.outputs.e2e }}
+        run: |
+          echo "affected=$AFFECTED repository=$REPOSITORY package=$PACKAGE e2e=$E2E"
+          echo "packages=$PACKAGE_MATRIX"
+          test "$AFFECTED" = success
+          test "$REPOSITORY" = success
+          if [ "$PACKAGE_MATRIX" = '[]' ]; then
+            test "$PACKAGE" = skipped
+          else
+            test "$PACKAGE" = success
+          fi
+          if [ "$E2E_MATRIX" = '[]' ]; then
+            test "$E2E" = skipped
+          else
+            test "$E2E" = success
+          fi
