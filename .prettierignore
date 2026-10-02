@@ -1,1 +1,3 @@
 pnpm-lock.yaml
+# Preserved design material is not reformatted.
+packages/nestjs-slightly-better-auth/docs/
