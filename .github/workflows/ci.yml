@@ -62,9 +62,12 @@ jobs:
           # is the base and the diff holds exactly the pull request's changes.
           scope=all
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            changed="$(git diff --name-only --no-renames 'HEAD^1' HEAD)"
-            shared="$(grep --invert-match --extended-regexp '^packages/|\.md$|^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)' <<< "$changed" || true)"
-            code="$(grep --invert-match --extended-regexp '\.md$' <<< "$changed" || true)"
+            # Only edits to existing Markdown files are exempt: adding or
+            # deleting one can change a package archive.
+            edited_markdown="$(git diff --name-only --no-renames --diff-filter=M 'HEAD^1' HEAD -- '*.md')"
+            changed="$(git diff --name-only --no-renames 'HEAD^1' HEAD | grep --invert-match --line-regexp --fixed-strings --file=<(printf '%s\n' "$edited_markdown") || true)"
+            shared="$(grep --invert-match --extended-regexp '^$|^packages/|^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)' <<< "$changed" || true)"
+            code="$(grep --invert-match --extended-regexp '^$' <<< "$changed" || true)"
             if [ -n "$shared" ]; then
               printf 'Shared files changed:\n%s\n' "$shared"
             elif [ -z "$code" ]; then
