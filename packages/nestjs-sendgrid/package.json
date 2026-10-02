@@ -67,6 +67,9 @@
     "@nestjs/core": "12.0.3",
     "@nestjs/testing": "12.0.3",
     "@sendgrid/client": "8.1.6",
-    "@sendgrid/mail": "8.1.6"
+    "@sendgrid/mail": "8.1.6",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0"
   }
 }

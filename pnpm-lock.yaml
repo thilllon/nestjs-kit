@@ -166,9 +166,6 @@ importers:
 
   .:
     devDependencies:
-      '@arethetypeswrong/core':
-        specifier: 0.18.5
-        version: 0.18.5
       '@biomejs/biome':
         specifier: 2.5.14
         version: 2.5.14
@@ -193,9 +190,6 @@ importers:
       prettier:
         specifier: 3.9.8
         version: 3.9.8
-      publint:
-        specifier: 0.3.24
-        version: 0.3.24
       tsdown:
         specifier: 0.23.0
         version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
@@ -224,6 +218,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@azure/storage-blob':
         specifier: 12.33.0
         version: 12.33.0
@@ -236,6 +233,12 @@ importers:
       '@nestjs/testing':
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/microservices@12.0.3)(@nestjs/platform-express@12.0.3)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-drizzle-pg:
     dependencies:
@@ -249,6 +252,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -264,6 +270,12 @@ importers:
       pg:
         specifier: 8.23.0
         version: 8.23.0
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-pg-listen:
     dependencies:
@@ -277,6 +289,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -292,6 +307,12 @@ importers:
       pg-listen:
         specifier: 1.7.0
         version: 1.7.0(pg@8.23.0)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-pubnub:
     dependencies:
@@ -302,6 +323,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -311,9 +335,15 @@ importers:
       '@nestjs/testing':
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/microservices@12.0.3)(@nestjs/platform-express@12.0.3)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
       pubnub:
         specifier: 13.0.3
         version: 13.0.3
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-sendbird:
     dependencies:
@@ -324,6 +354,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -336,6 +369,12 @@ importers:
       '@sendbird/sendbird-platform-sdk-typescript':
         specifier: 2.1.8
         version: 2.1.8
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-sendgrid:
     dependencies:
@@ -346,6 +385,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -361,6 +403,12 @@ importers:
       '@sendgrid/mail':
         specifier: 8.1.6
         version: 8.1.6(debug@4.4.3)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjs-slightly-better-auth:
     dependencies:
@@ -377,6 +425,9 @@ importers:
       '@apollo/subgraph':
         specifier: 2.15.1
         version: 2.15.1(graphql@16.14.2)
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@as-integrations/express5':
         specifier: 1.1.2
         version: 1.1.2(@apollo/server@5.5.1(graphql@16.14.2))(express@5.2.1)
@@ -491,6 +542,9 @@ importers:
       pg:
         specifier: 8.23.0
         version: 8.23.0
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
       reflect-metadata:
         specifier: 0.2.2
         version: 0.2.2
@@ -503,6 +557,9 @@ importers:
       socket.io-client:
         specifier: 4.8.3
         version: 4.8.3
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
       ws:
         specifier: 8.21.3
         version: 8.21.3
@@ -689,6 +746,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -698,6 +758,12 @@ importers:
       '@nestjs/testing':
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/microservices@12.0.3)(@nestjs/platform-express@12.0.3)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjskit__cloudinary:
     dependencies:
@@ -708,6 +774,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -723,6 +792,12 @@ importers:
       cloudinary:
         specifier: 2.11.0
         version: 2.11.0
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjskit__nodemailer:
     dependencies:
@@ -733,6 +808,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -745,6 +823,12 @@ importers:
       nodemailer:
         specifier: 10.0.10
         version: 10.0.10
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjskit__redis:
     dependencies:
@@ -755,6 +839,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@nestjs/common':
         specifier: 12.0.3
         version: 12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -770,9 +857,15 @@ importers:
       iovalkey:
         specifier: 0.4.0
         version: 0.4.0
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
       redis:
         specifier: 6.2.1
         version: 6.2.1
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
   packages/nestjskit__s3:
     dependencies:
@@ -783,6 +876,9 @@ importers:
         specifier: ^7.8.2
         version: 7.8.2
     devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 0.18.5
+        version: 0.18.5
       '@aws-sdk/client-s3':
         specifier: 3.1135.0
         version: 3.1135.0
@@ -795,6 +891,12 @@ importers:
       '@nestjs/testing':
         specifier: 12.0.3
         version: 12.0.3(@nestjs/common@12.0.3(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.0.3)(@nestjs/microservices@12.0.3)(@nestjs/platform-express@12.0.3)
+      publint:
+        specifier: 0.3.24
+        version: 0.3.24
+      tsdown:
+        specifier: 0.23.0
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
 
 packages:
 

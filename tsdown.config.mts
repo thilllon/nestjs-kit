@@ -1,4 +1,4 @@
-import { defineConfig, type UserConfig } from "tsdown";
+import type { UserConfig } from "tsdown";
 
 export const sharedBuildOptions = {
   cwd: process.cwd(),
@@ -16,4 +16,4 @@ export const sharedBuildOptions = {
   attw: { level: "error" },
 } satisfies UserConfig;
 
-export default defineConfig(sharedBuildOptions);
+export default sharedBuildOptions;
