@@ -1040,7 +1040,15 @@ mise install
 pnpm install
 pnpm --filter nestjs-slightly-better-auth typecheck
 pnpm --filter nestjs-slightly-better-auth build
-pnpm test:packaging
+pnpm --filter nestjs-slightly-better-auth test:packaging
+```
+
+The E2E tests use the services in this package's `compose.yaml`:
+
+```sh
+pnpm --filter nestjs-slightly-better-auth docker:up
+pnpm --filter nestjs-slightly-better-auth test:e2e
+pnpm --filter nestjs-slightly-better-auth docker:down
 ```
 
 The shared toolchain uses Node.js LTS, pnpm, tsdown, TypeScript and Vitest. Builds produce ESM and CommonJS artifacts with declarations, checked by strict publint and attw.

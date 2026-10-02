@@ -26,13 +26,14 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Order existing package.json scripts with `typecheck`, `build`, then `dev` first in the root and every package; do not add missing commands just for ordering.
 - Name type-checking scripts and Turbo tasks `typecheck`. Keep dependency fields at the end of every package.json in `peerDependencies`, `dependencies`, `devDependencies` order, omitting absent fields.
 - Spell out command-line flags in their long form in package scripts, workflows, hooks, Compose files and documented commands whenever the tool provides one, for example `tsc --project`, `docker compose up --detach` and `git commit --message`.
+- Each package declares the tools and services it needs: its `package.json` lists the tools its scripts run beyond the repository-wide toolchain, and its directory holds the Compose file for its E2E services. The root holds repository-wide tooling only: formatting, linting, the shared TypeScript, tsdown and Vitest configuration, the unit test run, Turbo, Changesets and commit checks. Packages do not depend on each other or on the root unless a technical reason requires it.
 - Use pnpm throughout. CI installs with `--frozen-lockfile`; checks must not silently install or modify dependencies.
 - Share package compiler options and source include/exclude patterns in root tsconfig.base.json using `${configDir}`. Root tsconfig.test.json extends it with test-only overrides; package configs should only extend these shared configurations.
 - Keep source and test files in the default package `tsconfig.json` project so editors apply the shared decorator settings to both. Use the test configuration for no-emit typechecking; production bundling stays limited to the package entry point.
 - Every library must build with tsdown to separate CJS and ESM outputs and matching declarations. Maintain conditional `require` and `import` exports.
 - Define `build` directly in each package's `package.json`; share options through `tsdown.config.mts`, not a build wrapper script.
 - For public API renames, audit exports, services, decorators, injection tokens, source paths and current examples together. Inspect the actual npm archive, including declarations and source maps, for stale names before publication; preserve historical changelogs.
-- Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks. For build changes, also verify real consumer imports and Nest injection in both formats.
+- Keep NestJS/SDK peer dependencies external and preserve decorator metadata. tsdown must run strict publint and attw checks; every package declares `tsdown`, `publint` and `@arethetypeswrong/core` in its `devDependencies`, because tsdown resolves the checkers as its own optional peers. For build changes, also verify real consumer imports and Nest injection in both formats.
 - Remove obsolete files and redundant wrappers after checking their references; prefer maintained tool features over custom validation scripts.
 - Use Turbo streaming output, never TUI. Include shared build configuration in cache inputs and release change detection.
 - Keep necessary executable scripts typed as `.mts` and run them through `tsx`; tests remain `*.test.ts`. Include both in the root typecheck and remove redundant setup wrappers.
@@ -48,9 +49,9 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 - Separate class methods, including constructors, with a blank line. Write nonempty `@Module({ ... })` metadata objects across multiple lines; keep Biome object expansion at its default `auto` behavior.
 - Name all test files `*.test.ts`, with middleware E2E tests named `*.e2e.test.ts`. Use `fixtures` for any necessary fixture directories; remove stale fixture exclusions and unused assets.
 - Write unit tests for meaningful behavior: signing rules, configuration isolation, lifecycle management, error propagation and regressions. Do not add trivial framework/getter tests or tests mirroring the implementation.
-- Where middleware integration needs E2E coverage, provide Docker Compose services with health checks and `docker:up` / `docker:down` scripts. Use isolated local services; always clean up after tests.
-- Default unit tests must not require cloud credentials or network services. HTTP, database, socket and broker E2E runs separately with `pnpm test:e2e`.
-- Run artifact consumer checks separately with `pnpm test:packaging` after building. Keep packaging tests out of the default unit test run so a clean checkout works without `dist`.
+- Where middleware integration needs E2E coverage, give the package its own `compose.yaml` with only the services it uses, with health checks, and its own `docker:up`, `docker:down` and `test:e2e` scripts. Do not add a root Compose file or root E2E scripts. Use isolated local services; packages run one at a time and always clean up after tests.
+- Default unit tests must not require cloud credentials or network services. HTTP, database, socket and broker E2E runs separately per package, for example `pnpm --filter nestjs-drizzle-pg test:e2e`; CI runs each package's services, tests and cleanup in turn.
+- Run artifact consumer checks separately with each package's `test:packaging` script; `pnpm exec turbo run test:packaging` builds and checks every package that has one. Keep packaging tests out of the default unit test run so a clean checkout works without `dist`.
 - Maintain working package examples and current API/runtime requirements in package READMEs. Do not recreate the retired migration guide.
 
 ## Multiple client registrations
