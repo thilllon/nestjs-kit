@@ -53,7 +53,8 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsdown --config ../../tsdown.config.mts",
-    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts"
+    "test": "vitest run --project unit",
+    "test:packaging": "vitest run --project packaging"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {
@@ -71,6 +72,11 @@
     "@sendgrid/mail": "8.1.6",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.24",
-    "tsdown": "0.23.0"
+    "tsdown": "0.23.0",
+    "@swc/core": "1.16.2",
+    "@types/node": "24.13.5",
+    "typescript": "7.0.2",
+    "unplugin-swc": "1.6.0",
+    "vitest": "5.0.1"
   }
 }

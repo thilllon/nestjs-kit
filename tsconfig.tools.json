@@ -8,6 +8,7 @@
   "include": [
     "*.mts",
     "packages/*/*.mts",
+    "packages/*/examples/*/*.mts",
     "packages/*/docs/design/tools/*.mts"
   ],
   "exclude": []

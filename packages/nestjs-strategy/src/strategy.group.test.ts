@@ -159,8 +159,9 @@ describe("defineStrategyGroup", () => {
   });
 });
 
-// Compile-time contracts, checked by the package typecheck. The function is never called.
-export function keyTypeContracts(
+// Compile-time contracts, checked by the package typecheck. The function is never called;
+// the `void` expression below marks it as used.
+function keyTypeContracts(
   registry: StrategyRegistry<PaymentStrategy, PaymentMethod>,
   untyped: StrategyRegistry<PaymentStrategy>,
   input: string,
@@ -190,3 +191,5 @@ export function keyTypeContracts(
   expectTypeOf(untyped.get("any-key")).toEqualTypeOf<PaymentStrategy>();
   expectTypeOf(untyped.keys()).toEqualTypeOf<string[]>();
 }
+
+void keyTypeContracts;

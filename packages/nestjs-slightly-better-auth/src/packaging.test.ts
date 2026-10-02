@@ -39,7 +39,7 @@ async function compileConsumer(
         "dir",
       ),
       symlink(
-        join(root, "../../node_modules", "@types"),
+        join(root, "node_modules", "@types"),
         join(modules, "@types"),
         "dir",
       ),

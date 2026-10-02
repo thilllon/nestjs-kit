@@ -11,6 +11,7 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsc --project tsconfig.build.json",
+    "test": "vitest run --project unit",
     "start": "node dist/main.js"
   },
   "dependencies": {
@@ -27,6 +28,10 @@
     "socket.io-client": "4.8.3"
   },
   "devDependencies": {
-    "@types/node": "24.13.5"
+    "@swc/core": "1.16.2",
+    "@types/node": "24.13.5",
+    "typescript": "7.0.2",
+    "unplugin-swc": "1.6.0",
+    "vitest": "5.0.1"
   }
 }
