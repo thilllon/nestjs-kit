@@ -26,24 +26,31 @@ pnpm format:check
 pnpm typecheck
 pnpm build
 pnpm test
-pnpm test:packaging
+pnpm exec turbo run test:packaging
 ```
 
 Run `pnpm format` to apply formatting. Biome covers all supported files throughout the repository, including root configuration and examples. Markdown and YAML use Prettier because [Biome does not yet support those languages](https://biomejs.dev/internals/language-support/). Generated files and dependencies follow `.gitignore`; source directories are not excluded. Prettier, commitlint, and Vitest use typed `.mts` configuration files.
 
 Run a single package's unit tests with, for example, `pnpm test packages/nestjskit__s3`. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Run `pnpm test:packaging` after `pnpm build` to check real Node consumers of the built ESM and CJS artifacts of every package with a `src/packaging.test.ts`. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs them again on the Node.js version at the floor of each package's `engines.node` range.
+Each package with `src/packaging*.test.ts` files has a `test:packaging` script that checks real Node consumers of its built ESM and CJS artifacts. `pnpm exec turbo run test:packaging` builds and checks every such package; `pnpm --filter nestjs-strategy test:packaging` checks one package after its build. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs them again on the Node.js version at the floor of each package's `engines.node` range.
 
-For integration tests against real databases and message brokers, install Docker with Compose and run:
+Each package with `*.e2e.test.ts` files has a `compose.yaml` that declares only the services its tests use, and `docker:up`, `docker:down` and `test:e2e` scripts. For integration tests against real databases and message brokers, install Docker with Compose and run one package at a time:
 
 ```sh
-pnpm docker:up
-pnpm test:e2e
-pnpm docker:down
+pnpm --filter nestjs-drizzle-pg docker:up
+pnpm --filter nestjs-drizzle-pg test:e2e
+pnpm --filter nestjs-drizzle-pg docker:down
 ```
 
-Compose starts isolated services, binds their client ports to `127.0.0.1`, and waits for health checks:
+| Package                       | Services                                         |
+| ----------------------------- | ------------------------------------------------ |
+| `nestjs-drizzle-pg`           | PostgreSQL                                       |
+| `nestjs-pg-listen`            | PostgreSQL                                       |
+| `@nestjs-kit/redis`           | Redis, Valkey                                    |
+| `nestjs-slightly-better-auth` | PostgreSQL, NATS, Kafka, RabbitMQ, MQTT 5, Redis |
+
+Packages share the default ports, so stop one package's services before starting another's. Compose starts isolated services, binds their client ports to `127.0.0.1`, and waits for health checks:
 
 | Service    | Default port | Override        |
 | ---------- | ------------ | --------------- |
@@ -55,7 +62,7 @@ Compose starts isolated services, binds their client ports to `127.0.0.1`, and w
 | Redis      | 56379        | `REDIS_PORT`    |
 | Valkey     | 56380        | `VALKEY_PORT`   |
 
-Set an override consistently for Compose and the test command if a port is occupied. The suite covers Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, native RPC credential carriers over TCP, gRPC and each broker, and Redis client registrations against Redis and Valkey. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI does so even on failure. PostgreSQL and RabbitMQ data are temporary, Redis and Valkey persistence is disabled, and `docker:down` removes the fixture volumes.
+Set an override consistently for Compose and the test command if a port is occupied. The suites cover Drizzle queries, LISTEN/NOTIFY delivery and connection cleanup, HTTP authentication and authorization, native RPC credential carriers over TCP, gRPC and each broker, and Redis client registrations against Redis and Valkey. Local HTTP/TCP/gRPC listeners use ephemeral ports. Always stop the test services afterward; CI runs each package in turn and stops its services even on failure. PostgreSQL and RabbitMQ data are temporary, Redis and Valkey persistence is disabled, and `docker:down` removes the fixture volumes.
 
 Lefthook checks lint, formatting, and staged secrets before a commit; before a push, it checks builds and types. Commit messages are checked with commitlint. CI runs the repository checks, including tests, with the same mise toolchain.
 
@@ -91,8 +98,8 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 Keep public exports in each package's `src/index.ts`; avoid importing another package's internal source files. A package must declare the dependencies its consumers need.
 
-Each workspace project declares its own dependencies. The root `devDependencies` hold only shared tooling: the tools that root scripts, configuration files, Git hooks and workflows run, and the compiler, bundler and script runner that packages invoke from the root. A project resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The example tests fail to boot when the variants diverge.
+Each workspace project declares its own dependencies. The root `devDependencies` hold only shared tooling: the tools that root scripts, configuration files, Git hooks and workflows run, and the compiler and test runner that package scripts invoke from the root. A project resolves its peer dependencies through its own `devDependencies`, so an example application and the package it imports share one `@nestjs/core` instance only when both resolve the same `@nestjs/core` peer variant. The example tests fail to boot when the variants diverge.
 
-Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
+Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. tsdown resolves both checkers as its optional peers, so each package declares `tsdown`, `publint` and `@arethetypeswrong/core` in its own `devDependencies`. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
 
 Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root tooling uses `tsconfig.tools.json` for its different source layout.

@@ -52,7 +52,11 @@
   ],
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
-    "build": "tsdown --config ../../tsdown.config.mts"
+    "build": "tsdown --config ../../tsdown.config.mts",
+    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts",
+    "docker:up": "docker compose up --detach --wait",
+    "docker:down": "docker compose down --volumes --remove-orphans",
+    "test:e2e": "vitest run --config ../../vitest.e2e.config.mts"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {
@@ -67,6 +71,9 @@
     "@nestjs/testing": "12.0.3",
     "iovalkey": "0.4.0",
     "ioredis": "6.0.0",
-    "redis": "6.2.1"
+    "redis": "6.2.1",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0"
   }
 }

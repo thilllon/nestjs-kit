@@ -51,7 +51,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
-    "build": "tsdown --config ../../tsdown.config.mts"
+    "build": "tsdown --config ../../tsdown.config.mts",
+    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {
@@ -64,6 +65,9 @@
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
     "@nestjs/testing": "12.0.3",
-    "@sendbird/sendbird-platform-sdk-typescript": "2.1.8"
+    "@sendbird/sendbird-platform-sdk-typescript": "2.1.8",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0"
   }
 }

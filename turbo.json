@@ -10,6 +10,10 @@
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.test.json"]
+    },
+    "test:packaging": {
+      "dependsOn": ["build"],
+      "cache": false
     }
   },
   "globalDependencies": ["tsconfig.base.json", "tsdown.config.mts"]

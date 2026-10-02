@@ -232,7 +232,11 @@
   ],
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
-    "build": "tsdown"
+    "build": "tsdown",
+    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts",
+    "docker:up": "docker compose up --detach --wait",
+    "docker:down": "docker compose down --volumes --remove-orphans",
+    "test:e2e": "vitest run --config ../../vitest.e2e.config.mts"
   },
   "peerDependenciesMeta": {
     "@nestjs/graphql": {
@@ -312,6 +316,9 @@
     "rxjs": "7.8.2",
     "socket.io": "4.8.3",
     "socket.io-client": "4.8.3",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0"
   }
 }

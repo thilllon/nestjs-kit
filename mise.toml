@@ -13,4 +13,4 @@ run = ["pnpm install", "lefthook install"]
 
 [tasks.check]
 description = "Run offline quality checks"
-run = ["pnpm lint", "pnpm format:check", "pnpm typecheck", "pnpm test", "pnpm build", "pnpm test:packaging"]
+run = ["pnpm lint", "pnpm format:check", "pnpm typecheck", "pnpm test", "pnpm build", "pnpm exec turbo run test:packaging"]
