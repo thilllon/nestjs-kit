@@ -11,6 +11,14 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tsconfig.test.json"]
     },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.shared.mts"]
+    },
     "test:packaging": {
       "dependsOn": ["build"],
       "cache": false

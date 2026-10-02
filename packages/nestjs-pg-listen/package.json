@@ -52,9 +52,10 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsdown --config ../../tsdown.config.mts",
+    "test": "vitest run --project unit",
     "docker:up": "docker compose up --detach --wait",
     "docker:down": "docker compose down --volumes --remove-orphans",
-    "test:e2e": "vitest run --config ../../vitest.e2e.config.mts"
+    "test:e2e": "vitest run --project e2e"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {
@@ -75,6 +76,11 @@
     "pg": "8.23.0",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.24",
-    "tsdown": "0.23.0"
+    "tsdown": "0.23.0",
+    "@swc/core": "1.16.2",
+    "@types/node": "24.13.5",
+    "typescript": "7.0.2",
+    "unplugin-swc": "1.6.0",
+    "vitest": "5.0.1"
   }
 }

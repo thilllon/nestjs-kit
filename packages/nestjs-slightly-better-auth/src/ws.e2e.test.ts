@@ -43,7 +43,7 @@ import {
   wsCloseCodeFor,
 } from "./websockets.js";
 
-export function sendMessage(
+function sendMessage(
   client: WebSocket,
   event: string,
   data: unknown,

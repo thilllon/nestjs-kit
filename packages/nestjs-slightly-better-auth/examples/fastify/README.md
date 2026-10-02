@@ -63,7 +63,7 @@ curl --cookie user.txt --header "origin: http://localhost:3000" \
 - `src/app.module.ts` registers the default instance synchronously and the named instance asynchronously. The instance name stays next to `useFactory`, which returns runtime options only.
 - `src/account.controller.ts` and `src/admin.controller.ts` define the routes for each instance.
 - `src/create-app.ts` creates the Nest application on the Fastify adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/fastify`.
+- `src/create-app.test.ts` boots the application and checks both instances. Run it from the repository root with `pnpm --filter better-auth-fastify-example test`.
 
 ## Deploy
 

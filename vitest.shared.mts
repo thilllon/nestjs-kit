@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import swc from "unplugin-swc";
-import { defineConfig } from "vitest/config";
+
+// This module imports only Node.js built-ins, so the repository root needs no
+// test runner. Each workspace project's `vitest.config.mts` imports Vitest and
+// the SWC plugin from its own dependencies and combines these options.
 
 type Manifest = {
   name: string;
@@ -33,7 +35,7 @@ function importTarget(target: unknown): unknown {
 // is `./dist/<entry>.mjs` resolves to `src/<entry>.ts` of the same package, so
 // tests run against source without a prior build. Exports without a matching
 // source file keep resolving through the package's own `exports`.
-function workspaceSourceAliases(): Alias[] {
+export function workspaceSourceAliases(): Alias[] {
   const aliases: Alias[] = [];
   for (const directory of readdirSync(packagesDirectory)) {
     const manifestUrl = new URL(`${directory}/package.json`, packagesDirectory);
@@ -64,26 +66,55 @@ function workspaceSourceAliases(): Alias[] {
   return aliases;
 }
 
-export default defineConfig({
-  plugins: [
-    swc.vite({
-      jsc: {
-        parser: { syntax: "typescript", decorators: true },
-        transform: { legacyDecorator: true, decoratorMetadata: true },
-      },
-    }),
-  ],
-  resolve: {
-    alias: workspaceSourceAliases(),
+// SWC options that compile legacy decorators and emit the metadata that Nest
+// dependency injection reads.
+export const decoratorTransform = {
+  jsc: {
+    parser: { syntax: "typescript", decorators: true },
+    transform: { legacyDecorator: true, decoratorMetadata: true },
   },
-  test: {
-    environment: "node",
-    include: [
-      "packages/*/src/**/*.test.ts",
-      "packages/*/examples/*/src/**/*.test.ts",
-    ],
-    exclude: ["**/*.e2e.test.ts", "**/packaging*.test.ts"],
-    clearMocks: true,
-    restoreMocks: true,
+} as const;
+
+// Vitest projects, relative to the workspace project that runs them. A script
+// selects one with `vitest run --project <name>`.
+export const testProjects = [
+  {
+    // Unit tests run against workspace source, without services or `dist`.
+    extends: true as const,
+    test: {
+      name: "unit",
+      environment: "node",
+      include: ["src/**/*.test.ts"],
+      exclude: ["**/*.e2e.test.ts", "**/packaging*.test.ts"],
+      clearMocks: true,
+      restoreMocks: true,
+    },
   },
-});
+  {
+    // E2E test files share the package's Compose services, so they run in turn.
+    extends: true as const,
+    test: {
+      name: "e2e",
+      environment: "node",
+      include: ["src/**/*.e2e.test.ts"],
+      clearMocks: true,
+      restoreMocks: true,
+      testTimeout: 15_000,
+      hookTimeout: 15_000,
+      fileParallelism: false,
+    },
+  },
+  {
+    // Packaging tests load the built artifacts, so this project inherits
+    // neither the source aliases nor the decorator transform. The tests start
+    // Node, pnpm, compiler and bundler processes, and the test files run in
+    // parallel; the unit-test default of 5 s is too short.
+    extends: false as const,
+    test: {
+      name: "packaging",
+      environment: "node",
+      include: ["src/packaging*.test.ts"],
+      testTimeout: 120_000,
+    },
+  },
+];

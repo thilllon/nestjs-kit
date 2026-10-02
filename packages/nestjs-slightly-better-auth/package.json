@@ -233,10 +233,11 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsdown",
-    "test:packaging": "vitest run --config ../../vitest.packaging.config.mts",
+    "test": "vitest run --project unit",
+    "test:packaging": "vitest run --project packaging",
     "docker:up": "docker compose up --detach --wait",
     "docker:down": "docker compose down --volumes --remove-orphans",
-    "test:e2e": "vitest run --config ../../vitest.e2e.config.mts"
+    "test:e2e": "vitest run --project e2e"
   },
   "peerDependenciesMeta": {
     "@nestjs/graphql": {
@@ -295,7 +296,6 @@
     "@nestjs/testing": "12.0.3",
     "@nestjs/websockets": "12.0.3",
     "@types/express": "5.0.6",
-    "@types/node": "24.13.5",
     "@types/pg": "8.23.1",
     "@types/ws": "8.18.1",
     "amqp-connection-manager": "5.0.0",
@@ -319,6 +319,12 @@
     "ws": "8.21.3",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.24",
-    "tsdown": "0.23.0"
+    "tsdown": "0.23.0",
+    "@swc/core": "1.16.2",
+    "@types/node": "24.13.5",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "unplugin-swc": "1.6.0",
+    "vitest": "5.0.1"
   }
 }

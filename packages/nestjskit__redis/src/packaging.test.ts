@@ -167,10 +167,7 @@ describe("built Redis package", () => {
             join(root, "node_modules", "@nestjs"),
             join(modules, "@nestjs"),
           ),
-          symlink(
-            join(root, "../../node_modules/@types"),
-            join(modules, "@types"),
-          ),
+          symlink(join(root, "node_modules/@types"), join(modules, "@types")),
         ]);
         await writeFile(join(directory, `consumer.${extension}`), consumer);
         await writeFile(

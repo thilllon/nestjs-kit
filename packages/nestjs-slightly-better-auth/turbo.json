@@ -11,6 +11,16 @@
         "!examples/**",
         "$TURBO_ROOT$/tsconfig.test.json"
       ]
+    },
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!examples/**",
+        "$TURBO_ROOT$/vitest.shared.mts"
+      ]
+    },
+    "transit": {
+      "inputs": ["$TURBO_DEFAULT$", "!examples/**"]
     }
   }
 }

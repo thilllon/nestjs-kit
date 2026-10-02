@@ -145,7 +145,7 @@ describe("built Sendbird package", () => {
           symlink(root, join(modules, packageName), "dir"),
           symlink(join(root, "node_modules", sdk), join(modules, sdk), "dir"),
           symlink(
-            join(root, "../../node_modules/@types"),
+            join(root, "node_modules/@types"),
             join(modules, "@types"),
             "dir",
           ),

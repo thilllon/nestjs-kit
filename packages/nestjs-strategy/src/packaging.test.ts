@@ -218,7 +218,7 @@ describe("built strategy package", () => {
         await Promise.all([
           symlink(root, join(modules, packageName), "dir"),
           symlink(
-            join(root, "../../node_modules/@types"),
+            join(root, "node_modules/@types"),
             join(modules, "@types"),
             "dir",
           ),

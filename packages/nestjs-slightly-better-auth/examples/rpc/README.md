@@ -76,7 +76,7 @@ node packages/nestjs-slightly-better-auth/examples/rpc/dist/call.js account.prof
 - `src/account.controller.ts` and `src/admin.controller.ts` define the message handlers for each instance.
 - `src/create-app.ts` creates the Nest application on the Express adapter and connects the TCP microservice; `src/main.ts` starts both.
 - `src/client.ts` sends messages with the token in the payload envelope; `src/call.ts` is its command-line entry.
-- `src/create-app.test.ts` boots the application, connects a TCP client and checks both instances. Run it from the repository root with `pnpm test packages/nestjs-slightly-better-auth/examples/rpc`.
+- `src/create-app.test.ts` boots the application, connects a TCP client and checks both instances. Run it from the repository root with `pnpm --filter better-auth-rpc-example test`.
 
 ## Deploy
 
