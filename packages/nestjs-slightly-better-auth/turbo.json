@@ -18,6 +18,9 @@
         "!examples/**",
         "$TURBO_ROOT$/vitest.shared.mts"
       ]
+    },
+    "transit": {
+      "inputs": ["$TURBO_DEFAULT$", "!examples/**"]
     }
   }
 }
