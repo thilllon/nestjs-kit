@@ -301,7 +301,7 @@ function compilerPath(directory: string, compiler: Compiler): string {
     : join(directory, "node_modules", `typescript-${compiler}`, "bin", "tsc");
 }
 
-describe.each(["floor", "current"] as const)(
+describe.concurrent.each(["floor", "current"] as const)(
   "declaration consumers with the %s peer versions",
   (row) => {
     it("installs TypeScript 5.9 and 6.x next to the workspace TypeScript 7", async () => {
@@ -324,7 +324,7 @@ describe.each(["floor", "current"] as const)(
       ]);
     }, 60_000);
 
-    it.concurrent.each(
+    it.each(
       compilerNames.flatMap((compiler) =>
         (["nodenext", "node16", "bundler"] as const).flatMap((mode) =>
           [false, true].map((apiKey) => ({ compiler, mode, apiKey })),
@@ -408,7 +408,7 @@ async function runIsolated(
   });
 }
 
-describe("bundlers with the current peer versions", () => {
+describe.concurrent("bundlers with the current peer versions", () => {
   beforeAll(async () => {
     await compileApp(consumerFor("current"));
   }, 180_000);

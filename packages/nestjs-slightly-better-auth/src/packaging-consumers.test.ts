@@ -458,7 +458,7 @@ const artifactResolution = Object.fromEntries(
   ]),
 );
 
-describe.each(["floor", "current"] as const)(
+describe.concurrent.each(["floor", "current"] as const)(
   "installed tarball with the %s peer versions",
   (row) => {
     it("installs the intended Nest and Better Auth versions", async () => {
@@ -638,7 +638,7 @@ console.log(JSON.stringify({
   },
 );
 
-it("resolves every entry to its CommonJS artifact with require(esm) disabled", async () => {
+it.concurrent("resolves every entry to its CommonJS artifact with require(esm) disabled", async () => {
   // Better Auth ships only ESM, so an entry that imports it stops at that peer;
   // the platform helpers and the Fastify platform import no Better Auth module.
   const script = `const { dirname, relative } = require("node:path");
@@ -836,7 +836,7 @@ console.log(JSON.stringify({ principals, outcomes: [...new Set(outcomes)].sort()
   },
 };
 
-describe.each(
+describe.concurrent.each(
   (["floor", "current"] as const).flatMap((row) =>
     (Object.keys(optionalConsumers) as OptionalConsumer[]).map((name) => ({
       row,
