@@ -129,7 +129,8 @@ jobs:
                 name: manifest.name,
                 directory,
                 floor,
-                packaging: files.length === 1,
+                // A package with the script but no matching file still runs it, so the run fails.
+                packaging: Boolean(manifest.scripts?.["test:packaging"]) && files.length <= 1,
                 e2e: existsSync(`${directory}/compose.yaml`),
               });
               if (files.length > 1) {
