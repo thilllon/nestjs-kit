@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       packages: ${{ steps.packages.outputs.packages }}
+      packaging: ${{ steps.packages.outputs.packaging }}
       e2e: ${{ steps.packages.outputs.e2e }}
     steps:
       - name: Verify dispatched commit
@@ -92,7 +93,10 @@ jobs:
         run: |
           # One matrix entry per affected directory in packages/. An affected
           # example selects the package that contains it. The e2e matrix holds
-          # the affected packages that have a Compose file.
+          # the affected packages that have a Compose file. A package whose
+          # packaging tests span several src/packaging*.test.ts files runs
+          # them in the packaging matrix instead of its package job: one entry
+          # per file on the pinned Node.js LTS and one on the engines floor.
           node --eval '
             const { appendFileSync, existsSync, readdirSync, readFileSync } = require("node:fs");
             const scope = process.env.SCOPE;
@@ -107,6 +111,7 @@ jobs:
               }
             }
             const packages = [];
+            const packaging = [];
             for (const name of readdirSync("packages").sort()) {
               const directory = `packages/${name}`;
               if (!existsSync(`${directory}/package.json`)) {
@@ -117,18 +122,29 @@ jobs:
               }
               const manifest = JSON.parse(readFileSync(`${directory}/package.json`, "utf8"));
               const [floor] = manifest.engines.node.match(/\d+\.\d+\.\d+/);
+              const files = manifest.scripts?.["test:packaging"]
+                ? readdirSync(`${directory}/src`).filter((file) => /^packaging.*\.test\.ts$/.test(file)).sort()
+                : [];
               packages.push({
                 name: manifest.name,
                 directory,
                 floor,
-                packaging: Boolean(manifest.scripts?.["test:packaging"]),
+                // A package with the script but no matching file still runs it, so the run fails.
+                packaging: Boolean(manifest.scripts?.["test:packaging"]) && files.length <= 1,
                 e2e: existsSync(`${directory}/compose.yaml`),
               });
+              if (files.length > 1) {
+                for (const file of files) {
+                  for (const node of [null, floor]) {
+                    packaging.push({ name: manifest.name, directory, file: `src/${file}`, node });
+                  }
+                }
+              }
             }
             const e2e = packages.filter((entry) => entry.e2e);
             appendFileSync(
               process.env.GITHUB_OUTPUT,
-              `packages=${JSON.stringify(packages)}\ne2e=${JSON.stringify(e2e)}\n`,
+              `packages=${JSON.stringify(packages)}\npackaging=${JSON.stringify(packaging)}\ne2e=${JSON.stringify(e2e)}\n`,
             );
             const names = packages.map((entry) => `- \`${entry.name}\``).join("\n");
             appendFileSync(
@@ -197,12 +213,51 @@ jobs:
       - run: pnpm exec turbo run typecheck --filter="...{./$DIRECTORY}"
       - run: pnpm exec turbo run test --filter="...{./$DIRECTORY}"
       - run: pnpm exec turbo run build --filter="...{./$DIRECTORY}"
-      - run: pnpm exec turbo run test:packaging --filter="...{./$DIRECTORY}"
+      - if: matrix.package.packaging
+        run: pnpm exec turbo run test:packaging --filter="...{./$DIRECTORY}"
       - name: Test packed consumers on the package's Node.js engines floor
         if: matrix.package.packaging
         run: |
           test "$(mise exec "node@$FLOOR" -- node --version)" = "v$FLOOR"
           mise exec "node@$FLOOR" -- pnpm --dir "$DIRECTORY" test:packaging
+
+  # Packaging tests of the packages that split them across several files, one
+  # file and Node.js version per job.
+  packaging:
+    name: ${{ matrix.entry.name }} ${{ matrix.entry.file }} on Node.js ${{ matrix.entry.node || 'LTS' }}
+    needs: affected
+    if: needs.affected.outputs.packaging != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.affected.outputs.packaging) }}
+    env:
+      DIRECTORY: ${{ matrix.entry.directory }}
+      FILE: ${{ matrix.entry.file }}
+      NODE_VERSION: ${{ matrix.entry.node }}
+    steps:
+      - name: Verify dispatched commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_SHA"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run build --filter="./$DIRECTORY"
+      - name: Test packed consumers on the pinned Node.js LTS
+        if: "!matrix.entry.node"
+        run: pnpm --dir "$DIRECTORY" test:packaging "$FILE"
+      - name: Test packed consumers on the package's Node.js engines floor
+        if: matrix.entry.node
+        run: |
+          test "$(mise exec "node@$NODE_VERSION" -- node --version)" = "v$NODE_VERSION"
+          mise exec "node@$NODE_VERSION" -- pnpm --dir "$DIRECTORY" test:packaging "$FILE"
 
   e2e:
     name: ${{ matrix.package.name }} E2E
@@ -242,7 +297,7 @@ jobs:
   # a skipped required check as passing.
   validate:
     name: Validate
-    needs: [affected, repository, package, e2e]
+    needs: [affected, repository, package, packaging, e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -252,11 +307,13 @@ jobs:
           AFFECTED: ${{ needs.affected.result }}
           REPOSITORY: ${{ needs.repository.result }}
           PACKAGE: ${{ needs.package.result }}
+          PACKAGING: ${{ needs.packaging.result }}
           E2E: ${{ needs.e2e.result }}
           PACKAGE_MATRIX: ${{ needs.affected.outputs.packages }}
+          PACKAGING_MATRIX: ${{ needs.affected.outputs.packaging }}
           E2E_MATRIX: ${{ needs.affected.outputs.e2e }}
         run: |
-          echo "affected=$AFFECTED repository=$REPOSITORY package=$PACKAGE e2e=$E2E"
+          echo "affected=$AFFECTED repository=$REPOSITORY package=$PACKAGE packaging=$PACKAGING e2e=$E2E"
           echo "packages=$PACKAGE_MATRIX"
           test "$AFFECTED" = success
           test "$REPOSITORY" = success
@@ -264,6 +321,11 @@ jobs:
             test "$PACKAGE" = skipped
           else
             test "$PACKAGE" = success
+          fi
+          if [ "$PACKAGING_MATRIX" = '[]' ]; then
+            test "$PACKAGING" = skipped
+          else
+            test "$PACKAGING" = success
           fi
           if [ "$E2E_MATRIX" = '[]' ]; then
             test "$E2E" = skipped

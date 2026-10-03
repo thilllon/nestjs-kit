@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,11 +14,14 @@ const compiler = fileURLToPath(
   new URL("../bin/tsc", import.meta.resolve("typescript")),
 );
 
-function node(script: string, ...flags: string[]): string {
-  return execFileSync(process.execPath, [...flags, "--eval", script], {
-    cwd: root,
-    encoding: "utf8",
-  }).trim();
+// Each check runs in its own Node process, so the checks run concurrently.
+async function node(script: string, ...flags: string[]): Promise<string> {
+  const { stdout } = await execute(
+    process.execPath,
+    [...flags, "--eval", script],
+    { cwd: root, encoding: "utf8" },
+  );
+  return stdout.trim();
 }
 
 async function compileConsumer(
@@ -194,7 +197,7 @@ const optionalPeerEntries: Record<
   graphql: ["graphql"],
 };
 
-describe("built authentication package", () => {
+describe.concurrent("built authentication package", () => {
   it.each(["mts", "cts"] as const)(
     "preserves GraphQL transport declarations for a .%s consumer",
     async (extension) => {
@@ -223,8 +226,8 @@ apolloTransport({ fieldResolverCoverage: "ignore" });
     { format: "cjs", driver: "mercurius", platform: "fastify" },
   ] as const)(
     "initializes $driver with its actual $format transport artifact",
-    ({ format, driver, platform }) => {
-      const result = node(
+    async ({ format, driver, platform }) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const { createRequire } = await import("node:module");
          const require = createRequire(import.meta.url);
@@ -294,8 +297,8 @@ void method; void token; void code;
 
   it.each(["esm", "cjs"] as const)(
     "injects connection authentication from the actual %s WebSocket entry",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const { createRequire } = await import("node:module");
          const require = createRequire(import.meta.url);
@@ -349,8 +352,8 @@ void defaults;
 
   it.each(["esm", "cjs"] as const)(
     "initializes a Nest microservice with the actual %s RPC artifact",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const { createRequire } = await import("node:module");
          const require = createRequire(import.meta.url);
@@ -387,8 +390,8 @@ void defaults;
     { format: "cjs", platform: "fastify" },
   ] as const)(
     "initializes $platform through its actual $format artifact",
-    ({ format, platform }) => {
-      const result = node(
+    async ({ format, platform }) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const { createRequire } = await import("node:module");
          const require = createRequire(import.meta.url);
@@ -497,8 +500,8 @@ void organization;
 
   it.each(["esm", "cjs"] as const)(
     "registers authorization units from the actual %s artifacts",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const { createRequire } = await import("node:module");
          const require = createRequire(import.meta.url);
@@ -553,8 +556,8 @@ void organization;
     },
   );
 
-  it("shares one module identity between canonical Node import and require", () => {
-    const result = node(
+  it("shares one module identity between canonical Node import and require", async () => {
+    const result = await node(
       `import { createRequire } from "node:module";
        const require = createRequire(import.meta.url);
        const name = ${JSON.stringify(manifest.name)};
@@ -576,8 +579,8 @@ void organization;
 
   it.each(["esm", "cjs"] as const)(
     "initializes and closes default plus named services from the actual %s build",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          const kit = ${format === "esm" ? 'await import("./dist/index.mjs")' : '(await import("node:module")).createRequire(import.meta.url)("./dist/index.cjs")'};
          const { Test } = await import("@nestjs/testing");
@@ -638,8 +641,8 @@ void organization;
     },
   );
 
-  it("loads the actual CJS artifact and interoperates with ESM through Nest tokens and error brands", () => {
-    const result = node(`
+  it("loads the actual CJS artifact and interoperates with ESM through Nest tokens and error brands", async () => {
+    const result = await node(`
       const cjs = require("./dist/index.cjs");
       (async () => {
         const esm = await import("./dist/index.mjs");
@@ -797,8 +800,8 @@ void organization;
     expect(missing).toEqual([]);
   });
 
-  it("loads the isolated plugin in both formats without importing the Nest kernel", () => {
-    const result = node(
+  it("loads the isolated plugin in both formats without importing the Nest kernel", async () => {
+    const result = await node(
       `import { createRequire, registerHooks } from "node:module";
        import { pathToFileURL } from "node:url";
        const require = createRequire(import.meta.url);
@@ -848,12 +851,12 @@ void organization;
     ),
   )(
     "runs every other $format entry point without the optional $peer peer",
-    ({ format, peer, owners }) => {
+    async ({ format, peer, owners }) => {
       const entries = entryPoints.map((entry) => ({
         name: entry.name,
         path: entry[format],
       }));
-      const result = node(
+      const result = await node(
         `import { createRequire, registerHooks } from "node:module";
          import { pathToFileURL } from "node:url";
          process.env.NODE_ENV = "test";
@@ -946,8 +949,8 @@ void organization;
 
   it.each(["esm", "cjs"] as const)(
     "loads the root %s entry without testing peers or test runners",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `import { createRequire, registerHooks } from "node:module";
          const require = createRequire(import.meta.url);
          const forbidden = ["@nestjs/testing", "vitest", "jest", "@jest/globals", "node:test", "node:assert", "node:assert/strict", "better-auth/plugins"];
@@ -973,8 +976,8 @@ void organization;
 
   it.each(["esm", "cjs"] as const)(
     "loads ./testing and ./testing/conformance from the actual %s artifacts without a test runner",
-    (format) => {
-      const result = node(
+    async (format) => {
+      const result = await node(
         `process.env.NODE_ENV = "test";
          import { createRequire, registerHooks } from "node:module";
          const require = createRequire(import.meta.url);
@@ -1118,8 +1121,8 @@ void organization;
     },
   );
 
-  it("keeps the testing entries to their Better Auth specifiers in both formats", () => {
-    const result = node(
+  it("keeps the testing entries to their Better Auth specifiers in both formats", async () => {
+    const result = await node(
       `import { createRequire, registerHooks } from "node:module";
        import { pathToFileURL } from "node:url";
        const require = createRequire(import.meta.url);
@@ -1174,8 +1177,8 @@ void organization;
     expect(seen.conformance).toContain("better-auth/adapters/memory");
   });
 
-  it("composes testing overrides from the ESM and CommonJS copies on one builder", () => {
-    const result = node(
+  it("composes testing overrides from the ESM and CommonJS copies on one builder", async () => {
+    const result = await node(
       `import { createRequire } from "node:module";
        const require = createRequire(import.meta.url);
        const esm = await import("./dist/testing.mjs");
