@@ -106,7 +106,7 @@ jobs:
                 .head_sha == $sha and .display_title == $key and
                 .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
               ' <<< "$result"
-              test "$(gh api "repos/$GH_REPO/actions/runs/$run/jobs" --jq 'any(.jobs[]; .name == "Validate" and .conclusion == "success")')" = true
+              test -n "$(gh api --paginate "repos/$GH_REPO/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | select(.name == "Validate" and .conclusion == "success") | .name')"
               echo "url=$(jq --raw-output .html_url <<< "$result")" >> "$GITHUB_OUTPUT"
               exit 0
             fi
