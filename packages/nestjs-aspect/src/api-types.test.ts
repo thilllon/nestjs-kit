@@ -1,12 +1,13 @@
 // Type fixture of the public API: the usage section of docs/sketch/api.ts.
 // `pnpm typecheck` checks it; every `@ts-expect-error` marks a misuse the API
-// rejects at compile time.
+// rejects at compile time. The tests evaluate the fixture and compare the
+// run-time guarantees of its pointcuts with their types.
 
 // biome-ignore-all lint/correctness/noUnusedVariables: the fixture declares classes and locals only to be type-checked
 // biome-ignore-all lint/correctness/noUnusedFunctionParameters: the fixture declares advice signatures without bodies
 
 import { Reflector } from "@nestjs/core";
-import { describe, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   After,
   AfterReturning,
@@ -45,10 +46,7 @@ class User {
   constructor(readonly name: string) {}
 }
 
-/**
- * Declares the annotations, targets, pointcuts and aspects of the fixture.
- * The declarations are evaluated only when the function is called.
- */
+/** Declares the annotations, targets, pointcuts and aspects of the fixture. */
 function declareUsage() {
   /** Retryable can only be applied to async methods. */
   const Retryable = createAnnotation<
@@ -281,8 +279,12 @@ describe("public types", () => {
 
   it("type P.args as an argument tuple", () => {
     type Args = ShapeOf<Usage["accountOps"]>["args"];
+    const primitives = P.args(String, Number, Boolean, BigInt, Symbol, P.ANY);
 
     expectTypeOf<Args[0]>().toEqualTypeOf<Account>();
+    expectTypeOf<ShapeOf<typeof primitives>["args"]>().toEqualTypeOf<
+      [string, number, boolean, bigint, symbol, unknown]
+    >();
   });
 
   it("guarantee the annotations of both sides of and() and the common ones of or()", () => {
@@ -292,6 +294,19 @@ describe("public types", () => {
     expectTypeOf<ShapeOf<Usage["either"]>["ann"]>().toEqualTypeOf<"Audited">();
     expectTypeOf<ShapeOf<Usage["anyOf"]>["ann"]>().toEqualTypeOf<"Audited">();
     expectTypeOf<ShapeOf<Usage["auditedOrRetry"]>["ann"]>().toBeNever();
+  });
+
+  it("guarantee at run time the annotations their types guarantee", () => {
+    const usage = declareUsage();
+    const names = (pointcut: Pointcut<any>) => [...pointcut.guarantees].sort();
+
+    expect(names(usage.retryable)).toEqual(["Retryable"]);
+    expect(names(usage.allOf)).toEqual(["Audited", "Retryable"]);
+    expect(names(usage.either)).toEqual(["Audited"]);
+    expect(names(usage.anyOf)).toEqual(["Audited"]);
+    expect(names(usage.auditedOrRetry)).toEqual([]);
+    expect(names(usage.findById)).toEqual([]);
+    expect(names(usage.broad)).toEqual([]);
   });
 
   it("leave broad pointcuts and negations without guarantees", () => {

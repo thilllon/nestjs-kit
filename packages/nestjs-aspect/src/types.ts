@@ -1,5 +1,5 @@
-// Shared contracts: owned by the architect and frozen. Every type that crosses
-// a file boundary is declared here; the other source files hold run-time code.
+// Every type that crosses a file boundary is declared here; the other source
+// files hold run-time code.
 
 import type { InjectionToken } from "@nestjs/common";
 import type { ReflectableDecorator } from "@nestjs/core";
@@ -241,7 +241,8 @@ export interface JoinPoint<S extends Shape> {
   annotation<V, N extends S["ann"]>(a: Annotation<V, any, N>): V;
   /** Same lookup as `annotation`; `undefined` when the annotation is absent. */
   findAnnotation<V>(a: Annotation<V, any, any>): V | undefined;
-  findAnnotation<V>(a: NestAnnotation<V>): V | undefined;
+  // Spelled without the `NestAnnotation` alias, through which `V` is not inferred.
+  findAnnotation<V>(a: ReflectableDecorator<any, V>): V | undefined;
   /** `"UserService.findById(1)"`. */
   toString(): string;
 }

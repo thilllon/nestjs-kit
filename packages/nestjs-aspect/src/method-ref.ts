@@ -1,6 +1,5 @@
-// Shared: owned by the architect, implemented and frozen. Builds the matching
-// input (`ClassRef`, `MethodRef`) that pointcuts, the chain builder and the
-// weaver share.
+// Builds the matching input (`ClassRef`, `MethodRef`) that pointcuts, the
+// chain builder and the weaver share.
 
 import "reflect-metadata";
 import { AopConfigurationError } from "./errors";

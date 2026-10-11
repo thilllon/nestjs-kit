@@ -1,6 +1,10 @@
-// Slice B. Exported signatures are frozen; the bodies are the slice's work.
+// Aspect and advice decorators, their metadata keys and readers.
 
+import "reflect-metadata";
+import { Injectable } from "@nestjs/common";
+import { AopConfigurationError } from "./errors";
 import type {
+  AdviceKind,
   AdviceMetadata,
   AnyShape,
   AspectMetadata,
@@ -9,6 +13,7 @@ import type {
   Fn,
   JoinPoint,
   Pointcut,
+  PointcutLike,
   ProceedingJoinPoint,
   Shape,
 } from "./types";
@@ -76,36 +81,111 @@ export type AdviceDecorator<S extends Shape, F extends Fn> = <T extends F>(
   desc: TypedPropertyDescriptor<T> & AsyncGuard<S, T>,
 ) => void;
 
+const INSTANTIATION_MODELS: readonly unknown[] = [
+  "singleton",
+  "perTarget",
+  "perClass",
+];
+
+function isPointcutLike(value: unknown): value is PointcutLike {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return false;
+  }
+  const { classFilter, methodMatcher } = value as Partial<PointcutLike>;
+  return (
+    typeof classFilter?.matches === "function" &&
+    typeof methodMatcher?.matches === "function"
+  );
+}
+
+function ownAdviceMetadata(type: object): readonly AdviceMetadata[] {
+  return Reflect.getOwnMetadata(ADVICE_METADATA, type) ?? [];
+}
+
+function adviceDecorator(
+  kind: AdviceKind,
+  pointcut: unknown,
+  throwing?: Class,
+): (target: object, key: string | symbol) => void {
+  const decorator = `@${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
+  if (!isPointcutLike(pointcut)) {
+    throw new AopConfigurationError(
+      `${decorator} requires a pointcut; an undefined pointcut usually comes from a circular import`,
+    );
+  }
+  if (throwing !== undefined && typeof throwing !== "function") {
+    throw new AopConfigurationError(
+      `${decorator} requires a class as its throwing option`,
+    );
+  }
+  return (target, key) => {
+    if (typeof target === "function") {
+      throw new AopConfigurationError(
+        `${decorator} cannot be applied to the static member ${target.name}.${String(key)}`,
+      );
+    }
+    const type = target.constructor;
+    const entry: AdviceMetadata =
+      throwing === undefined
+        ? { kind, pointcut, methodName: key }
+        : { kind, pointcut, methodName: key, throwing };
+    Reflect.defineMetadata(
+      ADVICE_METADATA,
+      [...ownAdviceMetadata(type), entry],
+      type,
+    );
+  };
+}
+
 /**
  * Marks a class as an aspect and as a Nest provider (`@Injectable()`), and
  * stores `AspectMetadata` with `instantiation` defaulting to `"singleton"`.
  */
-export function Aspect(_options?: AspectOptions): ClassDecorator {
-  throw new Error("not implemented");
+export function Aspect(options: AspectOptions = {}): ClassDecorator {
+  const { order, instantiation = "singleton" } = options;
+  if (
+    order !== undefined &&
+    (typeof order !== "number" || Number.isNaN(order))
+  ) {
+    throw new AopConfigurationError("@Aspect requires a number as its order");
+  }
+  if (!INSTANTIATION_MODELS.includes(instantiation)) {
+    throw new AopConfigurationError(
+      `@Aspect does not support the instantiation model ${String(instantiation)}`,
+    );
+  }
+  const metadata: AspectMetadata = { order, instantiation };
+  return (target) => {
+    Injectable()(target);
+    Reflect.defineMetadata(ASPECT_METADATA, metadata, target);
+  };
 }
 
 /** Runs before the join point. An error prevents the join point from running. */
 export function Before<S extends Shape>(
-  _pc: Pointcut<S>,
+  pc: Pointcut<S>,
 ): AdviceDecorator<S, (jp: JoinPoint<S>) => AdviceResult<S>> {
-  throw new Error("not implemented");
+  return adviceDecorator("before", pc);
 }
 
 /** Runs after the join point, whatever its outcome (finally). */
 export function After<S extends Shape>(
-  _pc: Pointcut<S>,
+  pc: Pointcut<S>,
 ): AdviceDecorator<S, (jp: JoinPoint<S>) => AdviceResult<S>> {
-  throw new Error("not implemented");
+  return adviceDecorator("after", pc);
 }
 
 /** Runs after a normal completion with the awaited result; cannot replace it. */
 export function AfterReturning<S extends Shape>(
-  _pc: Pointcut<S>,
+  pc: Pointcut<S>,
 ): AdviceDecorator<
   S,
   (jp: JoinPoint<S>, result: Awaited<S["returns"]>) => AdviceResult<S>
 > {
-  throw new Error("not implemented");
+  return adviceDecorator("afterReturning", pc);
 }
 
 /**
@@ -113,17 +193,17 @@ export function AfterReturning<S extends Shape>(
  * `instanceof` that class.
  */
 export function AfterThrowing<S extends Shape, E = unknown>(
-  _pc: Pointcut<S>,
-  _options?: { throwing: Class<E> },
+  pc: Pointcut<S>,
+  options?: { throwing: Class<E> },
 ): AdviceDecorator<S, (jp: JoinPoint<S>, error: E) => AdviceResult<S>> {
-  throw new Error("not implemented");
+  return adviceDecorator("afterThrowing", pc, options?.throwing);
 }
 
 /** Surrounds the join point; the return value becomes the caller's result. */
 export function Around<S extends Shape>(
-  _pc: Pointcut<S>,
+  pc: Pointcut<S>,
 ): AdviceDecorator<AnyShape, (jp: ProceedingJoinPoint<S>) => S["returns"]> {
-  throw new Error("not implemented");
+  return adviceDecorator("around", pc);
 }
 
 /**
@@ -131,29 +211,47 @@ export function Around<S extends Shape>(
  * as a Nest provider (`@Injectable()`).
  */
 export function AopAdvisor(): ClassDecorator {
-  throw new Error("not implemented");
+  return (target) => {
+    Injectable()(target);
+    Reflect.defineMetadata(ADVISOR_METADATA, true, target);
+  };
 }
 
 /** True when the class itself is decorated with `@Aspect`. */
-export function isAspect(_type: Class): boolean {
-  throw new Error("not implemented");
+export function isAspect(type: Class): boolean {
+  return Reflect.hasOwnMetadata(ASPECT_METADATA, type);
 }
 
 /** `AspectMetadata` of the class itself; `undefined` when it is not an aspect. */
-export function getAspectMetadata(_type: Class): AspectMetadata | undefined {
-  throw new Error("not implemented");
+export function getAspectMetadata(type: Class): AspectMetadata | undefined {
+  return Reflect.getOwnMetadata(ASPECT_METADATA, type);
 }
 
 /**
  * Advice declared on the class and its superclasses: the entries of the
- * furthest superclass first, each class in declaration order. Empty for a
- * class without advice decorators, whether or not it is an aspect.
+ * furthest superclass first, each class in declaration order. A class that
+ * declares advice on a method replaces the advice its superclasses declare on
+ * the method of that name. Empty for a class without advice decorators,
+ * whether or not it is an aspect.
  */
-export function getAdviceMetadata(_type: Class): readonly AdviceMetadata[] {
-  throw new Error("not implemented");
+export function getAdviceMetadata(type: Class): readonly AdviceMetadata[] {
+  const perClass: (readonly AdviceMetadata[])[] = [];
+  const redeclared = new Set<string | symbol>();
+  for (
+    let current: unknown = type;
+    typeof current === "function" && current !== Function.prototype;
+    current = Object.getPrototypeOf(current)
+  ) {
+    const own = ownAdviceMetadata(current);
+    perClass.unshift(own.filter((entry) => !redeclared.has(entry.methodName)));
+    for (const entry of own) {
+      redeclared.add(entry.methodName);
+    }
+  }
+  return perClass.flat();
 }
 
 /** True when the class itself is decorated with `@AopAdvisor`. */
-export function isAopAdvisor(_type: Class): boolean {
-  throw new Error("not implemented");
+export function isAopAdvisor(type: Class): boolean {
+  return Reflect.hasOwnMetadata(ADVISOR_METADATA, type);
 }

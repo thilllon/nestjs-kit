@@ -1,7 +1,10 @@
-// Slice B. Exported signatures are frozen; the bodies are the slice's work.
+// The interceptor chain of one member and its traversal.
 
+import { AopConfigurationError } from "./errors";
+import { createJoinPoint } from "./join-point";
 import type {
   AdvisorDescriptor,
+  ChainLink,
   AnyShape,
   ChainOptions,
   InterceptorChain,
@@ -20,11 +23,28 @@ import type {
  * `isRuntime`.
  */
 export function buildChain(
-  _method: MethodRef,
-  _advisors: readonly AdvisorDescriptor[],
-  _options: ChainOptions,
+  method: MethodRef,
+  advisors: readonly AdvisorDescriptor[],
+  options: ChainOptions,
 ): InterceptorChain {
-  throw new Error("not implemented");
+  const context = { returnValues: options.returnValues };
+  const links = advisors.map((advisor): ChainLink => {
+    const interceptor = options.adviceAdapters.toInterceptor(
+      advisor.advice,
+      context,
+    );
+    const matcher = advisor.pointcut.methodMatcher;
+    if (!matcher.isRuntime) {
+      return { interceptor, advisor };
+    }
+    if (typeof matcher.matchesRuntime !== "function") {
+      throw new AopConfigurationError(
+        `The method matcher of an advisor of ${advisor.source.type.name} has isRuntime but no matchesRuntime()`,
+      );
+    }
+    return { interceptor, runtimeMatcher: matcher, advisor };
+  });
+  return { method, links };
 }
 
 /**
@@ -43,21 +63,32 @@ export class Invocation implements MethodInvocation {
     protected index = 0,
   ) {}
 
+  private cachedJoinPoint: JoinPoint<AnyShape> | undefined;
+
   get method(): MethodRef {
     return this.chain.method;
   }
 
   /** Created on first access; one join point per invocation object. */
   get joinPoint(): JoinPoint<AnyShape> {
-    throw new Error("not implemented");
+    this.cachedJoinPoint ??= createJoinPoint(this);
+    return this.cachedJoinPoint;
   }
 
   proceed(): unknown {
-    throw new Error("not implemented");
+    const { links, method } = this.chain;
+    while (this.index < links.length) {
+      const link = links[this.index++];
+      if (link.runtimeMatcher?.matchesRuntime?.(method, this.args) === false) {
+        continue;
+      }
+      return link.interceptor.invoke(this);
+    }
+    return method.original.apply(this.target, this.args as unknown[]);
   }
 
-  cloneFromHere(_args: readonly unknown[] = this.args): Invocation {
-    throw new Error("not implemented");
+  cloneFromHere(args: readonly unknown[] = this.args): Invocation {
+    return new Invocation(this.chain, this.target, args, this.index);
   }
 }
 
@@ -66,9 +97,9 @@ export class Invocation implements MethodInvocation {
  * `new Invocation(chain, target, args).proceed()`.
  */
 export function invoke(
-  _chain: InterceptorChain,
-  _target: object,
-  _args: readonly unknown[],
+  chain: InterceptorChain,
+  target: object,
+  args: readonly unknown[],
 ): unknown {
-  throw new Error("not implemented");
+  return new Invocation(chain, target, args).proceed();
 }

@@ -1,8 +1,16 @@
-// Slice A. Exported signatures are frozen; the bodies are the slice's work.
-
+import "reflect-metadata";
+import type { InjectionToken } from "@nestjs/common";
+import {
+  hasClassAnnotation,
+  hasMethodAnnotation,
+  isAnnotation,
+} from "./annotation";
+import { AopConfigurationError } from "./errors";
+import { createPointcut } from "./pointcut";
 import type {
   AndShape,
   Annotation,
+  AnnotationLike,
   AnyShape,
   Class,
   ClassFilter,
@@ -26,7 +34,27 @@ export type MethodKeys<T> = {
   [K in keyof T]-?: T[K] extends Fn ? K : never;
 }[keyof T];
 
-export type ArgMatcher = Class | typeof ANY | typeof REST;
+export type ArgMatcher =
+  | Class
+  | BigIntConstructor
+  | SymbolConstructor
+  | typeof ANY
+  | typeof REST;
+
+/** Argument type one `P.args` matcher stands for. */
+export type ArgOf<H> = H extends StringConstructor
+  ? string
+  : H extends NumberConstructor
+    ? number
+    : H extends BooleanConstructor
+      ? boolean
+      : H extends BigIntConstructor
+        ? bigint
+        : H extends SymbolConstructor
+          ? symbol
+          : H extends Class<infer I>
+            ? I
+            : unknown;
 
 export type ArgsOf<M extends readonly ArgMatcher[]> = M extends readonly [
   infer H,
@@ -34,7 +62,7 @@ export type ArgsOf<M extends readonly ArgMatcher[]> = M extends readonly [
 ]
   ? H extends typeof REST
     ? unknown[]
-    : [H extends Class<infer I> ? I : unknown, ...ArgsOf<R>]
+    : [ArgOf<H>, ...ArgsOf<R>]
   : [];
 
 /** Shape of `P.all(...)`: the shapes folded with `and`. */
@@ -151,7 +179,8 @@ export interface PointcutFactory {
   /**
    * `args(...)`: run-time argument check (runtime matcher). A class matches
    * an argument that is `instanceof` it; `String`, `Number`, `Boolean`,
-   * `BigInt` and `Symbol` also match their primitives. `P.ANY` matches one
+   * `BigInt` and `Symbol` match their primitives and type the argument as
+   * the primitive. `P.ANY` matches one
    * argument and `P.REST` the remaining ones. Without `P.REST` the argument
    * count must equal the matcher count.
    */
@@ -211,27 +240,262 @@ export interface PointcutFactory {
   readonly REST: typeof REST;
 }
 
-function notImplemented(): never {
-  throw new Error("not implemented");
+const PRIMITIVE_TYPES: ReadonlyMap<unknown, string> = new Map<unknown, string>([
+  [String, "string"],
+  [Number, "number"],
+  [Boolean, "boolean"],
+  [BigInt, "bigint"],
+  [Symbol, "symbol"],
+]);
+
+function isTypeOrSubclass(type: Class, base: Class): boolean {
+  return type === base || type.prototype instanceof base;
+}
+
+function typeFilter(base: Class): ClassFilter {
+  return { matches: (classRef) => isTypeOrSubclass(classRef.type, base) };
+}
+
+function staticMatcher(matches: (method: MethodRef) => boolean): MethodMatcher {
+  return { isRuntime: false, matches };
+}
+
+/** A copy without the flags that make `test` depend on `lastIndex`. */
+function stateless(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, ""));
+}
+
+/** Whole-text test of a string in which `*` matches any run of characters. */
+function textTest(pattern: string | RegExp): (text: string) => boolean {
+  if (typeof pattern !== "string") {
+    const expression = stateless(pattern);
+    return (text) => expression.test(text);
+  }
+  if (!pattern.includes("*")) {
+    return (text) => text === pattern;
+  }
+  const expression = new RegExp(
+    `^${pattern
+      .split("*")
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join(".*")}$`,
+    "s",
+  );
+  return (text) => expression.test(text);
+}
+
+function tokenText(token: InjectionToken): string | undefined {
+  if (typeof token === "string") {
+    return token;
+  }
+  if (typeof token === "symbol") {
+    return token.description;
+  }
+  return typeof token === "function" ? token.name : undefined;
+}
+
+/** Guaranteed names of an annotation; a Nest decorator has none. */
+function annotationNames(annotation: AnnotationLike<any>): string[] {
+  if (isAnnotation(annotation)) {
+    return [annotation.annotationName];
+  }
+  if (
+    typeof annotation !== "function" ||
+    (annotation as { KEY?: unknown }).KEY === undefined
+  ) {
+    throw new AopConfigurationError(
+      "Expected an annotation created by createAnnotation() or Reflector.createDecorator()",
+    );
+  }
+  return [];
+}
+
+function matchesArgument(matcher: Fn, value: unknown): boolean {
+  return (
+    value instanceof matcher || typeof value === PRIMITIVE_TYPES.get(matcher)
+  );
+}
+
+function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
+  const restIndex = matchers.indexOf(REST);
+  if (restIndex !== -1 && restIndex !== matchers.length - 1) {
+    throw new AopConfigurationError(
+      "P.REST is valid only as the last matcher of P.args()",
+    );
+  }
+  const variadic = restIndex !== -1;
+  const positional = variadic ? matchers.slice(0, -1) : matchers;
+  for (const matcher of positional) {
+    if (matcher !== ANY && typeof matcher !== "function") {
+      throw new AopConfigurationError(
+        "P.args() accepts classes, P.ANY and P.REST",
+      );
+    }
+  }
+  return {
+    isRuntime: true,
+    matches: () => true,
+    matchesRuntime: (_method, args) => {
+      if (
+        variadic
+          ? args.length < positional.length
+          : args.length !== positional.length
+      ) {
+        return false;
+      }
+      return positional.every(
+        (matcher, index) =>
+          matcher === ANY || matchesArgument(matcher as Fn, args[index]),
+      );
+    },
+  };
+}
+
+function annotated(annotation: AnnotationLike<any>): Pointcut<any> {
+  return createPointcut({
+    methodMatcher: staticMatcher((method) =>
+      hasMethodAnnotation(annotation, method),
+    ),
+    guarantees: annotationNames(annotation),
+  });
+}
+
+function withinAnnotated(annotation: AnnotationLike<any>): Pointcut<any> {
+  return createPointcut({
+    // The declaring type is the target type or one of its superclasses, and
+    // class annotations are inherited.
+    classFilter: {
+      matches: (classRef) => hasClassAnnotation(annotation, classRef.type),
+    },
+    methodMatcher: staticMatcher((method) =>
+      hasClassAnnotation(annotation, method.declaringType),
+    ),
+    guarantees: annotationNames(annotation),
+  });
+}
+
+function targetAnnotated(annotation: AnnotationLike<any>): Pointcut<any> {
+  return createPointcut({
+    classFilter: {
+      matches: (classRef) => hasClassAnnotation(annotation, classRef.type),
+    },
+    guarantees: annotationNames(annotation),
+  });
 }
 
 /** Pointcut designators. */
 export const P: PointcutFactory = {
-  method: notImplemented,
-  within: notImplemented,
-  target: notImplemented,
-  name: notImplemented,
-  kind: notImplemented,
-  annotated: notImplemented,
-  withinAnnotated: notImplemented,
-  targetAnnotated: notImplemented,
-  args: notImplemented,
-  bean: notImplemented,
-  inModule: notImplemented,
-  metadata: notImplemented,
-  matching: notImplemented,
-  all: notImplemented,
-  any: notImplemented,
+  method: (type, name) =>
+    createPointcut({
+      classFilter: typeFilter(type),
+      methodMatcher: staticMatcher(
+        (method) => method.kind === "method" && method.name === name,
+      ),
+      includesExplicitly: () => true,
+    }),
+
+  within: (...types) =>
+    createPointcut({
+      classFilter: {
+        matches: (classRef) =>
+          types.some((type) => isTypeOrSubclass(classRef.type, type)),
+      },
+      methodMatcher: staticMatcher((method) =>
+        types.includes(method.declaringType),
+      ),
+    }),
+
+  target: (type) => createPointcut({ classFilter: typeFilter(type) }),
+
+  name: (pattern) => {
+    const test = textTest(pattern);
+    return createPointcut({
+      methodMatcher: staticMatcher(
+        (method) => typeof method.name === "string" && test(method.name),
+      ),
+    });
+  },
+
+  kind: (kind) =>
+    createPointcut({
+      methodMatcher: staticMatcher((method) => method.kind === kind),
+      includesExplicitly: () => kind !== "method",
+    }),
+
+  annotated,
+  withinAnnotated,
+  targetAnnotated,
+
+  args: (...matchers) =>
+    createPointcut({ methodMatcher: argsMatcher(matchers) }),
+
+  bean: (token) => {
+    let matchesToken: (candidate: InjectionToken) => boolean;
+    if (typeof token === "function") {
+      matchesToken = (candidate) => candidate === token;
+    } else {
+      const test =
+        typeof token === "string"
+          ? (text: string) => text === token
+          : textTest(token);
+      matchesToken = (candidate) => {
+        const text = tokenText(candidate);
+        return text !== undefined && test(text);
+      };
+    }
+    return createPointcut({
+      classFilter: {
+        matches: (classRef) =>
+          classRef.beans.some((bean) => matchesToken(bean.token)),
+      },
+    });
+  },
+
+  inModule: (module, options = {}) =>
+    createPointcut({
+      classFilter: {
+        matches: (classRef) =>
+          classRef.beans.some(
+            (bean) =>
+              bean.module === module ||
+              (options.transitive === true &&
+                classRef.reachesModule(module, bean.module)),
+          ),
+      },
+    }),
+
+  metadata: (key, predicate) =>
+    createPointcut({
+      methodMatcher: staticMatcher((method) => {
+        const prototype = method.declaringType.prototype;
+        let value: unknown;
+        if (Reflect.hasOwnMetadata(key, method.original)) {
+          value = Reflect.getOwnMetadata(key, method.original);
+        } else if (Reflect.hasOwnMetadata(key, prototype, method.name)) {
+          value = Reflect.getOwnMetadata(key, prototype, method.name);
+        } else {
+          return false;
+        }
+        return predicate === undefined || predicate(value, method);
+      }),
+    }),
+
+  matching: (parts) =>
+    createPointcut({
+      classFilter: parts.classFilter,
+      methodMatcher: parts.methodMatcher,
+    }),
+
+  all: (...pointcuts) =>
+    pointcuts.length === 0
+      ? createPointcut({})
+      : pointcuts.reduce((result, pointcut) => result.and(pointcut)),
+
+  any: (...pointcuts) =>
+    pointcuts.length === 0
+      ? createPointcut({ classFilter: { matches: () => false } })
+      : pointcuts.reduce((result, pointcut) => result.or(pointcut)),
+
   ANY,
   REST,
 };

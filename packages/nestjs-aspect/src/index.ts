@@ -1,4 +1,4 @@
-// Shared: owned by the architect and frozen. The public entry point.
+// The public entry point.
 
 export {
   type AnnotationOptions,
@@ -24,7 +24,10 @@ export {
   AopUsageError,
 } from "./errors";
 export {
+  type AllShapes,
+  type AnyShapes,
   type ArgMatcher,
+  type ArgOf,
   type ArgsOf,
   type MethodKeys,
   P,

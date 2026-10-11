@@ -1,10 +1,21 @@
-// Slice B. Exported signatures are frozen; the bodies are the slice's work.
+// Advice guards, the Promise return value adapter and the two
+// adapter registries.
 
+import { AopConfigurationError } from "./errors";
+import {
+  afterInterceptor,
+  afterReturningInterceptor,
+  afterThrowingInterceptor,
+  aroundInterceptor,
+  beforeInterceptor,
+} from "./interceptor";
 import type {
+  Advice,
   AdviceAdapter,
   AdviceAdapterRegistry,
   AdviceKind,
   AspectAdvice,
+  InterceptorContext,
   MethodInterceptor,
   ReturnValueAdapter,
   ReturnValueAdapterRegistry,
@@ -22,16 +33,40 @@ export const ADVICE_KINDS: readonly AdviceKind[] = [
   "afterThrowing",
 ];
 
+const INTERCEPTOR_FACTORIES: Record<
+  AdviceKind,
+  (advice: AspectAdvice, context: InterceptorContext) => MethodInterceptor
+> = {
+  around: aroundInterceptor,
+  before: beforeInterceptor,
+  after: afterInterceptor,
+  afterReturning: afterReturningInterceptor,
+  afterThrowing: afterThrowingInterceptor,
+};
+
+function isObject(value: unknown): value is Record<PropertyKey, unknown> {
+  return (
+    (typeof value === "object" && value !== null) || typeof value === "function"
+  );
+}
+
 /** True for an object with an `invoke` function. */
 export function isMethodInterceptor(
-  _advice: unknown,
-): _advice is MethodInterceptor {
-  throw new Error("not implemented");
+  advice: unknown,
+): advice is MethodInterceptor {
+  return isObject(advice) && typeof advice.invoke === "function";
 }
 
 /** True for advice compiled from an aspect method. */
-export function isAspectAdvice(_advice: unknown): _advice is AspectAdvice {
-  throw new Error("not implemented");
+export function isAspectAdvice(advice: unknown): advice is AspectAdvice {
+  return (
+    isObject(advice) &&
+    ADVICE_KINDS.includes(advice.kind as AdviceKind) &&
+    typeof advice.aspectType === "function" &&
+    (typeof advice.methodName === "string" ||
+      typeof advice.methodName === "symbol") &&
+    typeof advice.resolveAspect === "function"
+  );
 }
 
 /**
@@ -40,17 +75,32 @@ export function isAspectAdvice(_advice: unknown): _advice is AspectAdvice {
  * with whatever the callback throws.
  */
 export const promiseAdapter: ReturnValueAdapter<PromiseLike<unknown>> = {
-  supports(_value: unknown): _value is PromiseLike<unknown> {
-    throw new Error("not implemented");
+  supports(value: unknown): value is PromiseLike<unknown> {
+    return isObject(value) && typeof value.then === "function";
   },
-  onSuccess() {
-    throw new Error("not implemented");
+  onSuccess(value, cb) {
+    return value.then(async (resolved) => {
+      await cb(resolved);
+      return resolved;
+    });
   },
-  onError() {
-    throw new Error("not implemented");
+  onError(value, cb) {
+    return value.then(undefined, async (error: unknown) => {
+      await cb(error);
+      throw error;
+    });
   },
-  finally() {
-    throw new Error("not implemented");
+  finally(value, cb) {
+    return value.then(
+      async (resolved) => {
+        await cb();
+        return resolved;
+      },
+      async (error: unknown) => {
+        await cb();
+        throw error;
+      },
+    );
   },
 };
 
@@ -59,28 +109,34 @@ export const promiseAdapter: ReturnValueAdapter<PromiseLike<unknown>> = {
  * is `[promiseAdapter]`.
  */
 export function createReturnValueAdapterRegistry(
-  _adapters?: readonly ReturnValueAdapter<any>[],
+  adapters: readonly ReturnValueAdapter<any>[] = [promiseAdapter],
 ): ReturnValueAdapterRegistry {
-  throw new Error("not implemented");
+  const ordered = [...adapters];
+  return {
+    find(value) {
+      return ordered.find((adapter) => adapter.supports(value));
+    },
+  };
 }
 
 /** Passes a `MethodInterceptor` through unchanged. */
 export const methodInterceptorAdapter: AdviceAdapter = {
-  supports() {
-    throw new Error("not implemented");
+  supports(advice) {
+    return isMethodInterceptor(advice);
   },
-  toInterceptor() {
-    throw new Error("not implemented");
+  toInterceptor(advice) {
+    return advice as MethodInterceptor;
   },
 };
 
 /** Converts `AspectAdvice` with the interceptor factory of its kind. */
 export const aspectAdviceAdapter: AdviceAdapter = {
-  supports() {
-    throw new Error("not implemented");
+  supports(advice) {
+    return isAspectAdvice(advice);
   },
-  toInterceptor() {
-    throw new Error("not implemented");
+  toInterceptor(advice, context) {
+    const aspectAdvice = advice as AspectAdvice;
+    return INTERCEPTOR_FACTORIES[aspectAdvice.kind](aspectAdvice, context);
   },
 };
 
@@ -89,7 +145,18 @@ export const aspectAdviceAdapter: AdviceAdapter = {
  * `aspectAdviceAdapter` and `methodInterceptorAdapter`.
  */
 export function createAdviceAdapterRegistry(
-  _adapters?: readonly AdviceAdapter[],
+  adapters: readonly AdviceAdapter[] = [],
 ): AdviceAdapterRegistry {
-  throw new Error("not implemented");
+  const ordered = [...adapters, aspectAdviceAdapter, methodInterceptorAdapter];
+  return {
+    toInterceptor(advice: Advice, context: InterceptorContext) {
+      const adapter = ordered.find((candidate) => candidate.supports(advice));
+      if (!adapter) {
+        throw new AopConfigurationError(
+          "No advice adapter supports the advice: it is neither a MethodInterceptor nor advice compiled from an aspect",
+        );
+      }
+      return adapter.toInterceptor(advice, context);
+    },
+  };
 }
