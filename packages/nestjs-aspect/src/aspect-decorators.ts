@@ -14,6 +14,8 @@ import type {
   Fn,
   JoinPoint,
   Pointcut,
+  PointcutAdvisor,
+  PointcutLike,
   ProceedingJoinPoint,
   Shape,
 } from "./types";
@@ -196,11 +198,29 @@ export function Around<S extends Shape>(
 }
 
 /**
- * Marks a class whose instances implement `PointcutAdvisor` as an advisor and
- * as a Nest provider (`@Injectable()`).
+ * Class the `@Advisor` decorator accepts: a static `pointcut`, and instances
+ * with `advice` and an optional `order`.
  */
-export function Advisor(): ClassDecorator {
+export type AdvisorType = Class<Pick<PointcutAdvisor, "advice" | "order">> & {
+  readonly pointcut: PointcutLike;
+};
+
+/**
+ * Marks a class as an advisor and as a Nest provider (`@Injectable()`).
+ *
+ * The pointcut is the static member `pointcut`: the weaver matches it while
+ * the container instantiates providers, before an instance of the advisor
+ * exists. The instance supplies `advice` and `order`.
+ *
+ * Throws `AspectConfigurationError` when the class has no static pointcut.
+ */
+export function Advisor(): <T extends AdvisorType>(target: T) => void {
   return (target) => {
+    if (!isPointcutLike((target as Partial<AdvisorType>).pointcut)) {
+      throw new AspectConfigurationError(
+        `@Advisor requires ${target.name} to declare its pointcut as the static member "pointcut"`,
+      );
+    }
     Injectable()(target);
     Reflect.defineMetadata(ADVISOR_METADATA, true, target);
   };
@@ -239,4 +259,9 @@ export function getAdviceMetadata(type: Class): readonly AdviceMetadata[] {
 /** True when the class itself is decorated with `@Advisor`. */
 export function isAdvisor(type: Class): boolean {
   return Reflect.hasOwnMetadata(ADVISOR_METADATA, type);
+}
+
+/** The static pointcut of an `@Advisor` class. */
+export function getAdvisorPointcut(type: Class): PointcutLike {
+  return (type as AdvisorType).pointcut;
 }

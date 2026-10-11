@@ -6,6 +6,11 @@ export {
   isAnnotation,
 } from "./annotation";
 export { promiseAdapter } from "./advice";
+export { AspectModule } from "./aspect.module";
+export type {
+  AspectModuleOptions,
+  AspectReportLevel,
+} from "./aspect.module-definition";
 export {
   type AdviceDecorator,
   type AdviceResult,
@@ -13,6 +18,7 @@ export {
   AfterReturning,
   AfterThrowing,
   Advisor,
+  type AdvisorType,
   Around,
   Aspect,
   type AsyncGuard,

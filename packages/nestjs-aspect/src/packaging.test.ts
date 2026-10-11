@@ -61,6 +61,58 @@ const scenario = `
   }));
 `;
 
+/**
+ * A Nest application woven by \`AspectModule\` of \`kit\`. The aspect is
+ * declared with the decorators of \`decorators\`, which is another copy of the
+ * package in the cross-format test.
+ */
+const application = `
+  const describe = (type, name) => Object.getOwnPropertyDescriptor(type.prototype, name);
+  class Greeter {
+    greet(name) { return this.format(name); }
+    format(name) { return "hello " + name; }
+  }
+  common.Injectable()(Greeter);
+  async function bootstrap(kit, decorators, label, log) {
+    class TraceAspect {
+      before(jp) { log.push(label + " " + jp.toString()); }
+    }
+    decorators.Before(decorators.P.within(Greeter))(TraceAspect.prototype, "before", describe(TraceAspect, "before"));
+    decorators.Aspect()(TraceAspect);
+    class AppModule {}
+    common.Module({
+      imports: [kit.AspectModule.forRoot({ report: false })],
+      providers: [Greeter, TraceAspect],
+    })(AppModule);
+    return core.NestFactory.createApplicationContext(AppModule, { logger: false });
+  }
+`;
+
+const applications = {
+  esm: `import * as common from "@nestjs/common";
+import * as core from "@nestjs/core";
+import * as kit from "${packageName}";
+${application}
+const log = [];
+const app = await bootstrap(kit, kit, "esm", log);
+const greeting = app.get(Greeter).greet("a");
+await app.close();
+app.get(Greeter).greet("b");
+console.log(JSON.stringify({ greeting, log }));`,
+  cjs: `const common = require("@nestjs/common");
+const core = require("@nestjs/core");
+const kit = require("${packageName}");
+${application}
+(async () => {
+  const log = [];
+  const app = await bootstrap(kit, kit, "cjs", log);
+  const greeting = app.get(Greeter).greet("a");
+  await app.close();
+  app.get(Greeter).greet("b");
+  console.log(JSON.stringify({ greeting, log }));
+})();`,
+};
+
 const consumers = {
   esm: `import * as kit from "${packageName}";
 ${scenario}`,
@@ -70,6 +122,8 @@ ${scenario}`,
 
 const declarations = `import {
   Advisor,
+  AspectModule,
+  type AspectModuleOptions,
   Around,
   Aspect,
   Before,
@@ -128,15 +182,34 @@ class ResilienceAspect {
 }
 
 @Advisor()
-class TracingAdvisor implements PointcutAdvisor {
-  readonly pointcut = retryable.or(rename);
+class TracingAdvisor {
+  static readonly pointcut = retryable.or(rename);
+
   readonly advice: MethodInterceptor = {
     invoke: (invocation) => invocation.proceed(),
   };
 }
 
+// @ts-expect-error The pointcut of an advisor is a static member.
+@Advisor()
+class InstanceAdvisor implements PointcutAdvisor {
+  readonly pointcut = retryable;
+  readonly advice: MethodInterceptor = {
+    invoke: (invocation) => invocation.proceed(),
+  };
+}
+
+const options: AspectModuleOptions = { report: false, exclude: [UserService] };
+const modules: ReturnType<typeof AspectModule.forRoot>[] = [
+  AspectModule.forRoot(),
+  AspectModule.forRoot(options),
+  AspectModule.forRootAsync({ useFactory: async () => options }),
+];
+
 void ResilienceAspect;
 void TracingAdvisor;
+void InstanceAdvisor;
+void modules;
 `;
 
 describe("built nestjs-aspect package", () => {
@@ -161,6 +234,7 @@ describe("built nestjs-aspect package", () => {
           "Around",
           "Aspect",
           "AspectConfigurationError",
+          "AspectModule",
           "AspectNotReadyError",
           "AspectUsageError",
           "Before",
@@ -177,6 +251,62 @@ describe("built nestjs-aspect package", () => {
       });
     },
   );
+
+  it.each(["esm", "cjs"] as const)(
+    "weaves a Nest application with the actual %s artifact",
+    (format) => {
+      const output = execFileSync(
+        process.execPath,
+        [
+          ...(format === "esm" ? ["--input-type=module"] : []),
+          "--eval",
+          applications[format],
+        ],
+        { cwd: root, encoding: "utf8" },
+      );
+      expect(JSON.parse(output)).toEqual({
+        greeting: "hello a",
+        log: [`${format} Greeter.greet("a")`, `${format} Greeter.format("a")`],
+      });
+    },
+  );
+
+  it("keeps two applications apart when one uses each format on the same class", () => {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { createRequire } from "node:module";
+import * as common from "@nestjs/common";
+import * as core from "@nestjs/core";
+import * as esm from "${packageName}";
+const cjs = createRequire(import.meta.url)("${packageName}");
+${application}
+const log = [];
+// The aspect of each application is declared with the other format's decorators.
+const first = await bootstrap(cjs, esm, "cjs", log);
+const stub = Greeter.prototype.greet;
+const second = await bootstrap(esm, cjs, "esm", log);
+first.get(Greeter).format("a");
+second.get(Greeter).format("b");
+await first.close();
+first.get(Greeter).format("c");
+second.get(Greeter).format("d");
+await second.close();
+console.log(JSON.stringify({ sameStub: Greeter.prototype.greet === stub, log }));`,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(JSON.parse(output)).toEqual({
+      sameStub: true,
+      log: [
+        'cjs Greeter.format("a")',
+        'esm Greeter.format("b")',
+        'esm Greeter.format("d")',
+      ],
+    });
+  });
 
   it("recognizes the errors of one format as instances of the other format's classes", () => {
     const output = execFileSync(

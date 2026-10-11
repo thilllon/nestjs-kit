@@ -11,6 +11,7 @@ import {
   Before,
   getAdviceMetadata,
   getAspectMetadata,
+  getAdvisorPointcut,
   isAdvisor,
   isAspect,
 } from "./aspect-decorators";
@@ -218,8 +219,9 @@ describe("@Advisor", () => {
     class Transactions {}
 
     @Advisor()
-    class TransactionAdvisor implements PointcutAdvisor {
-      readonly pointcut = anything;
+    class TransactionAdvisor {
+      static readonly pointcut = anything;
+
       readonly advice: MethodInterceptor = {
         invoke: (invocation) => invocation.proceed(),
       };
@@ -232,10 +234,33 @@ describe("@Advisor", () => {
     }).compile();
 
     expect(isAdvisor(TransactionAdvisor)).toBe(true);
+    expect(getAdvisorPointcut(TransactionAdvisor)).toBe(anything);
     expect(isAspect(TransactionAdvisor)).toBe(false);
     expect(isAdvisor(Transactions)).toBe(false);
     expect(moduleRef.get(TransactionAdvisor).transactions).toBe(
       moduleRef.get(Transactions),
     );
+  });
+
+  it("rejects a class whose pointcut is not a static member", () => {
+    expect(() => {
+      // @ts-expect-error The pointcut must be a static member.
+      @Advisor()
+      class InstancePointcut implements PointcutAdvisor {
+        readonly pointcut = anything;
+        readonly advice: MethodInterceptor = {
+          invoke: (invocation) => invocation.proceed(),
+        };
+      }
+      return InstancePointcut;
+    }).toThrow(AspectConfigurationError);
+    expect(() => {
+      // @ts-expect-error Instances must supply advice.
+      @Advisor()
+      class NoAdvice {
+        static readonly pointcut = anything;
+      }
+      return NoAdvice;
+    }).not.toThrow();
   });
 });
