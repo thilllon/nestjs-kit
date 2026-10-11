@@ -297,6 +297,36 @@ describe("bootstrap validation", () => {
     ]);
   });
 
+  it("reports an invalid advisor instance as a validation problem", async () => {
+    @Injectable()
+    class Service {
+      run() {}
+    }
+
+    @Advisor()
+    class Unordered {
+      static readonly pointcut = P.method(Service, "run");
+
+      readonly order = "first" as never;
+
+      readonly advice: MethodInterceptor = {
+        invoke: (invocation) => invocation.proceed(),
+      };
+    }
+    const providers = [Service, Unordered];
+
+    const error = await initError({ providers });
+    expect(error).toBeInstanceOf(AspectConfigurationError);
+    expect(String(error)).toContain(
+      "The advisor Unordered has an order that is not a number",
+    );
+
+    const { logger } = await initWoven({ providers }, { strict: false });
+    expect(logger.messages("warn")).toEqual([
+      "The advisor Unordered has an order that is not a number",
+    ]);
+  });
+
   it("rejects options that depend on a request-scoped provider", async () => {
     @Injectable({ scope: Scope.REQUEST })
     class Tenant {}

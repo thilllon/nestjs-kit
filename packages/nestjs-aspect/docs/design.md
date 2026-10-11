@@ -702,6 +702,7 @@ as one `AspectConfigurationError`; with `strict: false` they are logged as warni
 - `requiresAdvice` annotation on a member of an aspect or advisor → error: they are never advised.
 - Aspect or advisor that is the instance of a factory, value or alias provider → error (§3.3).
 - `forRootAsync` options that depend on a request-scoped or transient provider → error (§4.2).
+- `@Advisor` instance without `advice` or with an `order` that is no number → error.
 - Request-scoped or transient aspect or advisor → error. Without strict mode its advice raises
   `AspectNotReadyError` on every call, because no singleton instance exists.
 - Pointcut that matches nothing → warning (Spring pitfall: typos fail silently).

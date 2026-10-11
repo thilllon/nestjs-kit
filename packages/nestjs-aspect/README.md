@@ -234,20 +234,21 @@ The entry point also exports the extension interfaces `AdviceAdapter` and `Retur
 
 `AspectModule` validates the configuration in its `onModuleInit` hook and logs through the Nest `Logger` with the context `AspectModule`.
 
-| Finding                                                                  | Result                          |
-| ------------------------------------------------------------------------ | ------------------------------- |
-| An aspect or advisor that is not a singleton                             | Error                           |
-| An aspect or advisor supplied by a factory, value or alias provider      | Error                           |
-| Advice decorators on a class without `@Aspect`                           | Error                           |
-| A `requiresAdvice` annotation on a member that no advisor handles        | Error that lists the members    |
-| A `requiresAdvice` annotation on a member of an aspect or advisor        | Error that lists the members    |
-| `forRootAsync` options that depend on a request-scoped provider          | Error                           |
-| A pointcut that matches no member of the application                     | Warning                         |
-| Different aspects with the same order, or without one, on one join point | Warning                         |
-| An aspect or advisor class registered in several modules                 | Warning                         |
-| A global module with a shutdown hook imported before `AspectModule`      | Warning                         |
-| `AspectModule` registered more than once, whatever the options           | Error while the module compiles |
-| An aspect that extends another `@Aspect` class                           | Error while the module compiles |
+| Finding                                                                   | Result                          |
+| ------------------------------------------------------------------------- | ------------------------------- |
+| An aspect or advisor that is not a singleton                              | Error                           |
+| An aspect or advisor supplied by a factory, value or alias provider       | Error                           |
+| An advisor instance without `advice` or with an `order` that is no number | Error                           |
+| Advice decorators on a class without `@Aspect`                            | Error                           |
+| A `requiresAdvice` annotation on a member that no advisor handles         | Error that lists the members    |
+| A `requiresAdvice` annotation on a member of an aspect or advisor         | Error that lists the members    |
+| `forRootAsync` options that depend on a request-scoped provider           | Error                           |
+| A pointcut that matches no member of the application                      | Warning                         |
+| Different aspects with the same order, or without one, on one join point  | Warning                         |
+| An aspect or advisor class registered in several modules                  | Warning                         |
+| A global module with a shutdown hook imported before `AspectModule`       | Warning                         |
+| `AspectModule` registered more than once, whatever the options            | Error while the module compiles |
+| An aspect that extends another `@Aspect` class                            | Error while the module compiles |
 
 An error fails `init()` with one `AspectConfigurationError`; with `strict: false` it is logged as a warning. The errors raised while the module compiles do not depend on `strict`. The weaving report follows, one line per join point and advisor in chain order:
 

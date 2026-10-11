@@ -358,6 +358,7 @@ export class AspectWeaver {
       const problems = [
         ...this.scopeProblems(),
         ...this.unwovenAdvisorProblems(),
+        ...this.invalidAdvisorProblems(),
         ...this.misplacedAdviceProblems(),
         ...this.requiredAdviceProblems(),
       ];
@@ -856,12 +857,39 @@ export class AspectWeaver {
       try {
         descriptors.push(advisor.describe(method));
       } catch (error) {
-        if (!(error instanceof AspectNotReadyError)) {
+        if (
+          !(error instanceof AspectNotReadyError) &&
+          !(error instanceof AspectConfigurationError)
+        ) {
           throw error;
         }
       }
     }
     return sortAdvisors(descriptors);
+  }
+
+  /**
+   * `@Advisor` instances without advice or with an order that is no number,
+   * among the advisors that matched a member.
+   */
+  private invalidAdvisorProblems(): string[] {
+    const problems = new Set<string>();
+    for (const type of this.context.wovenTypes()) {
+      for (const { method, advisors } of this.context.membersOf(type)) {
+        for (const advisor of advisors) {
+          try {
+            advisor.describe(method);
+          } catch (error) {
+            if (error instanceof AspectConfigurationError) {
+              problems.add(error.message);
+            } else if (!(error instanceof AspectNotReadyError)) {
+              throw error;
+            }
+          }
+        }
+      }
+    }
+    return [...problems];
   }
 
   /** Different aspects or advisors with one order on one join point. */
