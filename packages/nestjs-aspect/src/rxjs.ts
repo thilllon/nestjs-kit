@@ -65,7 +65,7 @@ export const observableAdapter: ReturnValueAdapter<Observable<unknown>> = {
   supports(value: unknown): value is Observable<unknown> {
     return isObservable(value);
   },
-  onSuccess(value, cb) {
+  onSuccess(value, callback) {
     return new Observable((subscriber) => {
       let last: unknown;
       return value.subscribe({
@@ -79,14 +79,14 @@ export const observableAdapter: ReturnValueAdapter<Observable<unknown>> = {
         complete() {
           notifyAfter(
             subscriber,
-            () => cb(last),
+            () => callback(last),
             () => subscriber.complete(),
           );
         },
       });
     });
   },
-  onError(value, cb) {
+  onError(value, callback) {
     return new Observable((subscriber) =>
       value.subscribe({
         next(emitted) {
@@ -95,7 +95,7 @@ export const observableAdapter: ReturnValueAdapter<Observable<unknown>> = {
         error(error: unknown) {
           notifyAfter(
             subscriber,
-            () => cb(error),
+            () => callback(error),
             () => subscriber.error(error),
           );
         },
@@ -105,12 +105,12 @@ export const observableAdapter: ReturnValueAdapter<Observable<unknown>> = {
       }),
     );
   },
-  finally(value, cb) {
+  finally(value, callback) {
     return new Observable((subscriber) => {
       let ran = false;
       const once = () => {
         ran = true;
-        return cb();
+        return callback();
       };
       const subscription = value.subscribe({
         next(emitted) {

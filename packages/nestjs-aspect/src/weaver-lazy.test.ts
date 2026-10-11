@@ -41,8 +41,8 @@ describe("lazy-loaded modules", () => {
     @Aspect()
     class Auditing {
       @Before(pointcut)
-      record(jp: JoinPoint<AnyShape>) {
-        log.push(`audit ${String(jp.signature.name)}`);
+      record(joinPoint: JoinPoint<AnyShape>) {
+        log.push(`audit ${String(joinPoint.signature.name)}`);
       }
     }
     const { moduleRef, logger } = await initWoven({ providers: [Auditing] });

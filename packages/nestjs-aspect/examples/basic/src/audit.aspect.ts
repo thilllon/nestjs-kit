@@ -3,7 +3,7 @@ import {
   AfterThrowing,
   Aspect,
   Before,
-  type JP,
+  type JoinPointOf,
   P,
 } from "nestjs-aspect";
 import { AuditLog } from "./audit-log.js";
@@ -12,8 +12,8 @@ import { OrdersModule } from "./orders.module.js";
 /** Every method of the providers and controllers `OrdersModule` declares. */
 const orders = P.inModule(OrdersModule);
 
-function memberOf(jp: JP<typeof orders>): string {
-  const { targetType, name } = jp.signature;
+function memberOf(joinPoint: JoinPointOf<typeof orders>): string {
+  const { targetType, name } = joinPoint.signature;
   return `${targetType.name}.${String(name)}`;
 }
 
@@ -22,20 +22,20 @@ export class AuditAspect {
   constructor(private readonly log: AuditLog) {}
 
   @Before(orders)
-  recordCall(jp: JP<typeof orders>): void {
-    this.log.record({ event: "call", member: memberOf(jp) });
+  recordCall(joinPoint: JoinPointOf<typeof orders>): void {
+    this.log.record({ event: "call", member: memberOf(joinPoint) });
   }
 
   @AfterReturning(orders)
-  recordReturn(jp: JP<typeof orders>): void {
-    this.log.record({ event: "return", member: memberOf(jp) });
+  recordReturn(joinPoint: JoinPointOf<typeof orders>): void {
+    this.log.record({ event: "return", member: memberOf(joinPoint) });
   }
 
   @AfterThrowing(orders)
-  recordError(jp: JP<typeof orders>, error: unknown): void {
+  recordError(joinPoint: JoinPointOf<typeof orders>, error: unknown): void {
     this.log.record({
       event: "error",
-      member: memberOf(jp),
+      member: memberOf(joinPoint),
       error: error instanceof Error ? error.constructor.name : typeof error,
     });
   }

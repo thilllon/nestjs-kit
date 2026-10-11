@@ -11,7 +11,7 @@ import type {
   AspectMetadata,
   AspectOptions,
   Class,
-  Fn,
+  AnyFunction,
   JoinPoint,
   Pointcut,
   PointcutAdvisor,
@@ -52,7 +52,7 @@ export const ADVISOR_METADATA: unique symbol = Symbol.for(
  * `subscribe` method, such as an Observable, which a `ReturnValueAdapter`
  * follows.
  */
-type Deferred = PromiseLike<any> | { subscribe: Fn };
+type Deferred = PromiseLike<any> | { subscribe: AnyFunction };
 
 /**
  * Return type required of before, after, afterReturning and afterThrowing
@@ -77,7 +77,7 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
  * constraint cannot reject asynchronous advice. This intersection checks the
  * return type of the advice method itself.
  */
-export type AsyncGuard<S extends Shape, T extends Fn> =
+export type AsyncGuard<S extends Shape, T extends AnyFunction> =
   AdviceResult<S> extends void | PromiseLike<void>
     ? // biome-ignore lint/suspicious/noConfusingVoidType: void is compared with the advice return type
       [void] extends [AdviceResult<S>]
@@ -96,9 +96,13 @@ export type AsyncGuard<S extends Shape, T extends Fn> =
  * as `observableAdapter` passes the last value an Observable emits, so the
  * advice declares the type itself.
  */
-export type AdviceValue<R> = R extends { subscribe: Fn } ? any : Awaited<R>;
+export type AdviceValue<R> = R extends { subscribe: AnyFunction }
+  ? any
+  : Awaited<R>;
 
-export type AdviceDecorator<S extends Shape, F extends Fn> = <T extends F>(
+export type AdviceDecorator<S extends Shape, F extends AnyFunction> = <
+  T extends F,
+>(
   target: object,
   key: string | symbol,
   desc: TypedPropertyDescriptor<T> & AsyncGuard<S, T>,
@@ -174,26 +178,29 @@ export function Aspect(options: AspectOptions = {}): ClassDecorator {
 
 /** Runs before the join point. An error prevents the join point from running. */
 export function Before<S extends Shape>(
-  pc: Pointcut<S>,
-): AdviceDecorator<S, (jp: JoinPoint<S>) => AdviceResult<S>> {
-  return adviceDecorator("before", pc);
+  pointcut: Pointcut<S>,
+): AdviceDecorator<S, (joinPoint: JoinPoint<S>) => AdviceResult<S>> {
+  return adviceDecorator("before", pointcut);
 }
 
 /** Runs after the join point, whatever its outcome (finally). */
 export function After<S extends Shape>(
-  pc: Pointcut<S>,
-): AdviceDecorator<S, (jp: JoinPoint<S>) => AdviceResult<S>> {
-  return adviceDecorator("after", pc);
+  pointcut: Pointcut<S>,
+): AdviceDecorator<S, (joinPoint: JoinPoint<S>) => AdviceResult<S>> {
+  return adviceDecorator("after", pointcut);
 }
 
 /** Runs after a normal completion with the settled result; cannot replace it. */
 export function AfterReturning<S extends Shape>(
-  pc: Pointcut<S>,
+  pointcut: Pointcut<S>,
 ): AdviceDecorator<
   S,
-  (jp: JoinPoint<S>, result: AdviceValue<S["returns"]>) => AdviceResult<S>
+  (
+    joinPoint: JoinPoint<S>,
+    result: AdviceValue<S["returns"]>,
+  ) => AdviceResult<S>
 > {
-  return adviceDecorator("afterReturning", pc);
+  return adviceDecorator("afterReturning", pointcut);
 }
 
 /**
@@ -201,17 +208,20 @@ export function AfterReturning<S extends Shape>(
  * `instanceof` that class.
  */
 export function AfterThrowing<S extends Shape, E = unknown>(
-  pc: Pointcut<S>,
+  pointcut: Pointcut<S>,
   options?: { throwing: Class<E> },
-): AdviceDecorator<S, (jp: JoinPoint<S>, error: E) => AdviceResult<S>> {
-  return adviceDecorator("afterThrowing", pc, options?.throwing);
+): AdviceDecorator<S, (joinPoint: JoinPoint<S>, error: E) => AdviceResult<S>> {
+  return adviceDecorator("afterThrowing", pointcut, options?.throwing);
 }
 
 /** Surrounds the join point; the return value becomes the caller's result. */
 export function Around<S extends Shape>(
-  pc: Pointcut<S>,
-): AdviceDecorator<AnyShape, (jp: ProceedingJoinPoint<S>) => S["returns"]> {
-  return adviceDecorator("around", pc);
+  pointcut: Pointcut<S>,
+): AdviceDecorator<
+  AnyShape,
+  (joinPoint: ProceedingJoinPoint<S>) => S["returns"]
+> {
+  return adviceDecorator("around", pointcut);
 }
 
 /**

@@ -2,7 +2,7 @@
 // application an object belongs to.
 
 import { AspectConfigurationError, AspectUsageError } from "./errors";
-import type { Class, Fn, JoinPointKind } from "./types";
+import type { Class, AnyFunction, JoinPointKind } from "./types";
 import { constructorChain, isObject } from "./util";
 
 /**
@@ -45,7 +45,7 @@ export interface DispatchContext {
     kind: JoinPointKind,
     target: object,
     args: readonly unknown[],
-    original: Fn,
+    original: AnyFunction,
   ): unknown;
   /**
    * The delegate that implements the introduced interface `token` for
@@ -93,7 +93,7 @@ export interface StubRecord {
   /** The class on whose prototype the stub is installed. */
   readonly owner: Class;
   /** The function the stub replaced. */
-  readonly original: Fn;
+  readonly original: AnyFunction;
   /**
    * True for the stub of a member that only an introduction adds: `original`
    * then is no member of the class, it raises `AspectUsageError`.
@@ -127,7 +127,7 @@ export interface WeavingRegistry {
    * The dispatcher stubs the package created. A function is a stub because
    * it is a key of this map, never because of a property it carries.
    */
-  readonly stubs: WeakMap<Fn, StubRecord>;
+  readonly stubs: WeakMap<AnyFunction, StubRecord>;
   /**
    * `generation` grows whenever the classes or instances of an application
    * change: a context examines a class, completes its weaving or closes.
@@ -201,13 +201,15 @@ export function weavingRegistry(host: object = globalThis): WeavingRegistry {
 const { attributions, types, containers, stubs, epoch } = weavingRegistry();
 
 /** Records `stub` as a dispatcher stub of the package. */
-export function registerStub(stub: Fn, record: StubRecord): void {
+export function registerStub(stub: AnyFunction, record: StubRecord): void {
   stubs.set(stub, record);
 }
 
 /** The record of a dispatcher stub; `undefined` for any other value. */
 export function stubRecord(value: unknown): StubRecord | undefined {
-  return typeof value === "function" ? stubs.get(value as Fn) : undefined;
+  return typeof value === "function"
+    ? stubs.get(value as AnyFunction)
+    : undefined;
 }
 
 function isLive(

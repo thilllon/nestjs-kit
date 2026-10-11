@@ -74,11 +74,11 @@ function tracingAspect(label: string, order?: number): object {
     }
 
     @Around(targets)
-    around(jp: ProceedingJoinPoint<AnyShape>): unknown {
+    around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
       log.push(`${label} around in`);
       const done = () => log.push(`${label} around out`);
       try {
-        const result = jp.proceed();
+        const result = joinPoint.proceed();
         if (result instanceof Promise) {
           return result.finally(done);
         }
@@ -317,8 +317,8 @@ describe("runtime matchers", () => {
     @Aspect()
     class Trace {
       @Around(targets)
-      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        return jp.proceedWith("replaced");
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        return joinPoint.proceedWith("replaced");
       }
 
       @Before(longValues)
@@ -339,16 +339,16 @@ describe("arguments", () => {
     @Aspect()
     class Retry {
       @Around(targets)
-      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        const results = [jp.proceed(), jp.proceed()];
-        seen.push(jp.args[0]);
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        const results = [joinPoint.proceed(), joinPoint.proceed()];
+        seen.push(joinPoint.args[0]);
         return results;
       }
 
       @Before(targets)
-      before(jp: JoinPoint<AnyShape>): void {
+      before(joinPoint: JoinPoint<AnyShape>): void {
         expect(() => {
-          (jp.args as unknown[])[0] = "mutated";
+          (joinPoint.args as unknown[])[0] = "mutated";
         }).toThrow(TypeError);
       }
     }

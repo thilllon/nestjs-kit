@@ -45,7 +45,7 @@ import {
   AspectModule,
   Before,
   createAnnotation,
-  type JP,
+  type JoinPointOf,
   P,
 } from "nestjs-aspect";
 
@@ -63,18 +63,24 @@ export class AuditAspect {
   constructor(private readonly trail: AuditTrail) {}
 
   @Before(audited)
-  started(jp: JP<typeof audited>): void {
-    this.trail.entries.push(`${jp.annotation(Audited)}: ${jp.toString()}`);
+  started(joinPoint: JoinPointOf<typeof audited>): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)}: ${joinPoint.toString()}`,
+    );
   }
 
   @AfterReturning(audited)
-  returned(jp: JP<typeof audited>, result: unknown): void {
-    this.trail.entries.push(`${jp.annotation(Audited)} returned ${result}`);
+  returned(joinPoint: JoinPointOf<typeof audited>, result: unknown): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)} returned ${result}`,
+    );
   }
 
   @AfterThrowing(audited)
-  failed(jp: JP<typeof audited>, error: unknown): void {
-    this.trail.entries.push(`${jp.annotation(Audited)} failed: ${error}`);
+  failed(joinPoint: JoinPointOf<typeof audited>, error: unknown): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)} failed: ${error}`,
+    );
   }
 }
 
@@ -247,7 +253,7 @@ export class BillingModule {}
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses. An annotation without a method contract also applies to accessors.
 - **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice. The same holds after the application has closed or has failed to initialize: on an instance its container created, the call of a member that requires advice raises `AspectConfigurationError`.
 - `isAnnotation(value)` tells an annotation from other functions.
-- Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `jp.findAnnotation`.
+- Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `joinPoint.findAnnotation`.
 
 ## Pointcuts
 
@@ -263,7 +269,7 @@ export class BillingModule {}
 | `P.annotated(A)`                             | `@annotation(A)`              | Members that carry `A`. Carries the method contract of `A` and guarantees `A`.                                  |
 | `P.withinAnnotated(A)`                       | `@within(A)`                  | Members declared on a class that carries `A`.                                                                   |
 | `P.targetAnnotated(A)`                       | `@target(A)`                  | Members of a class that carries `A`.                                                                            |
-| `P.args(Account, P.ANY, P.REST)`             | `args(Account, *, ..)`        | Calls by their arguments, checked on every call. Types `jp.args`.                                               |
+| `P.args(Account, P.ANY, P.REST)`             | `args(Account, *, ..)`        | Calls by their arguments, checked on every call. Types `joinPoint.args`.                                        |
 | `P.bean("token*" \| /Service$/ \| Type)`     | `bean(name*)`                 | Classes registered under a matching provider token.                                                             |
 | `P.inModule(Module, { transitive })`         | `within(package..*)`          | Providers and controllers a Nest module declares; with `transitive`, also those of the modules it imports.      |
 | `P.metadata(key, predicate?)`                | Attribute-driven pointcut     | Members with Reflect metadata `key`, such as metadata stored by `SetMetadata`.                                  |
@@ -283,7 +289,7 @@ export const queries = inBilling
 export const deposits = P.within(AccountService).and(P.args(Account, Number));
 ```
 
-- **Types.** `charge` carries the signature of `PaymentGateway.charge`, `retryable` the method contract and the value type of `Retryable`, and `deposits` types `jp.args` as `[Account, number]`. `and` guarantees the annotations of both sides, `or` those common to both, `not` none. Broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
+- **Types.** `charge` carries the signature of `PaymentGateway.charge`, `retryable` the method contract and the value type of `Retryable`, and `deposits` types `joinPoint.args` as `[Account, number]`. `and` guarantees the annotations of both sides, `or` those common to both, `not` none. Broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
 - **Default join points.** Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors. A constructor is never a join point.
 - **Static and dynamic matching.** Every designator except `P.args` is evaluated once per class member when the class is woven. `P.args` is evaluated on every call of a member the rest of the pointcut matches; combine it with a static designator. In `P.args`, a class matches an argument that is `instanceof` it, `String`, `Number`, `Boolean`, `BigInt` and `Symbol` match their primitives, `P.ANY` matches one argument and `P.REST` the remaining ones.
 - **`P.bean`** matches a class when one of its registrations has a matching token, `useClass` tokens included. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched when the application initializes, and the instance of a request-scoped or transient `useFactory` provider when the container first resolves one. `P.bean` selects the class: its advice then applies to every instance of that class.
@@ -291,30 +297,30 @@ export const deposits = P.within(AccountService).and(P.args(Account, Number));
 
 ## Advice
 
-`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JP<typeof pointcut>` and `PJP<typeof pointcut>` are the join point types of a pointcut.
+`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JoinPointOf<typeof pointcut>` and `ProceedingJoinPointOf<typeof pointcut>` are the join point types of a pointcut.
 
-| Decorator                           | Advice signature                                 | Semantics                                                                                                           |
-| ----------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `@Before(pc)`                       | `(jp: JP<typeof pc>)`                            | Runs before the join point. An error prevents the join point and propagates.                                        |
-| `@AfterReturning(pc)`               | `(jp: JP<typeof pc>, result)`                    | Runs after a normal completion with the result. It cannot replace the result.                                       |
-| `@AfterThrowing(pc, { throwing? })` | `(jp: JP<typeof pc>, error)`                     | Runs when the join point fails, with `throwing` only for errors of that class. The error propagates afterwards.     |
-| `@After(pc)`                        | `(jp: JP<typeof pc>)`                            | Runs after the join point, whatever its outcome.                                                                    |
-| `@Around(pc)`                       | `(jp: PJP<typeof pc>)` returning the result type | Surrounds the join point: it decides whether and how often the join point runs, and its return value is the result. |
+| Decorator                                 | Advice signature                                                                | Semantics                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `@Before(pointcut)`                       | `(joinPoint: JoinPointOf<typeof pointcut>)`                                     | Runs before the join point. An error prevents the join point and propagates.                                        |
+| `@AfterReturning(pointcut)`               | `(joinPoint: JoinPointOf<typeof pointcut>, result)`                             | Runs after a normal completion with the result. It cannot replace the result.                                       |
+| `@AfterThrowing(pointcut, { throwing? })` | `(joinPoint: JoinPointOf<typeof pointcut>, error)`                              | Runs when the join point fails, with `throwing` only for errors of that class. The error propagates afterwards.     |
+| `@After(pointcut)`                        | `(joinPoint: JoinPointOf<typeof pointcut>)`                                     | Runs after the join point, whatever its outcome.                                                                    |
+| `@Around(pointcut)`                       | `(joinPoint: ProceedingJoinPointOf<typeof pointcut>)` returning the result type | Surrounds the join point: it decides whether and how often the join point runs, and its return value is the result. |
 
 Use the least powerful advice that does the job: an after-returning advice cannot forget to call `proceed()`.
 
 ### Before
 
-Before advice runs ahead of the join point and can prevent it only by throwing. `deposits` contains `P.args(Account, Number)`, so the advice runs for the calls whose arguments match, and `jp.args` is typed.
+Before advice runs ahead of the join point and can prevent it only by throwing. `deposits` contains `P.args(Account, Number)`, so the advice runs for the calls whose arguments match, and `joinPoint.args` is typed.
 
 ```ts
-import { Aspect, Before, type JP } from "nestjs-aspect";
+import { Aspect, Before, type JoinPointOf } from "nestjs-aspect";
 
 @Aspect()
 export class DepositLimitAspect {
   @Before(deposits)
-  check(jp: JP<typeof deposits>): void {
-    const [account, amount] = jp.args;
+  check(joinPoint: JoinPointOf<typeof deposits>): void {
+    const [account, amount] = joinPoint.args;
     if (amount <= 0) {
       throw new RangeError(`Cannot deposit ${amount} into ${account.id}`);
     }
@@ -328,7 +334,7 @@ After-returning advice receives the result of a normal completion: for a method 
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { AfterReturning, Aspect, type JP } from "nestjs-aspect";
+import { AfterReturning, Aspect, type JoinPointOf } from "nestjs-aspect";
 
 @Injectable()
 export class Ledger {
@@ -340,8 +346,8 @@ export class ReceiptAspect {
   constructor(private readonly ledger: Ledger) {}
 
   @AfterReturning(charge)
-  record(jp: JP<typeof charge>, receipt: string): void {
-    const [account, amount] = jp.args;
+  record(joinPoint: JoinPointOf<typeof charge>, receipt: string): void {
+    const [account, amount] = joinPoint.args;
     this.ledger.lines.push(`${receipt}: ${amount} from ${account.id}`);
   }
 }
@@ -352,15 +358,17 @@ export class ReceiptAspect {
 After-throwing advice receives the error of the join point: a thrown error or the rejection of its promise. With `throwing`, it runs only for errors that are `instanceof` that class. The same error propagates after the advice; an error the advice throws replaces it. It is not a catch block: the caller still receives the error.
 
 ```ts
-import { AfterThrowing, Aspect, type JP } from "nestjs-aspect";
+import { AfterThrowing, Aspect, type JoinPointOf } from "nestjs-aspect";
 
 @Aspect()
 export class DeclineAspect {
   constructor(private readonly ledger: Ledger) {}
 
   @AfterThrowing(charge, { throwing: DeclinedError })
-  record(jp: JP<typeof charge>, error: DeclinedError): void {
-    this.ledger.lines.push(`declined ${jp.args[0].id}: ${error.message}`);
+  record(joinPoint: JoinPointOf<typeof charge>, error: DeclinedError): void {
+    this.ledger.lines.push(
+      `declined ${joinPoint.args[0].id}: ${error.message}`,
+    );
   }
 }
 ```
@@ -390,19 +398,21 @@ export class InFlightAspect {
 
 ### Around
 
-Around advice surrounds the join point. `jp.proceed()` runs the rest of the chain and the join point, and can be called zero times, once or several times; `jp.proceedWith(...args)` runs it with other arguments. The value the advice returns is the result of the call. `retryable` guarantees the `Retryable` annotation, so `jp.annotation(Retryable)` is typed as `RetryOptions`.
+Around advice surrounds the join point. `joinPoint.proceed()` runs the rest of the chain and the join point, and can be called zero times, once or several times; `joinPoint.proceedWith(...args)` runs it with other arguments. The value the advice returns is the result of the call. `retryable` guarantees the `Retryable` annotation, so `joinPoint.annotation(Retryable)` is typed as `RetryOptions`.
 
 ```ts
-import { Around, Aspect, type PJP } from "nestjs-aspect";
+import { Around, Aspect, type ProceedingJoinPointOf } from "nestjs-aspect";
 
 @Aspect({ order: 20 })
 export class RetryAspect {
   @Around(retryable)
-  async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const { attempts } = jp.annotation(Retryable);
+  async retry(
+    joinPoint: ProceedingJoinPointOf<typeof retryable>,
+  ): Promise<unknown> {
+    const { attempts } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await jp.proceed();
+        return await joinPoint.proceed();
       } catch (error) {
         if (error instanceof DeclinedError || attempt >= attempts) {
           throw error;
@@ -415,18 +425,18 @@ export class RetryAspect {
 
 ### The join point
 
-| Member                                    | Meaning                                                                                                       |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `jp.target`                               | The object the member is called on.                                                                           |
-| `jp.args`                                 | The arguments, frozen. `proceedWith` runs the join point with other arguments.                                |
-| `jp.signature`                            | `name`, `declaringType` (the class that defines the member) and `targetType` (the woven class).               |
-| `jp.kind`                                 | `"method"`, `"getter"` or `"setter"`.                                                                         |
-| `jp.isAsync`                              | True for an `async` method and for a decorated method whose declared return type is `Promise`.                |
-| `jp.annotation(A)`                        | The value of an annotation the pointcut guarantees. A compile error when the pointcut does not guarantee `A`. |
-| `jp.findAnnotation(A)`                    | The value of an annotation, or `undefined` when it is absent.                                                 |
-| `jp.introduced(Token)`                    | The delegate of an [introduction](#introductions) for the target.                                             |
-| `jp.toString()`                           | `'TransferService.transfer("alice", "bob", 25)'`.                                                             |
-| `jp.proceed()`, `jp.proceedWith(...args)` | Around advice only.                                                                                           |
+| Member                                                  | Meaning                                                                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `joinPoint.target`                                      | The object the member is called on.                                                                           |
+| `joinPoint.args`                                        | The arguments, frozen. `proceedWith` runs the join point with other arguments.                                |
+| `joinPoint.signature`                                   | `name`, `declaringType` (the class that defines the member) and `targetType` (the woven class).               |
+| `joinPoint.kind`                                        | `"method"`, `"getter"` or `"setter"`.                                                                         |
+| `joinPoint.isAsync`                                     | True for an `async` method and for a decorated method whose declared return type is `Promise`.                |
+| `joinPoint.annotation(A)`                               | The value of an annotation the pointcut guarantees. A compile error when the pointcut does not guarantee `A`. |
+| `joinPoint.findAnnotation(A)`                           | The value of an annotation, or `undefined` when it is absent.                                                 |
+| `joinPoint.introduced(Token)`                           | The delegate of an [introduction](#introductions) for the target.                                             |
+| `joinPoint.toString()`                                  | `'TransferService.transfer("alice", "bob", 25)'`.                                                             |
+| `joinPoint.proceed()`, `joinPoint.proceedWith(...args)` | Around advice only.                                                                                           |
 
 Annotation lookups read the method, then the declaring class, then the target class.
 
@@ -444,7 +454,7 @@ import {
   Around,
   Aspect,
   Before,
-  type PJP,
+  type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
 export const trace: string[] = [];
@@ -452,9 +462,11 @@ export const trace: string[] = [];
 @Aspect({ order: 1 })
 export class OuterAspect {
   @Around(charge)
-  async around(jp: PJP<typeof charge>): Promise<string> {
+  async around(
+    joinPoint: ProceedingJoinPointOf<typeof charge>,
+  ): Promise<string> {
     trace.push("outer around: before proceed");
-    const receipt = await jp.proceed();
+    const receipt = await joinPoint.proceed();
     trace.push("outer around: after proceed");
     return receipt;
   }
@@ -519,7 +531,7 @@ import {
   AfterReturning,
   Aspect,
   AspectModule,
-  type JP,
+  type JoinPointOf,
   P,
 } from "nestjs-aspect";
 import { observableAdapter } from "nestjs-aspect/rxjs";
@@ -539,8 +551,8 @@ export class ClosingPriceAspect {
   readonly closing = new Map<string, number>();
 
   @AfterReturning(quotes)
-  record(jp: JP<typeof quotes>, last: number): void {
-    this.closing.set(jp.args[0], last);
+  record(joinPoint: JoinPointOf<typeof quotes>, last: number): void {
+    this.closing.set(joinPoint.args[0], last);
   }
 }
 
@@ -683,7 +695,12 @@ An instance of a `perTarget` or `perClass` aspect is created during a call, with
 `@DeclareParents` declares that the classes a pointcut or class filter selects implement another interface, and names the class that implements it. The decorator applies to a static member of an aspect whose type is the interface: an abstract class, because a TypeScript interface leaves no value at run time.
 
 ```ts
-import { Aspect, Before, DeclareParents, type JP } from "nestjs-aspect";
+import {
+  Aspect,
+  Before,
+  DeclareParents,
+  type JoinPointOf,
+} from "nestjs-aspect";
 
 export abstract class UsageTracked {
   abstract incrementUseCount(): void;
@@ -709,8 +726,8 @@ export class UsageTrackingAspect {
   static readonly mixin: UsageTracked;
 
   @Before(sessions)
-  record(jp: JP<typeof sessions>): void {
-    jp.introduced(UsageTracked).incrementUseCount();
+  record(joinPoint: JoinPointOf<typeof sessions>): void {
+    joinPoint.introduced(UsageTracked).incrementUseCount();
   }
 }
 ```
@@ -825,29 +842,29 @@ Independent of `strict`, `compile()` fails when `AspectModule` is registered mor
 
 ## Spring concept mapping
 
-| Spring                                                              | nestjs-aspect                                                    |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `@EnableAspectJAutoProxy`                                           | `AspectModule.forRoot()` / `forRootAsync()`                      |
-| `@Aspect` with `@Component`                                         | `@Aspect()` in the `providers` of a module                       |
-| `@Pointcut` method                                                  | An exported constant built with `P`                              |
-| AspectJ pointcut expression, `&&`, `\|\|`, `!`                      | `P` designators, `.and()`, `.or()`, `.not()`                     |
-| `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After`, `@Around` | The same names                                                   |
-| `returning`, `throwing`                                             | The second advice parameter; `{ throwing: ErrorClass }`          |
-| `JoinPoint`, `ProceedingJoinPoint`                                  | `JP<typeof pc>`, `PJP<typeof pc>`                                |
-| `proceed()`, `proceed(args)`                                        | `jp.proceed()`, `jp.proceedWith(...args)`                        |
-| `args(..)` and `@annotation(..)` binding                            | `jp.args`, `jp.annotation(A)`, typed by the pointcut             |
-| Java annotation                                                     | `createAnnotation()`, or `Reflector.createDecorator()`           |
-| `@Order`, `Ordered`                                                 | `@Aspect({ order })`, `order` of an advisor                      |
-| `perthis`, `pertarget`, `pertypewithin`                             | `instantiation: "perTarget"`, `"perClass"`                       |
-| `@DeclareParents`                                                   | `@DeclareParents`, `isIntroduced`, `introduced`, `jp.introduced` |
-| `Advisor`, `MethodInterceptor`, `MethodInvocation`                  | `@Advisor()`, `MethodInterceptor`, `MethodInvocation`            |
-| `Pointcut`, `ClassFilter`, `MethodMatcher`                          | `PointcutLike`, `ClassFilter`, `MethodMatcher`                   |
-| `AdvisorAdapterRegistry`                                            | `AdviceAdapter`, the `adviceAdapters` option                     |
-| `ReactiveAdapterRegistry`                                           | `ReturnValueAdapter`, the `returnValueAdapters` option           |
-| `Advised`                                                           | `AspectInspector` (read-only)                                    |
-| `AopContext.currentProxy()`                                         | Not needed: self-invocation is advised                           |
-| `bean(name*)`                                                       | `P.bean()`                                                       |
-| Package                                                             | Nest module: `P.inModule()`                                      |
+| Spring                                                              | nestjs-aspect                                                            |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `@EnableAspectJAutoProxy`                                           | `AspectModule.forRoot()` / `forRootAsync()`                              |
+| `@Aspect` with `@Component`                                         | `@Aspect()` in the `providers` of a module                               |
+| `@Pointcut` method                                                  | An exported constant built with `P`                                      |
+| AspectJ pointcut expression, `&&`, `\|\|`, `!`                      | `P` designators, `.and()`, `.or()`, `.not()`                             |
+| `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After`, `@Around` | The same names                                                           |
+| `returning`, `throwing`                                             | The second advice parameter; `{ throwing: ErrorClass }`                  |
+| `JoinPoint`, `ProceedingJoinPoint`                                  | `JoinPointOf<typeof pointcut>`, `ProceedingJoinPointOf<typeof pointcut>` |
+| `proceed()`, `proceed(args)`                                        | `joinPoint.proceed()`, `joinPoint.proceedWith(...args)`                  |
+| `args(..)` and `@annotation(..)` binding                            | `joinPoint.args`, `joinPoint.annotation(A)`, typed by the pointcut       |
+| Java annotation                                                     | `createAnnotation()`, or `Reflector.createDecorator()`                   |
+| `@Order`, `Ordered`                                                 | `@Aspect({ order })`, `order` of an advisor                              |
+| `perthis`, `pertarget`, `pertypewithin`                             | `instantiation: "perTarget"`, `"perClass"`                               |
+| `@DeclareParents`                                                   | `@DeclareParents`, `isIntroduced`, `introduced`, `joinPoint.introduced`  |
+| `Advisor`, `MethodInterceptor`, `MethodInvocation`                  | `@Advisor()`, `MethodInterceptor`, `MethodInvocation`                    |
+| `Pointcut`, `ClassFilter`, `MethodMatcher`                          | `PointcutLike`, `ClassFilter`, `MethodMatcher`                           |
+| `AdvisorAdapterRegistry`                                            | `AdviceAdapter`, the `adviceAdapters` option                             |
+| `ReactiveAdapterRegistry`                                           | `ReturnValueAdapter`, the `returnValueAdapters` option                   |
+| `Advised`                                                           | `AspectInspector` (read-only)                                            |
+| `AopContext.currentProxy()`                                         | Not needed: self-invocation is advised                                   |
+| `bean(name*)`                                                       | `P.bean()`                                                               |
+| Package                                                             | Nest module: `P.inModule()`                                              |
 
 ## Design
 

@@ -119,27 +119,27 @@ class Task<T> {
 
 const taskAdapter: ReturnValueAdapter<Task<unknown>> = {
   supports: (value): value is Task<unknown> => value instanceof Task,
-  onSuccess: (task, cb) =>
+  onSuccess: (task, callback) =>
     new Task(() => {
       const value = task.run();
-      cb(value);
+      callback(value);
       return value;
     }),
-  onError: (task, cb) =>
+  onError: (task, callback) =>
     new Task(() => {
       try {
         return task.run();
       } catch (error) {
-        cb(error);
+        callback(error);
         throw error;
       }
     }),
-  finally: (task, cb) =>
+  finally: (task, callback) =>
     new Task(() => {
       try {
         return task.run();
       } finally {
-        cb();
+        callback();
       }
     }),
 };

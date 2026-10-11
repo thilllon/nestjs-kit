@@ -18,9 +18,9 @@ import {
   Before,
   createAnnotation,
   type JoinPoint,
-  type JP,
+  type JoinPointOf,
   P,
-  type PJP,
+  type ProceedingJoinPointOf,
   type Pointcut,
   type ProceedingJoinPoint,
   type ShapeOf,
@@ -94,14 +94,14 @@ function declareUsage() {
   class ResilienceAspect {
     @Around(retryable)
     async retry(
-      jp: ProceedingJoinPoint<
+      joinPoint: ProceedingJoinPoint<
         typeof retryable extends Pointcut<infer S> ? S : never
       >,
     ): Promise<unknown> {
-      const { attempts } = jp.annotation(Retryable); // typed as RetryOptions
+      const { attempts } = joinPoint.annotation(Retryable); // typed as RetryOptions
       for (let i = 1; ; i++) {
         try {
-          return await jp.proceed();
+          return await joinPoint.proceed();
         } catch (e) {
           if (i >= attempts) {
             throw e;
@@ -111,63 +111,79 @@ function declareUsage() {
     }
 
     @AfterReturning(findById)
-    cacheUser(jp: JoinPoint<any>, user: User): void {}
+    cacheUser(joinPoint: JoinPoint<any>, user: User): void {}
 
     @Before(accountOps)
-    checkAccount(jp: JoinPoint<any>): void {
-      const [account] = jp.args as [Account, ...unknown[]];
+    checkAccount(joinPoint: JoinPoint<any>): void {
+      const [account] = joinPoint.args as [Account, ...unknown[]];
     }
 
     @AfterThrowing(findById, { throwing: RangeError })
-    onRangeError(jp: JoinPoint<any>, error: RangeError): void {}
+    onRangeError(joinPoint: JoinPoint<any>, error: RangeError): void {}
   }
 
   @Aspect()
   class TypedAdviceAspect {
     @Around(findById)
-    async aroundFind(jp: PJP<typeof findById>): Promise<User> {
-      const [id] = jp.args; // number
+    async aroundFind(
+      joinPoint: ProceedingJoinPointOf<typeof findById>,
+    ): Promise<User> {
+      const [id] = joinPoint.args; // number
       const n: number = id;
-      return jp.proceedWith(n + 1);
+      return joinPoint.proceedWith(n + 1);
     }
 
     @Before(accountOps)
-    before(jp: JP<typeof accountOps>): void {
-      const account: Account = jp.args[0];
+    before(joinPoint: JoinPointOf<typeof accountOps>): void {
+      const account: Account = joinPoint.args[0];
       // @ts-expect-error this pointcut does not guarantee Audited
-      jp.annotation(Audited);
-      jp.findAnnotation(Audited); // allowed: returns void | undefined
+      joinPoint.annotation(Audited);
+      joinPoint.findAnnotation(Audited); // allowed: returns void | undefined
     }
 
     // @ts-expect-error around advice on findById must return Promise<User>
     @Around(findById)
-    wrongReturn(jp: PJP<typeof findById>): string {
+    wrongReturn(joinPoint: ProceedingJoinPointOf<typeof findById>): string {
       return "x";
     }
 
     @Around(findById)
-    async wrongArgs(jp: PJP<typeof findById>): Promise<User> {
+    async wrongArgs(
+      joinPoint: ProceedingJoinPointOf<typeof findById>,
+    ): Promise<User> {
       // @ts-expect-error proceedWith arguments are checked against the signature
-      return jp.proceedWith("not-a-number");
+      return joinPoint.proceedWith("not-a-number");
     }
 
     // @ts-expect-error afterReturning receives the awaited return type (User), not string
     @AfterReturning(findById)
-    wrongResult(jp: JP<typeof findById>, result: string): void {}
+    wrongResult(
+      joinPoint: JoinPointOf<typeof findById>,
+      result: string,
+    ): void {}
 
     // @ts-expect-error the throwing filter fixes the error parameter type
     @AfterThrowing(findById, { throwing: NotFoundError })
-    wrongError(jp: JP<typeof findById>, error: ConflictError): void {}
+    wrongError(
+      joinPoint: JoinPointOf<typeof findById>,
+      error: ConflictError,
+    ): void {}
 
     // Known limitation: TypeScript treats structurally identical classes as interchangeable.
     @AfterThrowing(findById, { throwing: RangeError })
-    structurallySame(jp: JP<typeof findById>, error: TypeError): void {}
+    structurallySame(
+      joinPoint: JoinPointOf<typeof findById>,
+      error: TypeError,
+    ): void {}
 
     @AfterReturning(findById)
-    async asyncAllowed(jp: JP<typeof findById>, user: User): Promise<void> {}
+    async asyncAllowed(
+      joinPoint: JoinPointOf<typeof findById>,
+      user: User,
+    ): Promise<void> {}
 
     @After(findById)
-    async asyncAfter(jp: JP<typeof findById>): Promise<void> {}
+    async asyncAfter(joinPoint: JoinPointOf<typeof findById>): Promise<void> {}
   }
 
   const renamePc = P.method(UserService, "rename");
@@ -176,11 +192,11 @@ function declareUsage() {
   class SyncAspect {
     // @ts-expect-error async advice on a join point known to be synchronous
     @Before(renamePc)
-    async check(jp: JP<typeof renamePc>): Promise<void> {}
+    async check(joinPoint: JoinPointOf<typeof renamePc>): Promise<void> {}
 
     // @ts-expect-error async advice on a join point known to be synchronous
     @After(renamePc)
-    async release(jp: JP<typeof renamePc>): Promise<void> {}
+    async release(joinPoint: JoinPointOf<typeof renamePc>): Promise<void> {}
 
     // @ts-expect-error P.method rejects a name that is not a method of the type
     static readonly bad = P.method(UserService, "nope");
@@ -193,10 +209,13 @@ function declareUsage() {
   @Aspect()
   class MixedAspect {
     @Before(renameOrFind)
-    async before(jp: JP<typeof renameOrFind>): Promise<void> {}
+    async before(joinPoint: JoinPointOf<typeof renameOrFind>): Promise<void> {}
 
     @AfterThrowing(anyOfBoth)
-    async failed(jp: JP<typeof anyOfBoth>, error: unknown): Promise<void> {}
+    async failed(
+      joinPoint: JoinPointOf<typeof anyOfBoth>,
+      error: unknown,
+    ): Promise<void> {}
   }
 
   // Accessors accept an annotation that has no method contract.
@@ -223,14 +242,14 @@ function declareUsage() {
   @Aspect()
   class OrAspect {
     @Before(either)
-    a(jp: JP<typeof either>): void {
-      jp.annotation(Audited);
+    a(joinPoint: JoinPointOf<typeof either>): void {
+      joinPoint.annotation(Audited);
     }
 
     @Before(auditedOrRetry)
-    b(jp: JP<typeof auditedOrRetry>): void {
+    b(joinPoint: JoinPointOf<typeof auditedOrRetry>): void {
       // @ts-expect-error neither annotation is guaranteed on every match
-      jp.annotation(Audited);
+      joinPoint.annotation(Audited);
     }
   }
 
@@ -249,26 +268,28 @@ function declareUsage() {
   @Aspect()
   class DesignatorAspect {
     @Before(allOf)
-    all(jp: JP<typeof allOf>): void {
-      jp.annotation(Retryable);
-      jp.annotation(Audited);
+    all(joinPoint: JoinPointOf<typeof allOf>): void {
+      joinPoint.annotation(Retryable);
+      joinPoint.annotation(Audited);
     }
 
     @Before(anyOf)
-    any(jp: JP<typeof anyOf>): void {
-      jp.annotation(Audited);
+    any(joinPoint: JoinPointOf<typeof anyOf>): void {
+      joinPoint.annotation(Audited);
     }
 
     @Before(roles)
-    nest(jp: JP<typeof roles>): void {
-      const found: string[] | undefined = jp.findAnnotation(Roles);
+    nest(joinPoint: JoinPointOf<typeof roles>): void {
+      const found: string[] | undefined = joinPoint.findAnnotation(Roles);
       // @ts-expect-error a Nest decorator has no name the pointcut can guarantee
-      jp.annotation(Roles);
+      joinPoint.annotation(Roles);
     }
 
     @Around(broad)
-    async broad(jp: PJP<typeof broad>): Promise<unknown> {
-      return jp.proceed();
+    async broad(
+      joinPoint: ProceedingJoinPointOf<typeof broad>,
+    ): Promise<unknown> {
+      return joinPoint.proceed();
     }
   }
 
@@ -300,14 +321,14 @@ describe("public types", () => {
     expectTypeOf<S["target"]>().toEqualTypeOf<
       InstanceType<Usage["UserService"]>
     >();
-    expectTypeOf<S["ann"]>().toBeNever();
+    expectTypeOf<S["annotations"]>().toBeNever();
   });
 
   it("carry the method contract of an annotation into the join point", () => {
     type S = ShapeOf<Usage["retryable"]>;
 
     expectTypeOf<S["returns"]>().toEqualTypeOf<Promise<unknown>>();
-    expectTypeOf<S["ann"]>().toEqualTypeOf<"Retryable">();
+    expectTypeOf<S["annotations"]>().toEqualTypeOf<"Retryable">();
   });
 
   it("type P.args as an argument tuple", () => {
@@ -321,12 +342,16 @@ describe("public types", () => {
   });
 
   it("guarantee the annotations of both sides of and() and the common ones of or()", () => {
-    expectTypeOf<ShapeOf<Usage["allOf"]>["ann"]>().toEqualTypeOf<
+    expectTypeOf<ShapeOf<Usage["allOf"]>["annotations"]>().toEqualTypeOf<
       "Retryable" | "Audited"
     >();
-    expectTypeOf<ShapeOf<Usage["either"]>["ann"]>().toEqualTypeOf<"Audited">();
-    expectTypeOf<ShapeOf<Usage["anyOf"]>["ann"]>().toEqualTypeOf<"Audited">();
-    expectTypeOf<ShapeOf<Usage["auditedOrRetry"]>["ann"]>().toBeNever();
+    expectTypeOf<
+      ShapeOf<Usage["either"]>["annotations"]
+    >().toEqualTypeOf<"Audited">();
+    expectTypeOf<
+      ShapeOf<Usage["anyOf"]>["annotations"]
+    >().toEqualTypeOf<"Audited">();
+    expectTypeOf<ShapeOf<Usage["auditedOrRetry"]>["annotations"]>().toBeNever();
   });
 
   it("guarantee at run time the annotations their types guarantee", () => {
@@ -357,7 +382,7 @@ describe("public types", () => {
   });
 
   it("leave broad pointcuts and negations without guarantees", () => {
-    expectTypeOf<ShapeOf<Usage["broad"]>["ann"]>().toBeNever();
+    expectTypeOf<ShapeOf<Usage["broad"]>["annotations"]>().toBeNever();
     expectTypeOf<ReturnType<Usage["findById"]["not"]>>().toEqualTypeOf<
       Pointcut<AnyShape>
     >();

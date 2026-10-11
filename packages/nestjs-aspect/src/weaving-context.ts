@@ -8,7 +8,7 @@ import type {
   AdvisorDescriptor,
   ChainOptions,
   Class,
-  Fn,
+  AnyFunction,
   InterceptorChain,
   JoinPointKind,
   MethodRef,
@@ -319,7 +319,7 @@ export class WeavingContext implements DispatchContext {
     kind: JoinPointKind,
     target: object,
     args: readonly unknown[],
-    original: Fn,
+    original: AnyFunction,
   ): unknown {
     const member = this.members.get(owner)?.get(name)?.[kind];
     if (!member) {
@@ -375,7 +375,7 @@ export class WeavingContext implements DispatchContext {
       delegate[name] = args[0];
       return undefined;
     }
-    return (delegate[name] as Fn).apply(delegate, args as unknown[]);
+    return (delegate[name] as AnyFunction).apply(delegate, args as unknown[]);
   }
 
   reportAmbiguous(owner: Class, message: string): void {

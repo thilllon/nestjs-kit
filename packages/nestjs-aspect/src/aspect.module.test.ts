@@ -89,16 +89,16 @@ function createApplication(
   @Aspect()
   class TraceAspect {
     @Before(traced)
-    before(jp: JoinPoint<AnyShape>) {
+    before(joinPoint: JoinPoint<AnyShape>) {
       log.push(
-        `before ${jp.signature.targetType.name}.${String(jp.signature.name)}`,
+        `before ${joinPoint.signature.targetType.name}.${String(joinPoint.signature.name)}`,
       );
     }
 
     @AfterReturning(traced)
-    afterReturning(jp: JoinPoint<AnyShape>) {
+    afterReturning(joinPoint: JoinPoint<AnyShape>) {
       log.push(
-        `afterReturning ${jp.signature.targetType.name}.${String(jp.signature.name)}`,
+        `afterReturning ${joinPoint.signature.targetType.name}.${String(joinPoint.signature.name)}`,
       );
     }
   }

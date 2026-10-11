@@ -14,7 +14,7 @@ import type {
   AnyShape,
   Class,
   ClassFilter,
-  Fn,
+  AnyFunction,
   JoinPointKind,
   MethodMatcher,
   MethodRef,
@@ -31,7 +31,7 @@ export const ANY: unique symbol = Symbol.for("nestjs-aspect:any");
 export const REST: unique symbol = Symbol.for("nestjs-aspect:rest");
 
 export type MethodKeys<T> = {
-  [K in keyof T]-?: T[K] extends Fn ? K : never;
+  [K in keyof T]-?: T[K] extends AnyFunction ? K : never;
 }[keyof T];
 
 export type ArgMatcher =
@@ -66,8 +66,8 @@ export type ArgsOf<M extends readonly ArgMatcher[]> = M extends readonly [
   : [];
 
 /** Shape of `P.all(...)`: the shapes folded with `and`. */
-export type AllShapes<Ps extends readonly Pointcut<any>[]> =
-  Ps extends readonly [
+export type AllShapes<Pointcuts extends readonly Pointcut<any>[]> =
+  Pointcuts extends readonly [
     Pointcut<infer H extends Shape>,
     ...infer R extends readonly Pointcut<any>[],
   ]
@@ -79,8 +79,8 @@ export type AllShapes<Ps extends readonly Pointcut<any>[]> =
     : AnyShape;
 
 /** Shape of `P.any(...)`: the shapes folded with `or`. */
-export type AnyShapes<Ps extends readonly Pointcut<any>[]> =
-  Ps extends readonly [
+export type AnyShapes<Pointcuts extends readonly Pointcut<any>[]> =
+  Pointcuts extends readonly [
     Pointcut<infer H extends Shape>,
     ...infer R extends readonly Pointcut<any>[],
   ]
@@ -105,7 +105,7 @@ export interface PointcutFactory {
     target: InstanceType<C>;
     args: Parameters<InstanceType<C>[K]>;
     returns: ReturnType<InstanceType<C>[K]>;
-    ann: never;
+    annotations: never;
   }>;
 
   /** `within(Type)`: members declared on one of the given classes. */
@@ -115,7 +115,7 @@ export interface PointcutFactory {
     target: InstanceType<C[number]>;
     args: readonly unknown[];
     returns: unknown;
-    ann: never;
+    annotations: never;
   }>;
 
   /** `target(Type)`: the target type is `type` or a subclass. */
@@ -125,7 +125,7 @@ export interface PointcutFactory {
     target: InstanceType<C>;
     args: readonly unknown[];
     returns: unknown;
-    ann: never;
+    annotations: never;
   }>;
 
   /**
@@ -144,35 +144,35 @@ export interface PointcutFactory {
    * `@annotation(A)`: the member itself carries A. The method contract of the
    * annotation flows into the advice.
    */
-  annotated<V, F extends Fn, N extends string>(
+  annotated<V, F extends AnyFunction, N extends string>(
     a: Annotation<V, F, N>,
   ): Pointcut<{
     target: object;
     args: Parameters<F>;
     returns: ReturnType<F>;
-    ann: N;
+    annotations: N;
   }>;
   annotated<V>(a: NestAnnotation<V>): Pointcut<AnyShape>;
 
   /** `@within(A)`: the declaring class carries A. */
-  withinAnnotated<V, F extends Fn, N extends string>(
+  withinAnnotated<V, F extends AnyFunction, N extends string>(
     a: Annotation<V, F, N>,
   ): Pointcut<{
     target: object;
     args: readonly unknown[];
     returns: unknown;
-    ann: N;
+    annotations: N;
   }>;
   withinAnnotated<V>(a: NestAnnotation<V>): Pointcut<AnyShape>;
 
   /** `@target(A)`: the target class carries A. */
-  targetAnnotated<V, F extends Fn, N extends string>(
+  targetAnnotated<V, F extends AnyFunction, N extends string>(
     a: Annotation<V, F, N>,
   ): Pointcut<{
     target: object;
     args: readonly unknown[];
     returns: unknown;
-    ann: N;
+    annotations: N;
   }>;
   targetAnnotated<V>(a: NestAnnotation<V>): Pointcut<AnyShape>;
 
@@ -190,7 +190,7 @@ export interface PointcutFactory {
     target: object;
     args: ArgsOf<M>;
     returns: unknown;
-    ann: never;
+    annotations: never;
   }>;
 
   /**
@@ -228,14 +228,14 @@ export interface PointcutFactory {
   }): Pointcut<AnyShape>;
 
   /** Conjunction. Without arguments it matches every default join point. */
-  all<Ps extends readonly Pointcut<any>[]>(
-    ...pointcuts: Ps
-  ): Pointcut<AllShapes<Ps>>;
+  all<Pointcuts extends readonly Pointcut<any>[]>(
+    ...pointcuts: Pointcuts
+  ): Pointcut<AllShapes<Pointcuts>>;
 
   /** Disjunction. Without arguments it matches nothing. */
-  any<Ps extends readonly Pointcut<any>[]>(
-    ...pointcuts: Ps
-  ): Pointcut<AnyShapes<Ps>>;
+  any<Pointcuts extends readonly Pointcut<any>[]>(
+    ...pointcuts: Pointcuts
+  ): Pointcut<AnyShapes<Pointcuts>>;
 
   readonly ANY: typeof ANY;
   readonly REST: typeof REST;
@@ -311,7 +311,7 @@ function annotationNames(annotation: AnnotationLike<any>): string[] {
   return [];
 }
 
-function matchesArgument(matcher: Fn, value: unknown): boolean {
+function matchesArgument(matcher: AnyFunction, value: unknown): boolean {
   return (
     value instanceof matcher || typeof value === PRIMITIVE_TYPES.get(matcher)
   );
@@ -346,7 +346,8 @@ function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
       }
       return positional.every(
         (matcher, index) =>
-          matcher === ANY || matchesArgument(matcher as Fn, args[index]),
+          matcher === ANY ||
+          matchesArgument(matcher as AnyFunction, args[index]),
       );
     },
   };

@@ -49,8 +49,8 @@ describe("compileAspect", () => {
       secondBefore(): void {}
 
       @Around(anything)
-      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        return jp.proceed();
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        return joinPoint.proceed();
       }
     }
 

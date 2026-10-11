@@ -27,7 +27,7 @@ const scenario = `
 
   const retryable = kit.P.annotated(Retryable).and(kit.P.within(UserService));
   class ResilienceAspect {
-    retry(jp) { return jp.proceed(); }
+    retry(joinPoint) { return joinPoint.proceed(); }
   }
   kit.Around(retryable)(ResilienceAspect.prototype, "retry", describe(ResilienceAspect, "retry"));
   kit.Aspect({ order: 10 })(ResilienceAspect);
@@ -75,7 +75,7 @@ const application = `
   common.Injectable()(Greeter);
   async function bootstrap(kit, decorators, label, log) {
     class TraceAspect {
-      before(jp) { log.push(label + " " + jp.toString()); }
+      before(joinPoint) { log.push(label + " " + joinPoint.toString()); }
     }
     decorators.Before(decorators.P.within(Greeter))(TraceAspect.prototype, "before", describe(TraceAspect, "before"));
     decorators.Aspect()(TraceAspect);
@@ -129,9 +129,9 @@ const declarations = `import {
   Before,
   createAnnotation,
   P,
-  type JP,
+  type JoinPointOf,
   type MethodInterceptor,
-  type PJP,
+  type ProceedingJoinPointOf,
   type PointcutAdvisor,
 } from "${packageName}";
 // @ts-expect-error The metadata keys stay internal.
@@ -162,22 +162,22 @@ const rename = P.method(UserService, "rename");
 @Aspect({ order: 10 })
 class ResilienceAspect {
   @Around(retryable)
-  async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const attempts: number = jp.annotation(Retryable).attempts;
+  async retry(joinPoint: ProceedingJoinPointOf<typeof retryable>): Promise<unknown> {
+    const attempts: number = joinPoint.annotation(Retryable).attempts;
     void attempts;
-    return jp.proceed();
+    return joinPoint.proceed();
   }
 
   @Around(rename)
-  upperCase(jp: PJP<typeof rename>): string {
-    const [name] = jp.args;
-    return jp.proceedWith(name.toUpperCase());
+  upperCase(joinPoint: ProceedingJoinPointOf<typeof rename>): string {
+    const [name] = joinPoint.args;
+    return joinPoint.proceedWith(name.toUpperCase());
   }
 
   // @ts-expect-error Asynchronous advice is rejected on a synchronous join point.
   @Before(rename)
-  async check(jp: JP<typeof rename>): Promise<void> {
-    void jp;
+  async check(joinPoint: JoinPointOf<typeof rename>): Promise<void> {
+    void joinPoint;
   }
 }
 

@@ -77,26 +77,26 @@ export const promiseAdapter: ReturnValueAdapter<Promise<unknown>> = {
   supports(value: unknown): value is Promise<unknown> {
     return value instanceof Promise;
   },
-  onSuccess(value, cb) {
+  onSuccess(value, callback) {
     return value.then(async (resolved) => {
-      await cb(resolved);
+      await callback(resolved);
       return resolved;
     });
   },
-  onError(value, cb) {
+  onError(value, callback) {
     return value.then(undefined, async (error: unknown) => {
-      await cb(error);
+      await callback(error);
       throw error;
     });
   },
-  finally(value, cb) {
+  finally(value, callback) {
     return value.then(
       async (resolved) => {
-        await cb();
+        await callback();
         return resolved;
       },
       async (error: unknown) => {
-        await cb();
+        await callback();
         throw error;
       },
     );
