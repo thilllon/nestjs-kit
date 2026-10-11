@@ -64,8 +64,22 @@ jobs:
           scope=all
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             # Only edits to existing Markdown files are exempt: adding or
-            # deleting one can change a package archive.
-            edited_markdown="$(git diff --name-only --no-renames --diff-filter=M 'HEAD^1' HEAD -- '*.md')"
+            # deleting one can change a package archive. A package README
+            # that src/readme-examples.test.ts of the package reads is a
+            # test input and is not exempt.
+            edited_markdown="$(
+              git diff --name-only --no-renames --diff-filter=M 'HEAD^1' HEAD -- '*.md' |
+                while IFS= read -r file; do
+                  case "$file" in
+                    (packages/*/README.md)
+                      if [ -f "${file%README.md}src/readme-examples.test.ts" ]; then
+                        continue
+                      fi
+                      ;;
+                  esac
+                  printf '%s\n' "$file"
+                done
+            )"
             changed="$(git diff --name-only --no-renames 'HEAD^1' HEAD | grep --invert-match --line-regexp --fixed-strings --file=<(printf '%s\n' "$edited_markdown") || true)"
             shared="$(grep --invert-match --extended-regexp '^$|^packages/|^docs/|^LICENSE$|^\.github/(ISSUE_TEMPLATE/|dependabot\.yml$)' <<< "$changed" || true)"
             code="$(grep --invert-match --extended-regexp '^$' <<< "$changed" || true)"
