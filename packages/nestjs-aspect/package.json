@@ -55,7 +55,8 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "build": "tsdown --config ../../tsdown.config.mts",
-    "test": "vitest run --project unit"
+    "test": "vitest run --project unit",
+    "test:packaging": "vitest run --project packaging"
   },
   "module": "./dist/index.mjs",
   "peerDependencies": {

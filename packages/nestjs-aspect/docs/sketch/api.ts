@@ -31,11 +31,23 @@ interface AnyShape extends Shape {
 // ---------------------------------------------------------------------------
 // Annotations (typed metadata + decorator)
 // ---------------------------------------------------------------------------
+/** Accessors are accepted only when `F` is no method contract (exactly `Fn`). */
+type AccessorGuard<F extends Fn, T> = [T] extends [Fn]
+  ? never
+  : (<G>() => G extends F ? 1 : 2) extends <G>() => G extends Fn ? 1 : 2
+    ? unknown
+    : never;
+
 type MethodOrClassDecorator<F extends Fn> = {
   <T extends F>(
     target: object,
     key: string | symbol,
     desc: TypedPropertyDescriptor<T>,
+  ): void;
+  <T>(
+    target: object,
+    key: string | symbol,
+    desc: TypedPropertyDescriptor<T> & AccessorGuard<F, T>,
   ): void;
   (target: Class): void;
 };
@@ -189,8 +201,11 @@ type AdviceResult<S extends Shape> = [S["returns"]] extends [PromiseLike<any>]
   ? void | PromiseLike<void>
   : unknown extends S["returns"]
     ? void | PromiseLike<void>
-    : // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
-      void;
+    : // A union with a promise member, as `or()` of a synchronous and an asynchronous method produces.
+      [Extract<S["returns"], PromiseLike<any>>] extends [never]
+      ? // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
+        void
+      : void | PromiseLike<void>;
 
 /**
  * `() => Promise<void>` is assignable to `() => void`, so a plain function type
@@ -389,6 +404,28 @@ class SyncAspect {
 
   // @ts-expect-error P.method rejects a name that is not a method of the type
   static readonly bad = P.method(UserService, "nope");
+}
+
+// or() of a synchronous and an asynchronous method may be asynchronous
+const renameOrFind = renamePc.or(findById);
+@Aspect()
+class MixedAspect {
+  @Before(renameOrFind)
+  async check(jp: JP<typeof renameOrFind>): Promise<void> {}
+}
+
+// Accessors accept an annotation that has no method contract
+class Settings {
+  @Audited()
+  get theme(): string {
+    return "dark";
+  }
+
+  // @ts-expect-error Retryable requires a method that returns a Promise
+  @Retryable({ attempts: 3 })
+  get retries(): number {
+    return 3;
+  }
 }
 
 // or(): an annotation is guaranteed only when both sides guarantee it

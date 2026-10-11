@@ -288,11 +288,13 @@ export const Audited = createAnnotation<"Audited">("Audited"); // no value: @Aud
 - Usable on methods and classes. On methods the decorator is typed with
   `TypedPropertyDescriptor<T extends F>`: applying `@Retryable` to a synchronous method is a
   compile error (the "Retryable requires a method that returns a Promise" line in the sketch).
+  An annotation without a method contract is also usable on accessors.
 - The value type is enforced: `@Retryable()` without options is a compile error.
 - `requiresAdvice: true`: a bootstrap error when a method is annotated but no advisor matched
   (the silent no-op that occurs in `@toss/nestjs-aop` when the aspect provider is missing).
 - Lookup order of `jp.annotation(A)`: the method first, then the declaring class, then the target
-  class (the lookup order of Spring's `@Transactional` attributes).
+  class (the lookup order of Spring's `@Transactional` attributes). Class annotations are
+  inherited, so each class step includes the superclasses of that class.
 - Nest's own `Reflector.createDecorator<T>()` decorators are also accepted by `P.annotated()` /
   `jp.findAnnotation()`, typed with their `T`.
 
@@ -508,10 +510,18 @@ class Invocation {
 }
 ```
 
+`args` is a frozen copy of the arguments, as Spring's `JoinPoint.getArgs()` returns a copy:
+`proceedWith` is the only way to run the rest of the chain with other arguments, and every
+`proceed()` of a retrying around advice starts from the same arguments.
+
 ### 5.3 Advice kind → interceptor (async-aware)
 
-`A` is the `ReturnValueAdapter` responsible for the result (`promiseAdapter` for thenables,
-`observableAdapter` is optional). Synchronous results take the plain path.
+`A` is the `ReturnValueAdapter` responsible for the result (`promiseAdapter` for instances of
+`Promise`, `observableAdapter` is optional). Synchronous results take the plain path. A thenable
+that is not a `Promise` (a lazy query builder, for example) is followed as `Promise.resolve(value)`
+only when the join point is declared asynchronous (a native `async` function or
+`design:returntype === Promise`); returned from any other method it is a plain value and passes
+through untouched, because following it would run it and replace it with a promise.
 
 | Kind            | Interceptor behavior                                                                                                                                                                                                                                                             |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -536,7 +546,8 @@ interface ReturnValueAdapter<T = unknown> {
 }
 ```
 
-- `promiseAdapter` (built in): `then` / `catch` / `finally` semantics, preserves the resolved value.
+- `promiseAdapter` (built in): supports `value instanceof Promise`; `then` / `catch` / `finally`
+  semantics, preserves the resolved value.
 - `observableAdapter` (opt-in, `rxjs` peer): success = completion with the last emitted value,
   error = error notification, finally = `finalize` (also on unsubscribe). Observables are lazy, so
   advice runs at subscription time, not at call time.
