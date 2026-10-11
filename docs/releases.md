@@ -43,9 +43,9 @@ For that local first publication only, use `--provenance=false` to override the 
 
 ### Packages awaiting first publication
 
-A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
+A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication and the verification of its trusted publisher, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-- `nestjs-aspect` (`packages/nestjs-aspect`)
+- `nestjs-aspect` (`packages/nestjs-aspect`): version 0.0.0 is on npm; the package stays held until its trusted publisher is verified.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
