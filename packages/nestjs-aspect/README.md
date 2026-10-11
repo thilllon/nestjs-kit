@@ -1,12 +1,22 @@
 # nestjs-aspect
 
-**Spring-style aspect-oriented programming for NestJS.** Aspects are Nest providers whose advice runs around the methods their pointcuts select.
-
 [![npm version](https://img.shields.io/npm/v/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect)
 [![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-Version `0.0.0` on npm exports the declaration API only: annotations, pointcuts, aspect and advice decorators, the advisor interfaces and the error classes. `AspectModule`, which weaves aspects into a Nest application, is not part of that version; it ships with the next release.
+**Spring-style aspect-oriented programming for NestJS.** An aspect is a Nest provider that holds a crosscutting concern, such as retries, auditing or transactions, together with pointcuts that select the methods it applies to. `AspectModule` weaves the aspects of an application into every class its container manages.
+
+[Quick start](#quick-start) · [Module options](#aspectmodule) · [Annotations](#annotations) · [Pointcuts](#pointcuts) · [Advice](#advice) · [Ordering](#ordering) · [Asynchronous join points](#asynchronous-join-points) · [Advisors](#advisors) · [Introductions](#introductions) · [Inspection](#inspection) · [Testing](#testing) · [Validation and errors](#bootstrap-validation) · [Limitations](#limitations) · [Spring mapping](#spring-concept-mapping)
+
+## What it is
+
+- **Aspects are providers.** `@Aspect()` marks a class as an aspect and as an injectable provider with regular dependency injection.
+- **Pointcuts are independent of the class hierarchy.** A pointcut selects methods by class, name, kind, module, provider token, annotation, Reflect metadata or argument. The advised class does not import the aspect and needs no decorator for it.
+- **The five advice kinds of Spring**: `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After` and `@Around`, with the Spring semantics and ordering rules.
+- **Typed from the pointcut to the advice.** A pointcut carries the target, argument and return types and the annotations it guarantees; the advice decorators check the advice method against them.
+- **Correct for asynchronous code.** Advice follows the settlement of a promise, and of an Observable with the adapter of `nestjs-aspect/rxjs`.
+- **Errors instead of silent no-ops.** A misconfiguration fails the bootstrap, and a method whose required advice is missing cannot be called.
+- **Every managed class.** Providers, controllers, gateways, guards, interceptors, pipes, filters and middleware, in the singleton, request and transient scopes.
 
 ## Installation
 
@@ -14,41 +24,147 @@ Version `0.0.0` on npm exports the declaration API only: annotations, pointcuts,
 pnpm add nestjs-aspect
 ```
 
-`@nestjs/common`, `@nestjs/core`, `reflect-metadata` and `rxjs` are peer dependencies.
+Requirements:
 
-Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript declarations. Aspects use legacy decorators: enable `experimentalDecorators` and `emitDecoratorMetadata`.
+- **Node.js 24** or later and **NestJS 12**.
+- Peer dependencies: `@nestjs/common` and `@nestjs/core` `^12.0.0`, `reflect-metadata` `^0.2.2`, `rxjs` `^7.8.2`.
+- Legacy decorators with emitted metadata, as Nest itself requires: `"experimentalDecorators": true` and `"emitDecoratorMetadata": true` in `tsconfig.json`.
 
-## Setup
+The package ships ES module and CommonJS builds with TypeScript declarations. It has two entry points: `nestjs-aspect` and `nestjs-aspect/rxjs`.
 
-Import `AspectModule.forRoot()` once, as the first import of the root module, and register aspects as providers of any module.
+## Quick start
+
+An annotation marks the methods, an aspect holds the behavior, and `AspectModule.forRoot()` weaves the aspect into the application.
 
 ```ts
-import { Module } from "@nestjs/common";
-import { AspectModule } from "nestjs-aspect";
+import { Injectable, Module } from "@nestjs/common";
+import {
+  AfterReturning,
+  AfterThrowing,
+  Aspect,
+  AspectModule,
+  Before,
+  createAnnotation,
+  type JP,
+  P,
+} from "nestjs-aspect";
+
+export const Audited = createAnnotation<"Audited", string>("Audited");
+
+const audited = P.annotated(Audited);
+
+@Injectable()
+export class AuditTrail {
+  readonly entries: string[] = [];
+}
+
+@Aspect()
+export class AuditAspect {
+  constructor(private readonly trail: AuditTrail) {}
+
+  @Before(audited)
+  started(jp: JP<typeof audited>): void {
+    this.trail.entries.push(`${jp.annotation(Audited)}: ${jp.toString()}`);
+  }
+
+  @AfterReturning(audited)
+  returned(jp: JP<typeof audited>, result: unknown): void {
+    this.trail.entries.push(`${jp.annotation(Audited)} returned ${result}`);
+  }
+
+  @AfterThrowing(audited)
+  failed(jp: JP<typeof audited>, error: unknown): void {
+    this.trail.entries.push(`${jp.annotation(Audited)} failed: ${error}`);
+  }
+}
+
+@Injectable()
+export class TransferService {
+  @Audited("transfer")
+  async transfer(from: string, to: string, amount: number): Promise<number> {
+    if (amount <= 0) {
+      throw new RangeError(`Cannot move ${amount} from ${from} to ${to}`);
+    }
+    return amount;
+  }
+}
 
 @Module({
   imports: [AspectModule.forRoot()],
-  providers: [UserService, ResilienceAspect],
+  providers: [TransferService, AuditTrail, AuditAspect],
 })
 export class AppModule {}
 ```
 
-The module is global. It weaves the classes the Nest container registers: providers, controllers, guards, interceptors, pipes, filters and middleware, of every scope. Weaving replaces a matched method on the class prototype with a dispatcher that runs the advice of the application the object belongs to. It happens while Nest instantiates providers, so advice is in place before the router binds route handlers and before the first lifecycle hook, and after `Test.createTestingModule(...).compile()` without `init()`. A middleware class that is only passed to `consumer.apply()` and the instance of a singleton factory or value provider are woven when the application initializes ([Limits](#limits)).
+`TransferService` knows nothing about `AuditAspect`. The advice runs for every call, and the after-returning and after-throwing advice run when the promise settles:
 
-Nest runs the `onModuleInit` hooks of global modules in import order and their `onApplicationShutdown` hooks in reverse order. With `AspectModule` imported first, its weaving is complete before the hooks of every other module, and it shuts down after them.
+```ts
+const app = await NestFactory.createApplicationContext(AppModule);
+const transfers = app.get(TransferService);
 
-| Option                | Default   | Purpose                                                                                                                                     |
-| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `returnValueAdapters` | `[]`      | `ReturnValueAdapter`s for asynchronous result types other than `Promise`, consulted in order before the built-in `promiseAdapter`.          |
-| `report`              | `"debug"` | Logger level (`"verbose"`, `"debug"` or `"log"`) of the weaving report; `false` logs none.                                                  |
-| `strict`              | `true`    | The [bootstrap validations](#bootstrap-validation) fail `init()` with `AspectConfigurationError`. With `false` they are logged as warnings. |
-| `exclude`             | `[]`      | Classes that are never woven: a class excludes itself and its subclasses, a `ClassFilter` the classes it matches.                           |
+await transfers.transfer("alice", "bob", 25);
+await transfers.transfer("alice", "bob", 0).catch(() => undefined);
 
-`AspectModule.forRootAsync({ useFactory, inject, imports })` resolves the options from singleton providers. The weaver waits for them inside the instantiation phase; a provider factory that runs before the options are resolved calls its dependencies without advice.
+const { entries } = app.get(AuditTrail);
+// [
+//   'transfer: TransferService.transfer("alice", "bob", 25)',
+//   "transfer returned 25",
+//   'transfer: TransferService.transfer("alice", "bob", 0)',
+//   "transfer failed: RangeError: Cannot move 0 from alice to bob",
+// ]
+```
+
+A complete HTTP application with a retry aspect and an audit aspect is in [examples/basic](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect/examples/basic).
+
+## AspectModule
+
+Import `AspectModule.forRoot()` once, as the first import of the root module. The module is global. Register aspects and advisors as providers of any module.
+
+Weaving replaces each matched method on its class prototype with a dispatcher that runs the advice of the application the called object belongs to. It happens while Nest instantiates the providers, so advice is in place before the router binds the route handlers and before the first lifecycle hook runs.
+
+| Option                | Default   | Purpose                                                                                                                                                           |
+| --------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `returnValueAdapters` | `[]`      | `ReturnValueAdapter`s that let advice follow asynchronous results other than promises, consulted in order before the built-in `promiseAdapter`.                   |
+| `adviceAdapters`      | `[]`      | `AdviceAdapter`s that convert the `advice` of an `@Advisor` into a `MethodInterceptor`, which adds advice kinds. Consulted in order before the built-in adapters. |
+| `report`              | `"debug"` | Logger level (`"verbose"`, `"debug"` or `"log"`) of the [weaving report](#inspection); `false` logs none.                                                         |
+| `strict`              | `true`    | With `true`, the [bootstrap validation](#bootstrap-validation) fails `init()`. With `false`, its findings are warnings and the calls they concern fail instead.   |
+| `exclude`             | `[]`      | Classes that are never woven: a class excludes itself and its subclasses, a `ClassFilter` excludes the classes it matches.                                        |
+
+`AspectModule.forRootAsync()` takes the options from a factory, a class or an existing provider:
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+import { AspectModule, type AspectReportLevel } from "nestjs-aspect";
+
+@Injectable()
+export class Settings {
+  readonly aspectReport: AspectReportLevel | false = "log";
+}
+
+@Module({
+  providers: [Settings],
+  exports: [Settings],
+})
+export class SettingsModule {}
+
+@Module({
+  imports: [
+    AspectModule.forRootAsync({
+      imports: [SettingsModule],
+      inject: [Settings],
+      useFactory: (settings: Settings) => ({ report: settings.aspectReport }),
+    }),
+  ],
+  providers: [TransferService, AuditTrail, AuditAspect],
+})
+export class ConfiguredAppModule {}
+```
+
+The options come from singleton providers. The weaver waits for them inside the instantiation phase; a provider factory that runs before they are resolved calls its dependencies without advice.
 
 ## Annotations
 
-`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes; an annotation without a method contract also applies to accessors. Its type parameters are the name literal, the value type and the method contract the annotation accepts.
+`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes. Its type parameters are the name literal, the value type and the method contract the annotation accepts.
 
 ```ts
 import { createAnnotation } from "nestjs-aspect";
@@ -57,158 +173,439 @@ export interface RetryOptions {
   attempts: number;
 }
 
-// Applies only to methods that return a Promise, and requires RetryOptions.
 export const Retryable = createAnnotation<
   "Retryable",
   RetryOptions,
   (...args: any[]) => Promise<unknown>
 >("Retryable", { requiresAdvice: true });
 
-export const Audited = createAnnotation<"Audited">("Audited");
-
-export class UserService {
-  @Retryable({ attempts: 3 })
-  async findById(id: number): Promise<User> {
-    return this.users.load(id);
-  }
-
-  @Audited()
-  rename(user: User, name: string): User {
-    return user.withName(name);
-  }
-}
+export const Internal = createAnnotation<"Internal">("Internal");
 ```
 
-- The annotation name is its identity: annotations created with the same name read and write the same metadata.
-- A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses.
-- `requiresAdvice` marks an annotation whose members must be matched by an advisor that handles it: one whose pointcut refers to the annotation with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written.
+`Retryable` takes a `RetryOptions` value and applies only to methods that return a promise; `@Retryable()` without a value or on a synchronous method is a compile error. `Internal` takes no value.
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+
+export class Account {
+  constructor(
+    readonly id: string,
+    public balance = 0,
+  ) {}
+}
+
+export class DeclinedError extends Error {}
+
+@Injectable()
+export class PaymentGateway {
+  readonly failures: Error[] = [];
+
+  @Retryable({ attempts: 3 })
+  async charge(account: Account, amount: number): Promise<string> {
+    const failure = this.failures.shift();
+    if (failure) {
+      throw failure;
+    }
+    account.balance -= amount;
+    return `receipt-${account.id}-${amount}`;
+  }
+}
+
+@Injectable()
+export class AccountService {
+  private readonly accounts = new Map<string, Account>();
+
+  open(id: string): Account {
+    const account = new Account(id);
+    this.accounts.set(id, account);
+    return account;
+  }
+
+  find(id: string): Account | undefined {
+    return this.accounts.get(id);
+  }
+
+  @Internal()
+  findAll(): Account[] {
+    return [...this.accounts.values()];
+  }
+
+  deposit(account: Account, amount: number): Account {
+    account.balance += amount;
+    return account;
+  }
+}
+
+@Module({
+  providers: [PaymentGateway, AccountService],
+  exports: [PaymentGateway, AccountService],
+})
+export class BillingModule {}
+```
+
+- The name is the identity of an annotation: annotations created with the same name read and write the same metadata.
+- A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses. An annotation without a method contract also applies to accessors.
+- **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice.
 - `isAnnotation(value)` tells an annotation from other functions.
 - Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `jp.findAnnotation`.
 
 ## Pointcuts
 
-`P` builds typed pointcuts. A pointcut carries the target, argument and return types and the annotations it guarantees, and the advice decorators check advice signatures against them.
+`P` builds typed pointcuts. A pointcut is a value: export it as a constant and share it between aspects.
 
-| Designator                                   | Matches                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `P.method(Type, "name")`                     | That method on `Type` and its subclasses; carries its exact signature.                  |
-| `P.within(...Types)`                         | Members declared on one of the classes.                                                 |
-| `P.target(Type)`                             | Members of `Type` and its subclasses.                                                   |
-| `P.name("find*" \| /^find/)`                 | Members by name; `*` in a string matches any run of characters.                         |
-| `P.kind("method" \| "getter" \| "setter")`   | Members by kind.                                                                        |
-| `P.annotated(A)`                             | Members that carry `A`; carries the method contract of `A`.                             |
-| `P.withinAnnotated(A)`                       | Members declared on a class that carries `A`.                                           |
-| `P.targetAnnotated(A)`                       | Members of a class that carries `A`.                                                    |
-| `P.args(Account, P.ANY, P.REST)`             | Calls by argument, checked on every call; types `jp.args`.                              |
-| `P.bean("token" \| /Service$/ \| Type)`      | Classes registered under a matching provider token; `*` in a string is a wildcard.      |
-| `P.inModule(Module, { transitive })`         | Classes a Nest module declares, with `transitive` also those of the modules it imports. |
-| `P.metadata(key, predicate?)`                | Members with Reflect metadata `key`, such as metadata stored by `SetMetadata`.          |
-| `P.matching({ classFilter, methodMatcher })` | Members a custom class filter and method matcher accept.                                |
+| Designator                                   | Spring equivalent             | Matches                                                                                                         |
+| -------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `P.method(Type, "name")`                     | `execution(* Type+.name(..))` | That method of `Type` and its subclasses. Carries its exact signature. The only designator for lifecycle hooks. |
+| `P.within(...Types)`                         | `within(Type)`                | Members declared on one of the classes.                                                                         |
+| `P.target(Type)`                             | `target(Type)`, `this(Type)`  | Members of `Type` and its subclasses.                                                                           |
+| `P.name("find*" \| /^find/)`                 | Name pattern of `execution`   | Members by name; `*` in a string matches any run of characters.                                                 |
+| `P.kind("method" \| "getter" \| "setter")`   | -                             | Members by kind. The only designator for accessors.                                                             |
+| `P.annotated(A)`                             | `@annotation(A)`              | Members that carry `A`. Carries the method contract of `A` and guarantees `A`.                                  |
+| `P.withinAnnotated(A)`                       | `@within(A)`                  | Members declared on a class that carries `A`.                                                                   |
+| `P.targetAnnotated(A)`                       | `@target(A)`                  | Members of a class that carries `A`.                                                                            |
+| `P.args(Account, P.ANY, P.REST)`             | `args(Account, *, ..)`        | Calls by their arguments, checked on every call. Types `jp.args`.                                               |
+| `P.bean("token*" \| /Service$/ \| Type)`     | `bean(name*)`                 | Classes registered under a matching provider token.                                                             |
+| `P.inModule(Module, { transitive })`         | `within(package..*)`          | Providers and controllers a Nest module declares; with `transitive`, also those of the modules it imports.      |
+| `P.metadata(key, predicate?)`                | Attribute-driven pointcut     | Members with Reflect metadata `key`, such as metadata stored by `SetMetadata`.                                  |
+| `P.matching({ classFilter, methodMatcher })` | Custom `Pointcut`             | Members a hand-written class filter and method matcher accept.                                                  |
 
-Compose pointcuts with `.and()`, `.or()` and `.not()`, or with `P.all(...)` and `P.any(...)`. `and` guarantees the annotations of both sides, `or` those common to both sides, and `not` none.
+Compose pointcuts with `.and()`, `.or()` and `.not()`, or fold a list with `P.all(...)` and `P.any(...)`.
 
 ```ts
 import { P } from "nestjs-aspect";
 
 export const retryable = P.annotated(Retryable);
-export const findById = P.method(UserService, "findById");
-export const accountOps = P.within(AccountService).and(P.args(Account, P.REST));
+export const charge = P.method(PaymentGateway, "charge");
+export const inBilling = P.inModule(BillingModule);
+export const queries = inBilling
+  .and(P.name("find*"))
+  .and(P.annotated(Internal).not());
+export const deposits = P.within(AccountService).and(P.args(Account, Number));
 ```
 
-Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors; a getter and a setter of one property are woven independently. A constructor is never a join point.
+- **Types.** `charge` carries the signature of `PaymentGateway.charge`, `retryable` the method contract and the value type of `Retryable`, and `deposits` types `jp.args` as `[Account, number]`. `and` guarantees the annotations of both sides, `or` those common to both, `not` none. Broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
+- **Default join points.** Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors. A constructor is never a join point.
+- **Static and dynamic matching.** Every designator except `P.args` is evaluated once per class member when the class is woven. `P.args` is evaluated on every call of a member the rest of the pointcut matches; combine it with a static designator. In `P.args`, a class matches an argument that is `instanceof` it, `String`, `Number`, `Boolean`, `BigInt` and `Symbol` match their primitives, `P.ANY` matches one argument and `P.REST` the remaining ones.
+- **`P.bean`** matches a class when one of its registrations has a matching token, `useClass` tokens included. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched when the application initializes.
+- **`P.inModule(Module, { transitive: true })`** follows the imports of the module. A global module counts only when the `@Module()` decorator of the importing module lists it.
 
-- `P.bean` sees the token of every registration of a class, including `useClass` tokens. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched by their token when the application initializes.
-- `P.inModule(Module, { transitive: true })` follows the imports of the module. A global module counts only when the `@Module()` decorator of the importing module lists it, because Nest adds every global module to the imports of every module.
-- Static designators are evaluated once per class member at weaving time. `P.args` is evaluated on every call; combine it with a static designator.
+## Advice
 
-## Aspects and advice
+`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JP<typeof pointcut>` and `PJP<typeof pointcut>` are the join point types of a pointcut.
 
-`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider with regular constructor injection; list it in the `providers` of a module. `"singleton"` is the supported instantiation model.
+| Decorator                           | Advice signature                                 | Semantics                                                                                                           |
+| ----------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `@Before(pc)`                       | `(jp: JP<typeof pc>)`                            | Runs before the join point. An error prevents the join point and propagates.                                        |
+| `@AfterReturning(pc)`               | `(jp: JP<typeof pc>, result)`                    | Runs after a normal completion with the result. It cannot replace the result.                                       |
+| `@AfterThrowing(pc, { throwing? })` | `(jp: JP<typeof pc>, error)`                     | Runs when the join point fails, with `throwing` only for errors of that class. The error propagates afterwards.     |
+| `@After(pc)`                        | `(jp: JP<typeof pc>)`                            | Runs after the join point, whatever its outcome.                                                                    |
+| `@Around(pc)`                       | `(jp: PJP<typeof pc>)` returning the result type | Surrounds the join point: it decides whether and how often the join point runs, and its return value is the result. |
+
+Use the least powerful advice that does the job: an after-returning advice cannot forget to call `proceed()`.
+
+### Before
+
+Before advice runs ahead of the join point and can prevent it only by throwing. `deposits` contains `P.args(Account, Number)`, so the advice runs for the calls whose arguments match, and `jp.args` is typed.
 
 ```ts
-import {
-  AfterReturning,
-  AfterThrowing,
-  Around,
-  Aspect,
-  Before,
-  type JP,
-  type PJP,
-} from "nestjs-aspect";
+import { Aspect, Before, type JP } from "nestjs-aspect";
 
-@Aspect({ order: 10 })
-export class ResilienceAspect {
-  constructor(private readonly metrics: MetricsService) {}
+@Aspect()
+export class DepositLimitAspect {
+  @Before(deposits)
+  check(jp: JP<typeof deposits>): void {
+    const [account, amount] = jp.args;
+    if (amount <= 0) {
+      throw new RangeError(`Cannot deposit ${amount} into ${account.id}`);
+    }
+  }
+}
+```
 
+### After returning
+
+After-returning advice receives the result of a normal completion: for a method that returns a promise, the value the promise resolves to. Its second parameter is typed from the pointcut. An error the advice throws propagates instead of the result.
+
+```ts
+import { Injectable } from "@nestjs/common";
+import { AfterReturning, Aspect, type JP } from "nestjs-aspect";
+
+@Injectable()
+export class Ledger {
+  readonly lines: string[] = [];
+}
+
+@Aspect()
+export class ReceiptAspect {
+  constructor(private readonly ledger: Ledger) {}
+
+  @AfterReturning(charge)
+  record(jp: JP<typeof charge>, receipt: string): void {
+    const [account, amount] = jp.args;
+    this.ledger.lines.push(`${receipt}: ${amount} from ${account.id}`);
+  }
+}
+```
+
+### After throwing
+
+After-throwing advice receives the error of the join point: a thrown error or the rejection of its promise. With `throwing`, it runs only for errors that are `instanceof` that class. The same error propagates after the advice; an error the advice throws replaces it. It is not a catch block: the caller still receives the error.
+
+```ts
+import { AfterThrowing, Aspect, type JP } from "nestjs-aspect";
+
+@Aspect()
+export class DeclineAspect {
+  constructor(private readonly ledger: Ledger) {}
+
+  @AfterThrowing(charge, { throwing: DeclinedError })
+  record(jp: JP<typeof charge>, error: DeclinedError): void {
+    this.ledger.lines.push(`declined ${jp.args[0].id}: ${error.message}`);
+  }
+}
+```
+
+### After
+
+After advice runs when the join point has finished, whether it returned or failed, like a `finally` block. For an asynchronous join point it runs when the promise settles. An error the advice throws replaces the outcome.
+
+```ts
+import { After, Aspect, Before } from "nestjs-aspect";
+
+@Aspect()
+export class InFlightAspect {
+  inFlight = 0;
+
+  @Before(charge)
+  enter(): void {
+    this.inFlight += 1;
+  }
+
+  @After(charge)
+  leave(): void {
+    this.inFlight -= 1;
+  }
+}
+```
+
+### Around
+
+Around advice surrounds the join point. `jp.proceed()` runs the rest of the chain and the join point, and can be called zero times, once or several times; `jp.proceedWith(...args)` runs it with other arguments. The value the advice returns is the result of the call. `retryable` guarantees the `Retryable` annotation, so `jp.annotation(Retryable)` is typed as `RetryOptions`.
+
+```ts
+import { Around, Aspect, type PJP } from "nestjs-aspect";
+
+@Aspect({ order: 20 })
+export class RetryAspect {
   @Around(retryable)
   async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const { attempts } = jp.annotation(Retryable); // RetryOptions
-    for (let attempt = 1; ; attempt++) {
+    const { attempts } = jp.annotation(Retryable);
+    for (let attempt = 1; ; attempt += 1) {
       try {
         return await jp.proceed();
       } catch (error) {
-        if (attempt >= attempts) {
+        if (error instanceof DeclinedError || attempt >= attempts) {
           throw error;
         }
       }
     }
   }
+}
+```
 
-  @AfterReturning(findById)
-  cache(jp: JP<typeof findById>, user: User): void {}
+### The join point
 
-  @AfterThrowing(findById, { throwing: NotFoundError })
-  onMissing(jp: JP<typeof findById>, error: NotFoundError): void {}
+| Member                                    | Meaning                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `jp.target`                               | The object the member is called on.                                                                           |
+| `jp.args`                                 | The arguments, frozen. `proceedWith` runs the join point with other arguments.                                |
+| `jp.signature`                            | `name`, `declaringType` (the class that defines the member) and `targetType` (the woven class).               |
+| `jp.kind`                                 | `"method"`, `"getter"` or `"setter"`.                                                                         |
+| `jp.isAsync`                              | True for an `async` method and for a decorated method whose declared return type is `Promise`.                |
+| `jp.annotation(A)`                        | The value of an annotation the pointcut guarantees. A compile error when the pointcut does not guarantee `A`. |
+| `jp.findAnnotation(A)`                    | The value of an annotation, or `undefined` when it is absent.                                                 |
+| `jp.introduced(Token)`                    | The delegate of an [introduction](#introductions) for the target.                                             |
+| `jp.toString()`                           | `'TransferService.transfer("alice", "bob", 25)'`.                                                             |
+| `jp.proceed()`, `jp.proceedWith(...args)` | Around advice only.                                                                                           |
 
-  @Before(accountOps)
-  check(jp: JP<typeof accountOps>): void {
-    const account: Account = jp.args[0];
+Annotation lookups read the method, then the declaring class, then the target class.
+
+The compiler rejects an annotation on a method outside its contract, a missing or mistyped annotation value, around advice with the wrong return type, `proceedWith` arguments that do not fit the method, an after-returning result or after-throwing error parameter of the wrong type, asynchronous advice on a join point known to be synchronous, and `P.method` with a name that is not a method of the class.
+
+## Ordering
+
+- **Across aspects and advisors**, a lower `order` has the higher precedence: its advice runs first on the way in and last on the way out. One without an order has the lowest precedence. Aspects with equal orders, or without one, run in registration order, which the weaver reports as a warning when they advise the same member.
+- **Within one aspect**, the advice kinds nest in this order from the outside in: around, before, after, after returning, after throwing. After advice therefore runs after the after-returning and after-throwing advice of its aspect. Advice of the same kind runs in declaration order.
+
+```ts
+import {
+  After,
+  AfterReturning,
+  Around,
+  Aspect,
+  Before,
+  type PJP,
+} from "nestjs-aspect";
+
+export const trace: string[] = [];
+
+@Aspect({ order: 1 })
+export class OuterAspect {
+  @Around(charge)
+  async around(jp: PJP<typeof charge>): Promise<string> {
+    trace.push("outer around: before proceed");
+    const receipt = await jp.proceed();
+    trace.push("outer around: after proceed");
+    return receipt;
+  }
+
+  @Before(charge)
+  before(): void {
+    trace.push("outer before");
+  }
+
+  @After(charge)
+  after(): void {
+    trace.push("outer after");
+  }
+
+  @AfterReturning(charge)
+  afterReturning(): void {
+    trace.push("outer after returning");
+  }
+}
+
+@Aspect({ order: 2 })
+export class InnerAspect {
+  @Before(charge)
+  before(): void {
+    trace.push("inner before");
+  }
+
+  @AfterReturning(charge)
+  afterReturning(): void {
+    trace.push("inner after returning");
   }
 }
 ```
 
-| Decorator                           | Advice signature                                 | Semantics                                                                      |
-| ----------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `@Before(pc)`                       | `(jp: JP<typeof pc>)`                            | Runs before the join point; an error prevents the join point from running.     |
-| `@After(pc)`                        | `(jp: JP<typeof pc>)`                            | Runs after the join point, whatever its outcome.                               |
-| `@AfterReturning(pc)`               | `(jp: JP<typeof pc>, result)`                    | Runs after a normal completion with the awaited result; cannot replace it.     |
-| `@AfterThrowing(pc, { throwing? })` | `(jp: JP<typeof pc>, error)`                     | Runs when the join point fails, with `throwing` only for errors of that class. |
-| `@Around(pc)`                       | `(jp: PJP<typeof pc>)` returning the result type | Surrounds the join point; its return value becomes the result.                 |
+One call of `PaymentGateway.charge` leaves this trace:
 
-- `jp.annotation(A)` is callable only when the pointcut guarantees `A`; `jp.findAnnotation(A)` returns `undefined` when `A` is absent. Both look at the method, then the declaring class, then the target class. Each class step includes inherited class annotations, so for an inherited method an annotation on a superclass of the declaring class wins over one on the target class.
-- `jp.args` is frozen. `jp.proceedWith(...args)` runs the rest of the chain with other arguments.
-- `jp.proceed()` and `jp.proceedWith(...args)` can be called more than once; each call starts from the arguments the advice received or passes.
-- Aspects and advisors are never advised.
-- An aspect inherits the advice of a superclass without `@Aspect`, such as an abstract base class. An aspect that extends another `@Aspect` class is rejected.
-- A call from a method to another method of the same object (`this.other()`) is advised, unlike in Spring: the dispatcher lives on the class prototype, not on a proxy.
-- On a controller method, advice runs inside Nest interceptors and after pipes. An error thrown by advice reaches the exception filters like an error of the handler.
-
-The compiler rejects an annotation on a method outside its contract, a missing or mistyped annotation value, around advice with the wrong return type, `proceedWith` arguments that do not fit the method, an after-returning result or after-throwing error parameter of the wrong type, and `P.method` with a name that is not a method of the class. Structurally identical classes are interchangeable to TypeScript, and broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
-
-## Ordering
-
-- Across aspects and advisors a lower `order` runs first and wraps the others; one without an order has the lowest precedence. Equal orders run in registration order, which the weaver reports as a warning.
-- Within one aspect the advice order is around, before, after, after returning, after throwing; advice of the same kind runs in declaration order.
+```
+outer around: before proceed
+outer before
+inner before
+inner after returning
+outer after returning
+outer after
+outer around: after proceed
+```
 
 ## Asynchronous join points
 
-- Advice follows the settlement of a `Promise` result, not the synchronous return. Another thenable, such as a lazy query builder, is followed only when the method is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise`. Returned from any other method it reaches the caller untouched and is not run.
-- Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AspectUsageError` when called.
-- `async` before advice needs a method that is declared asynchronous. A method that returns a promise without being `async` and without a decorated `Promise` return type counts as synchronous for before advice.
-- A `ReturnValueAdapter` in the `returnValueAdapters` option makes advice follow another result type.
+- **Promises.** After-returning, after-throwing and after advice follow the settlement of a `Promise`, not the synchronous return of the promise object.
+- **Asynchronous advice.** Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous; the settlement the caller sees waits for the advice. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AspectUsageError` when called.
+- **Asynchronous before advice** needs a method that is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise`. A method that returns a promise without either counts as synchronous for before advice.
+- **Other thenables**, such as a lazy query builder, are followed only when the method is declared asynchronous. Returned from any other method they reach the caller untouched and are not run.
+- **Around advice** receives what `proceed()` returns, a promise for an asynchronous method, and awaits it when it needs the result.
 
-## Scopes
+### Observables
 
-- Targets of every scope are advised: singleton, request-scoped and transient.
-- Aspects and advisors are singletons. One that is request-scoped or transient, by its own scope or because it depends on a request-scoped provider, is rejected when the application initializes. Per-request state belongs to the join point: resolve a request-scoped provider inside the advice with `ModuleRef.resolve()` and `ContextIdFactory`, or read it from a CLS store.
-- An aspect class registered in several modules has one instance that serves its advice, the one of the module registered first.
+`observableAdapter` of the `nestjs-aspect/rxjs` entry lets advice follow an Observable. Register it in `returnValueAdapters`. The root entry does not load `rxjs`.
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+import {
+  AfterReturning,
+  Aspect,
+  AspectModule,
+  type JP,
+  P,
+} from "nestjs-aspect";
+import { observableAdapter } from "nestjs-aspect/rxjs";
+import { type Observable, of } from "rxjs";
+
+@Injectable()
+export class PriceFeed {
+  quotes(symbol: string): Observable<number> {
+    return symbol === "ACME" ? of(101, 102, 103) : of();
+  }
+}
+
+export const quotes = P.method(PriceFeed, "quotes");
+
+@Aspect()
+export class ClosingPriceAspect {
+  readonly closing = new Map<string, number>();
+
+  @AfterReturning(quotes)
+  record(jp: JP<typeof quotes>, last: number): void {
+    this.closing.set(jp.args[0], last);
+  }
+}
+
+@Module({
+  imports: [AspectModule.forRoot({ returnValueAdapters: [observableAdapter] })],
+  providers: [PriceFeed, ClosingPriceAspect],
+})
+export class FeedModule {}
+```
+
+An Observable is lazy, so the advice runs within each subscription:
+
+- After-returning advice runs when the stream completes, with the last value it emitted or `undefined` when it emitted none. For a method that returns an Observable, the result parameter is typed `any`, so the advice declares the type of the emitted values itself.
+- After-throwing advice runs on the error notification.
+- After advice runs once when the subscription ends: at completion, at an error, or when the subscriber unsubscribes.
+- A result that is never subscribed runs no after advice; a result that is subscribed twice runs it twice.
+- Before advice and the code of around advice run when the method is called, not at subscription.
+
+A custom `ReturnValueAdapter` (`supports`, `onSuccess`, `onError`, `finally`) makes advice follow another result type.
+
+## Scopes, self-invocation and the request pipeline
+
+- **Targets of every scope are advised**: singleton, request-scoped and transient.
+- **Aspects and advisors are singletons.** One that is request-scoped or transient, by its own scope or because it depends on a request-scoped provider, is rejected when the application initializes. Per-request state belongs to the join point: resolve a request-scoped provider inside the advice with `ModuleRef.resolve()` and `ContextIdFactory`, or read it from a CLS store.
+- **Aspects and advisors are never advised.** An aspect inherits the advice of a superclass without `@Aspect`; an aspect that extends another `@Aspect` class is rejected.
+- **Self-invocation is advised.** A call from a method to another method of the same object (`this.other()`) runs the advice of that method, unlike in Spring: the dispatcher is the member on the class prototype, not a proxy in front of the object.
+- **Controllers.** On a route handler, advice runs inside the Nest interceptors and after the pipes, so it sees the transformed arguments:
+
+  ```
+  middleware -> guards -> interceptors -> pipes -> [ advice -> route handler ] -> interceptors -> exception filters
+  ```
+
+  An error thrown by advice reaches the exception filters like an error of the handler. Route metadata and `SetMetadata` values stay visible on a woven handler.
 
 ## Advisors
 
-`@Advisor()` marks a provider as a low-level advisor. The static member `pointcut` selects the join points; an instance supplies `advice`, a `MethodInterceptor`, and an optional `order`.
+`@Advisor()` marks a provider as an advisor: one pointcut and one advice, the layer aspects compile to. The static member `pointcut` selects the join points; an instance supplies `advice`, a `MethodInterceptor`, and an optional `order`.
 
 ```ts
-import { Advisor, type MethodInterceptor, P } from "nestjs-aspect";
+import { Injectable } from "@nestjs/common";
+import {
+  Advisor,
+  createAnnotation,
+  type MethodInterceptor,
+  P,
+} from "nestjs-aspect";
+
+export const Transactional = createAnnotation<"Transactional">("Transactional");
+
+@Injectable()
+export class TransactionManager {
+  readonly log: string[] = [];
+
+  async run(work: () => unknown): Promise<unknown> {
+    this.log.push("begin");
+    try {
+      const result = await work();
+      this.log.push("commit");
+      return result;
+    } catch (error) {
+      this.log.push("rollback");
+      throw error;
+    }
+  }
+}
 
 @Advisor()
 export class TransactionAdvisor {
@@ -224,73 +621,233 @@ export class TransactionAdvisor {
 
   constructor(private readonly transactions: TransactionManager) {}
 }
+
+@Injectable()
+@Transactional()
+export class InvoiceService {
+  async issue(account: Account, amount: number): Promise<string> {
+    if (amount <= 0) {
+      throw new RangeError(`Cannot invoice ${amount}`);
+    }
+    return `invoice-${account.id}-${amount}`;
+  }
+}
 ```
 
-The pointcut is static because the weaver matches it before Nest creates the advisor instance. `@Advisor()` on a class without a static `pointcut` is a compile error and raises `AspectConfigurationError`.
+- The pointcut is static because the weaver matches it before Nest creates the advisor instance. `@Advisor()` on a class without a static `pointcut` is a compile error and raises `AspectConfigurationError`.
+- `invocation.proceed()` runs the rest of the chain once. An interceptor that proceeds more than once uses `invocation.cloneFromHere(args?)` for each run. `invocation.method`, `invocation.target`, `invocation.args` and `invocation.joinPoint` describe the call.
+- An `AdviceAdapter` in the `adviceAdapters` option converts another kind of `advice` object into a `MethodInterceptor`; `context.returnValues` gives it the return value adapters of the application.
+- The entry point also exports the matching interfaces `PointcutAdvisor`, `PointcutLike`, `ClassFilter`, `MethodMatcher`, `ClassRef` and `MethodRef`.
 
-The entry point also exports the extension interfaces `AdviceAdapter` and `ReturnValueAdapter`, the built-in `promiseAdapter`, and the matching interfaces `PointcutAdvisor`, `PointcutLike`, `ClassFilter`, `MethodMatcher`, `ClassRef` and `MethodRef`.
+## Instantiation models
 
-## Bootstrap validation
+`@Aspect({ instantiation })` selects how many instances of an aspect serve its advice.
 
-`AspectModule` validates the configuration in its `onModuleInit` hook and logs through the Nest `Logger` with the context `AspectModule`.
+| Model         | Instances                                                                                  | Spring equivalent      |
+| ------------- | ------------------------------------------------------------------------------------------ | ---------------------- |
+| `"singleton"` | The provider instance. The default.                                                        | singleton              |
+| `"perTarget"` | One per target object, created at the first advised call on it, collected with the object. | `perthis`, `pertarget` |
+| `"perClass"`  | One per advised class.                                                                     | `pertypewithin`        |
 
-| Finding                                                                   | Result                          |
-| ------------------------------------------------------------------------- | ------------------------------- |
-| An aspect or advisor that is not a singleton                              | Error                           |
-| An aspect or advisor supplied by a factory, value or alias provider       | Error                           |
-| An advisor instance without `advice` or with an `order` that is no number | Error                           |
-| Advice decorators on a class without `@Aspect`                            | Error                           |
-| A `requiresAdvice` annotation on a member that no advisor handles         | Error that lists the members    |
-| A `requiresAdvice` annotation on a member of an aspect or advisor         | Error that lists the members    |
-| `forRootAsync` options that depend on a request-scoped provider           | Error                           |
-| A pointcut that matches no member of the application                      | Warning                         |
-| Different aspects with the same order, or without one, on one join point  | Warning                         |
-| An aspect or advisor class registered in several modules                  | Warning                         |
-| A global module with a shutdown hook imported before `AspectModule`       | Warning                         |
-| `AspectModule` registered more than once, whatever the options            | Error while the module compiles |
-| An aspect that extends another `@Aspect` class                            | Error while the module compiles |
+```ts
+import { Injectable, Scope } from "@nestjs/common";
+import { Aspect, Before, P } from "nestjs-aspect";
 
-An error fails `init()` with one `AspectConfigurationError`; with `strict: false` it is logged as a warning. The errors raised while the module compiles do not depend on `strict`. The weaving report follows, one line per join point and advisor in chain order:
+@Injectable({ scope: Scope.TRANSIENT })
+export class Session {
+  touch(): string {
+    return "touched";
+  }
+}
+
+const sessions = P.within(Session);
+
+@Aspect({ instantiation: "perTarget" })
+export class CallCountAspect {
+  private calls = 0;
+
+  constructor(private readonly ledger: Ledger) {}
+
+  @Before(sessions)
+  count(): void {
+    this.calls += 1;
+    this.ledger.lines.push(`call ${this.calls} of this session`);
+  }
+}
+```
+
+An instance of a `perTarget` or `perClass` aspect is created during a call, with the singleton providers its constructor and `@Inject()` properties name. A dependency that is request-scoped, transient or missing is rejected when the application initializes.
+
+## Introductions
+
+`@DeclareParents` declares that the classes a pointcut or class filter selects implement another interface, and names the class that implements it. The decorator applies to a static member of an aspect whose type is the interface: an abstract class, because a TypeScript interface leaves no value at run time.
+
+```ts
+import { Aspect, Before, DeclareParents, type JP } from "nestjs-aspect";
+
+export abstract class UsageTracked {
+  abstract incrementUseCount(): void;
+
+  abstract get useCount(): number;
+}
+
+export class DefaultUsageTracked implements UsageTracked {
+  private count = 0;
+
+  incrementUseCount(): void {
+    this.count += 1;
+  }
+
+  get useCount(): number {
+    return this.count;
+  }
+}
+
+@Aspect()
+export class UsageTrackingAspect {
+  @DeclareParents(sessions, { use: DefaultUsageTracked })
+  static readonly mixin: UsageTracked;
+
+  @Before(sessions)
+  record(jp: JP<typeof sessions>): void {
+    jp.introduced(UsageTracked).incrementUseCount();
+  }
+}
+```
+
+The methods and accessors of `DefaultUsageTracked` become members of every `Session`. Each object has its own delegate, created without arguments on first use. `isIntroduced` narrows an object to the introduced interface, and `introduced(object, Token)` returns the delegate:
+
+```ts
+const session = await app.resolve(Session);
+session.touch();
+session.touch();
+const uses = isIntroduced(session, UsageTracked) ? session.useCount : 0;
+```
+
+- An introduction applies to whole classes: of a pointcut, only the class filter is used.
+- A member the class already has, or that another introduction adds, raises `AspectConfigurationError` while the module compiles, unless the introduction sets `override: true`.
+- Introduced members are not advised.
+
+## Inspection
+
+`AspectInspector` is a provider `AspectModule` exports globally. It lists what the application advises.
+
+```ts
+const inspector = app.get(AspectInspector);
+const advisors = inspector.advisorsOf(PaymentGateway, "charge");
+const members = inspector.advisedMembers(PaymentGateway);
+```
+
+- `advisorsOf(type, name, kind?)` returns the advisors of one member in the order their advice runs: `{ type, methodName?, kind?, order }`, where `type` is the aspect or advisor class. With `RetryAspect` and `ReceiptAspect` registered, `advisors` holds `RetryAspect.retry` (around, order 20) and then `ReceiptAspect.record` (afterReturning, no order).
+- `advisedMembers(type?)` returns every advised member of the application or of one class: `{ type, declaringType, name, kind, advisors }`.
+- It reports static matches: an advisor with `P.args` is listed for every member it may advise. It lists nothing after the application has shut down.
+
+When the application initializes, the weaver logs the same information as the **weaving report** through the Nest `Logger`, with the context `AspectModule` and at the level of the `report` option. One line names a member and one advisor, in chain order:
 
 ```
-UserService.findById <- ResilienceAspect.retry (around, order 10)
-UserService.findById <- AuditAspect.audit (before, no order)
+TransferService.transfer <- AuditAspect.started (before, no order)
+TransferService.transfer <- AuditAspect.returned (afterReturning, no order)
+TransferService.transfer <- AuditAspect.failed (afterThrowing, no order)
 ```
 
 ## Testing
 
-- `Test.createTestingModule({ imports: [AppModule] }).compile()` weaves the module: advice runs without `init()`. The bootstrap validation and the weaving report run in `init()`.
-- An object created with `new`, outside a container, runs its original methods when no live application weaves its class. While a live application weaves the class, the object is advised by that application.
-- Close each application or testing module: `close()` detaches it from the woven classes. An application that is never closed, such as one whose `compile()` or `init()` failed, stays attached until it is garbage collected.
-- Applications that weave the same class in one process stay apart: an instance is advised by the application whose container holds it, also when that application excludes the class or matches nothing in it. An instance of a closed application is not advised by a later one, unless the container of the later one holds the same object, such as a shared `useValue` instance.
-- An aspect replaced with `overrideProvider(...).useValue(...)` is no aspect any more: its advice does not run.
+Weaving happens while the module compiles, so advice runs after `compile()` without `init()`. The bootstrap validation, the weaving report and the weaving of factory and value provider instances run in `init()`.
 
-## Limits
+```ts
+const moduleRef = await Test.createTestingModule({
+  imports: [AppModule],
+}).compile();
 
-- A call made while Nest instantiates providers, in a constructor or a provider factory, is not guaranteed to be advised. Before the weaver has run it runs without advice. After that, a call that reaches a woven method before the instance of an aspect or advisor that advises it exists raises `AspectNotReadyError`: Nest cannot create that instance on demand.
-- When several live applications weave the same class, a request-scoped or transient instance is advised by the most recently created application, which logs a warning once per class.
-- An application without `AspectModule` is invisible to the others: while another live application weaves a class, the instances of that class in the application without the module are advised by it.
-- A subclass that is not woven itself inherits the dispatcher of a woven superclass method and is advised by it only when the container does not manage the subclass; a `super` call from an override is advised when the superclass is woven, except in a class of the `exclude` option.
-- With a global module imported before `AspectModule`, the `onApplicationShutdown` hooks of that module run after `AspectModule` has shut down, without advice, and its `onModuleInit` hooks run before the classes of factory and value providers are woven.
-- An aspect or advisor is registered as a class, by itself or with `useClass`. One that a `useFactory`, `useValue` or `useExisting` provider supplies is rejected when the application initializes.
-- A middleware class that is only passed to `consumer.apply()` becomes known when the application initializes, after the router has bound its `use` method: `use` itself is not advised, the methods it calls are. Register the middleware as a provider as well to have `use` advised.
-- A factory or value provider is woven by the class of its instance when the application initializes, and only when it is a singleton. Modules loaded with `LazyModuleLoader` are not woven.
-- Arrow-function class fields and `#private` methods cannot be advised: they are not members of the prototype.
-- There are no return type or parameter type patterns; `P.method`, `P.args` and annotation contracts carry the types.
-- The advice of a running application cannot be changed.
+await moduleRef.get(TransferService).transfer("alice", "bob", 25);
+const { entries } = moduleRef.get(AuditTrail);
+await moduleRef.close();
+```
 
-## Errors
+Close each application or testing module: `close()` detaches it from the woven classes. An object created with `new` runs its original methods when no live application advises its class:
 
-| Class                      | Thrown when                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------ |
-| `AspectConfigurationError` | Aspects, pointcuts, advice or module options are misconfigured, or a bootstrap validation fails. |
-| `AspectUsageError`         | Advice is misused at run time, such as asynchronous advice on a synchronous join point.          |
-| `AspectNotReadyError`      | A woven method is invoked before the instance of an aspect or advisor that advises it exists.    |
+```ts
+const unmanaged = new TransferService();
+await unmanaged.transfer("alice", "bob", 25);
+```
+
+- **Unmanaged instances.** While exactly one live application advises a class, an object of that class created with `new` is advised by that application.
+- **Several applications in one process** stay apart. An instance is advised by the application whose container created it, also when that application excludes the class or matches nothing in it, and an instance of a closed application is not advised by a later one.
+- **Ambiguous objects.** When several live applications advise a class and nothing tells which of them an object belongs to, as for an object created with `new`, a call raises `AspectUsageError`. With `strict: false` in each of those applications, the most recently created one advises the object and logs a warning. An application that is never closed counts as live until it is garbage collected, so close the modules of earlier tests.
+- **Replaced aspects.** An aspect replaced with `overrideProvider(...).useValue(...)` is no aspect any more: its advice does not run.
+
+## Bootstrap validation
+
+`AspectModule` validates the configuration in its `onModuleInit` hook and raises the findings of one application as one `AspectConfigurationError`.
+
+| Finding                                                                                   | `strict: true`               | `strict: false`                                  |
+| ----------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------ |
+| Advice decorators on a class without `@Aspect`                                            | Error                        | Error                                            |
+| An aspect or advisor supplied by a factory, value or alias provider                       | Error                        | Error                                            |
+| An aspect or advisor that is not a singleton                                              | Error                        | Warning; its advice raises `AspectNotReadyError` |
+| A `perTarget` or `perClass` aspect with a dependency that is no singleton provider        | Error                        | Warning; the call fails                          |
+| An advisor instance without `advice` or with an `order` that is no number                 | Error                        | Warning; the call fails                          |
+| A `requiresAdvice` annotation on a member no advisor handles, or on a class never advised | Error that lists the members | Warning; the call fails                          |
+| A pointcut that matches no member of the application                                      | Warning                      | Warning                                          |
+| Different aspects with the same order, or without one, on one member                      | Warning                      | Warning                                          |
+| An aspect or advisor class registered in several modules                                  | Warning                      | Warning                                          |
+| A global module with a shutdown hook imported before `AspectModule`                       | Warning                      | Warning                                          |
+
+Independent of `strict`, `compile()` fails when `AspectModule` is registered more than once, when an aspect extends another `@Aspect` class and when an introduction collides with a member; `init()` fails when the `forRootAsync` options depend on a request-scoped or transient provider.
+
+### Errors
+
+| Class                      | Thrown when                                                                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AspectConfigurationError` | Aspects, pointcuts, advice or module options are misconfigured, a bootstrap validation fails, or a member is called whose required advice is missing. |
+| `AspectUsageError`         | Advice is misused at run time: asynchronous advice on a synchronous join point, an introduction that is not declared, an ambiguous object.            |
+| `AspectNotReadyError`      | A woven member is called before the instance of an aspect or advisor that advises it exists.                                                          |
 
 `instanceof` recognizes these errors across the CommonJS and ES module builds of the package.
 
+## Limitations
+
+- **Calls during instantiation.** A call made while Nest instantiates providers, in a constructor or a provider factory, is not guaranteed to be advised. Before the weaver has run it runs without advice; after that, a call that reaches a woven member before the instance of its aspect or advisor exists raises `AspectNotReadyError`.
+- **Import order.** With a global module imported before `AspectModule`, the `onApplicationShutdown` hooks of that module run after `AspectModule` has shut down, without advice.
+- **Middleware.** A middleware class that is only passed to `consumer.apply()` becomes known when the application initializes, after the router has bound its `use` method: `use` itself is not advised, the methods it calls are. Register the middleware as a provider as well to have `use` advised.
+- **Factory and value providers.** A singleton factory or value provider is woven by the class of its instance when the application initializes; the instance of a request-scoped or transient factory provider when the container first resolves one.
+- **Aspects are class providers.** An aspect or advisor that a `useFactory`, `useValue` or `useExisting` provider supplies is rejected.
+- **Lazy-loaded modules** (`LazyModuleLoader`) are not woven.
+- **Not join points**: arrow-function class fields, `#private` methods, constructors, introduced members, and the members of aspects, advisors, module classes and excluded classes.
+- **Subclasses.** A subclass the container manages that matches no advisor is not advised through the dispatcher it inherits from a woven superclass; a `super` call from an override is advised when the superclass is woven.
+- **No type patterns.** A pointcut cannot match by return type or parameter type; `P.method`, `P.args` and annotation contracts carry types.
+- **An application without `AspectModule`** is invisible to the others: while another live application advises a class, the instances of that class in the application without the module are advised by it.
+- **Observables.** Advice that runs because a subscriber unsubscribes is not awaited.
+- The advice of a running application cannot be changed.
+
+## Spring concept mapping
+
+| Spring                                                              | nestjs-aspect                                                    |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `@EnableAspectJAutoProxy`                                           | `AspectModule.forRoot()` / `forRootAsync()`                      |
+| `@Aspect` with `@Component`                                         | `@Aspect()` in the `providers` of a module                       |
+| `@Pointcut` method                                                  | An exported constant built with `P`                              |
+| AspectJ pointcut expression, `&&`, `\|\|`, `!`                      | `P` designators, `.and()`, `.or()`, `.not()`                     |
+| `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After`, `@Around` | The same names                                                   |
+| `returning`, `throwing`                                             | The second advice parameter; `{ throwing: ErrorClass }`          |
+| `JoinPoint`, `ProceedingJoinPoint`                                  | `JP<typeof pc>`, `PJP<typeof pc>`                                |
+| `proceed()`, `proceed(args)`                                        | `jp.proceed()`, `jp.proceedWith(...args)`                        |
+| `args(..)` and `@annotation(..)` binding                            | `jp.args`, `jp.annotation(A)`, typed by the pointcut             |
+| Java annotation                                                     | `createAnnotation()`, or `Reflector.createDecorator()`           |
+| `@Order`, `Ordered`                                                 | `@Aspect({ order })`, `order` of an advisor                      |
+| `perthis`, `pertarget`, `pertypewithin`                             | `instantiation: "perTarget"`, `"perClass"`                       |
+| `@DeclareParents`                                                   | `@DeclareParents`, `isIntroduced`, `introduced`, `jp.introduced` |
+| `Advisor`, `MethodInterceptor`, `MethodInvocation`                  | `@Advisor()`, `MethodInterceptor`, `MethodInvocation`            |
+| `Pointcut`, `ClassFilter`, `MethodMatcher`                          | `PointcutLike`, `ClassFilter`, `MethodMatcher`                   |
+| `AdvisorAdapterRegistry`                                            | `AdviceAdapter`, the `adviceAdapters` option                     |
+| `ReactiveAdapterRegistry`                                           | `ReturnValueAdapter`, the `returnValueAdapters` option           |
+| `Advised`                                                           | `AspectInspector` (read-only)                                    |
+| `AopContext.currentProxy()`                                         | Not needed: self-invocation is advised                           |
+| `bean(name*)`                                                       | `P.bean()`                                                       |
+| Package                                                             | Nest module: `P.inModule()`                                      |
+
 ## Design
 
-[docs/design.md](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-aspect/docs/design.md) specifies the API, the weaving model and the error behavior. [docs/spring-aop-analysis.md](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-aspect/docs/spring-aop-analysis.md) describes the Spring AOP model and the feature list the design maps to. [docs/sketch/api.ts](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-aspect/docs/sketch/api.ts) holds a type-level sketch of the public API, and [docs/spike](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect/docs/spike) holds runnable experiments on weaving timing.
+[docs/design.md](https://github.com/thilllon/nestjs-kit/blob/main/packages/nestjs-aspect/docs/design.md) explains aspect-oriented programming and the Spring AOP model, and specifies the weaving strategy, the run-time semantics, the differences from Spring and the coverage of the Spring feature list. [examples/basic](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect/examples/basic) is a runnable application.
 
 [Contributing](https://github.com/thilllon/nestjs-kit/blob/main/CONTRIBUTING.md) · [Release setup](https://github.com/thilllon/nestjs-kit/blob/main/docs/releases.md)

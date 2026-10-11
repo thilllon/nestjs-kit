@@ -26,7 +26,8 @@ import {
 const TAG = "aspect-module-test:tag";
 
 /**
- * The application of `docs/spike/weaving-timing.ts`, woven by `AspectModule`.
+ * An application with a controller, a service, a request-scoped provider and
+ * a module with a lifecycle hook, woven by `AspectModule`.
  * Every call declares its own classes: stubs live on class prototypes, which
  * the tests of one file share.
  */
