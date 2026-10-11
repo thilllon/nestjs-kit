@@ -19,6 +19,7 @@ export type {
 export {
   type AdviceDecorator,
   type AdviceResult,
+  type AdviceValue,
   After,
   AfterReturning,
   AfterThrowing,

@@ -86,6 +86,7 @@ const publicApi = {
       "AdviceDecorator",
       "AdviceKind",
       "AdviceResult",
+      "AdviceValue",
       "AdvisedMember",
       "AdvisorType",
       "AllShapes",

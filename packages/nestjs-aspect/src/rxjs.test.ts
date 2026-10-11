@@ -109,8 +109,9 @@ describe("observableAdapter with after-returning advice", () => {
     @Aspect()
     class AuditAspect {
       @AfterReturning(quotes)
-      record(jp: JP<typeof quotes>, value: unknown) {
-        log.push(`returned ${jp.args[0]} ${String(value)}`);
+      // The advice declares the type of the values the stream emits.
+      record(jp: JP<typeof quotes>, value: string) {
+        log.push(`returned ${jp.args[0]} ${value}`);
       }
     }
 

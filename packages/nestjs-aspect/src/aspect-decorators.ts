@@ -89,6 +89,15 @@ export type AsyncGuard<S extends Shape, T extends Fn> =
       : unknown
     : unknown;
 
+/**
+ * Type of the result after-returning advice receives: the awaited result of
+ * the join point. For a result with a `subscribe` method it is `any`: a
+ * `ReturnValueAdapter` decides at run time what such a result settles to,
+ * as `observableAdapter` passes the last value an Observable emits, so the
+ * advice declares the type itself.
+ */
+export type AdviceValue<R> = R extends { subscribe: Fn } ? any : Awaited<R>;
+
 export type AdviceDecorator<S extends Shape, F extends Fn> = <T extends F>(
   target: object,
   key: string | symbol,
@@ -177,12 +186,12 @@ export function After<S extends Shape>(
   return adviceDecorator("after", pc);
 }
 
-/** Runs after a normal completion with the awaited result; cannot replace it. */
+/** Runs after a normal completion with the settled result; cannot replace it. */
 export function AfterReturning<S extends Shape>(
   pc: Pointcut<S>,
 ): AdviceDecorator<
   S,
-  (jp: JoinPoint<S>, result: Awaited<S["returns"]>) => AdviceResult<S>
+  (jp: JoinPoint<S>, result: AdviceValue<S["returns"]>) => AdviceResult<S>
 > {
   return adviceDecorator("afterReturning", pc);
 }
