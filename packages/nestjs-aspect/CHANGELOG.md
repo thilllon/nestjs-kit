@@ -1,5 +1,11 @@
 # nestjs-aspect
 
+## 0.0.2
+
+### Patch Changes
+
+- b4e85c1: Spell out the abbreviated type names. `JP` is `JoinPointOf`, `PJP` is `ProceedingJoinPointOf`, `Fn` is `AnyFunction`, and the `ann` member of `Shape` is `annotations`. The abbreviated names are removed.
+
 ## 0.0.1
 
 ### Patch Changes
