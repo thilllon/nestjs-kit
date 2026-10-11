@@ -6,7 +6,15 @@
 [![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-This package is being prepared for its first npm release and is not yet published on npm. The entry point exports the declaration API: annotations, pointcuts, aspect and advice decorators, the advisor interfaces and the error classes. It does not yet export the module that weaves aspects into a Nest application, so declared advice does not run in an application.
+Version `0.0.0` exports the declaration API: annotations, pointcuts, aspect and advice decorators, the advisor interfaces and the error classes. It does not export the module that weaves aspects into a Nest application, so declared advice does not run in an application.
+
+## Installation
+
+```sh
+pnpm add nestjs-aspect
+```
+
+`@nestjs/common`, `@nestjs/core`, `reflect-metadata` and `rxjs` are peer dependencies.
 
 Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript declarations. Aspects use legacy decorators: enable `experimentalDecorators` and `emitDecoratorMetadata`.
 
