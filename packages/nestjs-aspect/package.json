@@ -1,0 +1,80 @@
+{
+  "name": "nestjs-aspect",
+  "version": "0.0.0",
+  "description": "Spring-style aspect-oriented programming for NestJS",
+  "license": "ISC",
+  "author": "thilllon",
+  "type": "commonjs",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/nestjs-aspect"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "nest",
+    "typescript",
+    "aop",
+    "aspect",
+    "aspect-oriented-programming",
+    "pointcut",
+    "advice"
+  ],
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.test.json",
+    "build": "tsdown --config ../../tsdown.config.mts",
+    "test": "vitest run --project unit"
+  },
+  "module": "./dist/index.mjs",
+  "peerDependencies": {
+    "@nestjs/common": "^12.0.0",
+    "@nestjs/core": "^12.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/common": "12.0.3",
+    "@nestjs/core": "12.0.3",
+    "@nestjs/testing": "12.0.3",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0",
+    "@swc/core": "1.16.2",
+    "@types/node": "24.13.5",
+    "typescript": "7.0.2",
+    "unplugin-swc": "1.6.0",
+    "vitest": "5.0.1"
+  }
+}
