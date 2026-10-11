@@ -20,8 +20,18 @@ export interface DispatchContext {
   readonly strict: boolean;
   /** The one weak reference to the context that the registry stores. */
   readonly ref: WeakRef<DispatchContext>;
-  /** True when `target` is an instance the application's container holds. */
-  owns(target: object): boolean;
+  /**
+   * The reference to the context that the registry stores with each object
+   * the application owns; the context empties it when it closes.
+   */
+  readonly handle: ContextHandle;
+  /**
+   * How the application's container holds `target`: `"created"` for the
+   * instance of a class provider, which the container constructed,
+   * `"held"` for the instance of a factory or value provider, `undefined`
+   * for an object the container does not hold.
+   */
+  owns(target: object): Ownership | undefined;
   /** True when the application advises a member of `owner`. */
   weaves(owner: Class): boolean;
   /**
@@ -49,12 +59,31 @@ export interface DispatchContext {
   close(): void;
 }
 
+/** How the container of an application came to hold an object. */
+export type Ownership = "created" | "held";
+
+/**
+ * A strong reference to a context that the context itself empties when it
+ * closes. The registry stores it with the objects the application owns: an
+ * application stays live while one of its objects is reachable, and a closed
+ * application is not kept in memory by the objects that outlive it.
+ */
+export interface ContextHandle {
+  context: DispatchContext | undefined;
+}
+
+/** A context that owns an object. */
+interface Owner {
+  readonly handle: ContextHandle;
+  ownership: Ownership;
+}
+
 /** What the registry knows about the applications of one object. */
 interface Attribution {
   /** Contexts whose container holds the object or created it. */
-  owners: WeakRef<DispatchContext>[];
-  /** True once a context that owned the object is closed or gone. */
-  orphaned: boolean;
+  owners: Owner[];
+  /** Handles of the closed contexts whose container created the object. */
+  readonly creators: ContextHandle[];
   /** Registry generation at which the containers were searched for it. */
   searched: number;
 }
@@ -70,12 +99,22 @@ export interface StubRecord {
    * then is no member of the class, it raises `AspectUsageError`.
    */
   readonly introduced?: boolean;
+  /**
+   * Handles of the contexts in which the member carries an annotation that
+   * requires advice: the stub never runs `original` for an object such an
+   * application created.
+   */
+  readonly required: WeakSet<ContextHandle>;
 }
 
 /**
- * The registry refers to contexts weakly: an application that is abandoned
- * without `close()`, such as one whose bootstrap failed, leaves the registry
- * when it is garbage collected, and no registry entry keeps a container alive.
+ * The registry refers to a context strongly only from the objects the
+ * application owns, as the value of a `WeakMap` entry whose key is the
+ * object. An application therefore stays live as long as one of its objects
+ * is reachable, also when nothing else refers to its container. An
+ * application that is abandoned without `close()`, such as one whose
+ * bootstrap failed, leaves the registry when it is garbage collected with
+ * its objects.
  */
 export interface WeavingRegistry {
   /** The applications of each object a stub was called on. */
@@ -221,21 +260,34 @@ export function claimContainer(
 function attributionOf(target: object): Attribution {
   let attribution = attributions.get(target);
   if (!attribution) {
-    attribution = { owners: [], orphaned: false, searched: -1 };
+    attribution = { owners: [], creators: [], searched: -1 };
     attributions.set(target, attribution);
   }
   return attribution;
 }
 
-function addOwner(attribution: Attribution, context: DispatchContext): void {
-  if (!attribution.owners.includes(context.ref)) {
-    attribution.owners.push(context.ref);
+function addOwner(
+  attribution: Attribution,
+  context: DispatchContext,
+  ownership: Ownership,
+): void {
+  const owner = attribution.owners.find(
+    (candidate) => candidate.handle === context.handle,
+  );
+  if (!owner) {
+    attribution.owners.push({ handle: context.handle, ownership });
+  } else if (ownership === "created") {
+    owner.ownership = ownership;
   }
 }
 
 /** Records `context` as an owner of `target`. */
-export function recordOwner(target: object, context: DispatchContext): void {
-  addOwner(attributionOf(target), context);
+export function recordOwner(
+  target: object,
+  context: DispatchContext,
+  ownership: Ownership,
+): void {
+  addOwner(attributionOf(target), context, ownership);
 }
 
 /** Makes `context` a candidate for the instances of `type`. */
@@ -251,13 +303,21 @@ export function advanceGeneration(): void {
   epoch.generation++;
 }
 
+/** A live context that owns an object. */
+interface LiveOwner {
+  readonly context: DispatchContext;
+  readonly ownership: Ownership;
+}
+
 /**
  * The live contexts that own `target`: those that recorded it when their
  * container created or handed out the instance, and those whose container
  * holds it. The containers are searched once per registry generation.
+ * `orphaned` is true once a context whose container created the object is
+ * closed.
  */
 function ownersOf(target: object): {
-  live: DispatchContext[];
+  live: LiveOwner[];
   orphaned: boolean;
 } {
   const attribution = attributionOf(target);
@@ -265,17 +325,41 @@ function ownersOf(target: object): {
     attribution.searched = epoch.generation;
     const type = classOf(target);
     for (const context of type ? liveContexts(type) : []) {
-      if (context.owns(target)) {
-        addOwner(attribution, context);
+      const ownership = context.owns(target);
+      if (ownership) {
+        addOwner(attribution, context, ownership);
       }
     }
   }
-  const live = attribution.owners.map((ref) => ref.deref()).filter(isLive);
-  if (live.length !== attribution.owners.length) {
-    attribution.owners = live.map((context) => context.ref);
-    attribution.orphaned = true;
+  const live: LiveOwner[] = [];
+  for (const { handle, ownership } of attribution.owners) {
+    if (isLive(handle.context)) {
+      live.push({ context: handle.context, ownership });
+    } else if (ownership === "created") {
+      attribution.creators.push(handle);
+    }
   }
-  return { live, orphaned: attribution.orphaned };
+  if (live.length !== attribution.owners.length) {
+    attribution.owners = attribution.owners.filter(({ handle }) =>
+      isLive(handle.context),
+    );
+  }
+  return { live, orphaned: attribution.creators.length > 0 };
+}
+
+/**
+ * True when `target` is an object that a closed application created and
+ * for which the member of `record` requires advice in that application.
+ * `resolveContext` has examined the owners of `target` before.
+ */
+export function requiresClosedAdvice(
+  target: unknown,
+  record: StubRecord,
+): boolean {
+  const creators = isObject(target)
+    ? attributions.get(target)?.creators
+    : undefined;
+  return creators?.some((handle) => record.required.has(handle)) ?? false;
 }
 
 /**
@@ -291,7 +375,7 @@ function ownerOfDependencies(
   for (const key of Reflect.ownKeys(target)) {
     const value: unknown = Object.getOwnPropertyDescriptor(target, key)?.value;
     if (typeof value === "object" && value !== null) {
-      for (const context of ownersOf(value).live) {
+      for (const { context } of ownersOf(value).live) {
         found.add(context);
       }
     }
@@ -330,21 +414,23 @@ function choose(
  * The live context that advises `target` through a stub installed on
  * `owner`, or `undefined` when the call runs the original function.
  *
- * 1. An object belongs to the live contexts that own it: the context whose
- *    container created it or handed it out, which covers request-scoped,
- *    transient and durable instances, and the contexts whose container holds
- *    it. One owner takes the object whether or not it advises the member: an
- *    application that excludes the class or matches nothing in it runs the
- *    original function for its own instances.
- * 2. Of several owners, as for one object that the containers of two
- *    applications hold, the one that advises `owner` takes the object;
- *    `choose` decides between several of those.
- * 3. An object whose owners are all closed or gone runs the original
- *    function: it belongs to an application that no longer exists and is not
- *    adopted by another one.
- * 4. Any other object, such as one created with `new`, one under construction
- *    or a `this` that is no object, goes to the live contexts that advise
- *    `owner`: the only one, else the one that owns the objects in the
+ * 1. An object belongs to the live context whose container created it: the
+ *    instance of a class provider of any scope. That context takes the
+ *    object whether or not it advises the member: an application that
+ *    excludes the class or matches nothing in it runs the original function
+ *    for its own instances.
+ * 2. A live context whose container holds the object as the instance of a
+ *    factory or value provider, or handed it out as one, takes the object
+ *    when it advises `owner`. Of several contexts under rules 1 and 2, as
+ *    for one object in the containers of two applications, the one that
+ *    advises `owner` takes the object; `choose` decides between several.
+ * 3. An object that a container created and whose creators are all closed
+ *    runs the original function: it belongs to an application that no
+ *    longer exists and is not adopted by another one.
+ * 4. Any other object, such as one created with `new`, one under
+ *    construction, one that a container only holds without advising its
+ *    class, or a `this` that is no object, goes to the live contexts that
+ *    advise `owner`: the only one, else the one that owns the objects in the
  *    properties of the object, else the one `choose` decides for. Such an
  *    object is resolved again on every call, so it follows the applications
  *    as they start and close.
@@ -360,24 +446,31 @@ export function resolveContext(
     // The common case, without allocation: one owner, known to be current.
     const known = attributions.get(target);
     if (known?.searched === epoch.generation && known.owners.length === 1) {
-      const only = known.owners[0].deref();
-      if (isLive(only)) {
+      const [{ handle, ownership }] = known.owners;
+      const only = handle.context;
+      if (isLive(only) && (ownership === "created" || only.weaves(owner))) {
         return only;
       }
     }
     const { live, orphaned } = ownersOf(target);
-    if (live.length === 1) {
-      return live[0];
+    const taking = live
+      .filter(
+        ({ context, ownership }) =>
+          ownership === "created" || context.weaves(owner),
+      )
+      .map(({ context }) => context);
+    if (taking.length === 1) {
+      return taking[0];
     }
-    if (live.length > 1) {
-      const advising = live.filter((context) => context.weaves(owner));
+    if (taking.length > 1) {
+      const advising = taking.filter((context) => context.weaves(owner));
       return advising.length > 1
         ? choose(
             advising,
             owner,
             "the instance that was called is held by the containers of several live applications",
           )
-        : (advising[0] ?? live[0]);
+        : (advising[0] ?? taking[0]);
     }
     if (orphaned) {
       return undefined;

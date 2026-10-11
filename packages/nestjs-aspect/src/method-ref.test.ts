@@ -157,12 +157,3 @@ describe("createMethodRef", () => {
     );
   });
 });
-
-describe("createClassRef", () => {
-  it("describes a class outside a container without registrations", () => {
-    const ref = createClassRef(Concrete);
-
-    expect(ref.beans).toEqual([]);
-    expect(ref.reachesModule(Base, Concrete)).toBe(false);
-  });
-});

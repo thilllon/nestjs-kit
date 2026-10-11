@@ -85,7 +85,10 @@ export type MethodOrClassDecorator<F extends Fn> = {
  */
 export interface Annotation<V, F extends Fn = Fn, N extends string = string> {
   readonly annotationName: N;
-  /** A method that carries the annotation must be matched by an advisor. */
+  /**
+   * A member that carries the annotation must be advised by an advisor
+   * whose pointcut refers to the annotation.
+   */
   readonly requiresAdvice: boolean;
   // biome-ignore lint/suspicious/noConfusingVoidType: void marks an annotation that takes no value
   (...value: [V] extends [void] ? [] : [value: V]): MethodOrClassDecorator<F>;

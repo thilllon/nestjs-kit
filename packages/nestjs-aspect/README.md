@@ -24,13 +24,15 @@
 pnpm add nestjs-aspect
 ```
 
+npm serves version `0.0.0`, which exports the declaration API only: annotations, pointcuts, the aspect and advice decorators, the advisor interfaces and the error classes. `AspectModule`, `AspectInspector`, introductions, the instantiation models and the `nestjs-aspect/rxjs` entry require version `0.0.1`.
+
 Requirements:
 
 - **Node.js 24** or later and **NestJS 12**.
 - Peer dependencies: `@nestjs/common` and `@nestjs/core` `^12.0.0`, `reflect-metadata` `^0.2.2`, `rxjs` `^7.8.2`.
 - Legacy decorators with emitted metadata, as Nest itself requires: `"experimentalDecorators": true` and `"emitDecoratorMetadata": true` in `tsconfig.json`.
 
-The package ships ES module and CommonJS builds with TypeScript declarations. It has two entry points: `nestjs-aspect` and `nestjs-aspect/rxjs`.
+The package ships ES module and CommonJS builds with TypeScript declarations. It has two entry points: `nestjs-aspect` and `nestjs-aspect/rxjs`. The types of `nestjs-aspect/rxjs` resolve through the `exports` field of the package, which TypeScript reads with `moduleResolution` `node16`, `nodenext` or `bundler`.
 
 ## Quick start
 
@@ -245,7 +247,7 @@ export class BillingModule {}
 
 - The name is the identity of an annotation: annotations created with the same name read and write the same metadata.
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses. An annotation without a method contract also applies to accessors.
-- **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice.
+- **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice. The same holds after the application has closed or has failed to initialize: on an instance its container created, the call of a member that requires advice raises `AspectConfigurationError`.
 - `isAnnotation(value)` tells an annotation from other functions.
 - Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `jp.findAnnotation`.
 
@@ -286,7 +288,7 @@ export const deposits = P.within(AccountService).and(P.args(Account, Number));
 - **Types.** `charge` carries the signature of `PaymentGateway.charge`, `retryable` the method contract and the value type of `Retryable`, and `deposits` types `jp.args` as `[Account, number]`. `and` guarantees the annotations of both sides, `or` those common to both, `not` none. Broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
 - **Default join points.** Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors. A constructor is never a join point.
 - **Static and dynamic matching.** Every designator except `P.args` is evaluated once per class member when the class is woven. `P.args` is evaluated on every call of a member the rest of the pointcut matches; combine it with a static designator. In `P.args`, a class matches an argument that is `instanceof` it, `String`, `Number`, `Boolean`, `BigInt` and `Symbol` match their primitives, `P.ANY` matches one argument and `P.REST` the remaining ones.
-- **`P.bean`** matches a class when one of its registrations has a matching token, `useClass` tokens included. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched when the application initializes.
+- **`P.bean`** matches a class when one of its registrations has a matching token, `useClass` tokens included. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched when the application initializes, and the instance of a request-scoped or transient `useFactory` provider when the container first resolves one. `P.bean` selects the class: its advice then applies to every instance of that class.
 - **`P.inModule(Module, { transitive: true })`** follows the imports of the module. A global module counts only when the `@Module()` decorator of the importing module lists it.
 
 ## Advice
@@ -434,8 +436,8 @@ The compiler rejects an annotation on a method outside its contract, a missing o
 
 ## Ordering
 
-- **Across aspects and advisors**, a lower `order` has the higher precedence: its advice runs first on the way in and last on the way out. One without an order has the lowest precedence. Aspects with equal orders, or without one, run in registration order, which the weaver reports as a warning when they advise the same member.
-- **Within one aspect**, the advice kinds nest in this order from the outside in: around, before, after, after returning, after throwing. After advice therefore runs after the after-returning and after-throwing advice of its aspect. Advice of the same kind runs in declaration order.
+- **Across aspects and advisors**, a lower `order` has the higher precedence: its advice runs first on the way in and last on the way out. One without an order has the lowest precedence. Aspects with equal orders, or without one, nest in registration order: the one registered first is the outer one. The weaver reports this as a warning when they advise the same member.
+- **Within one aspect**, the advice kinds nest in this order from the outside in: around, before, after, after returning, after throwing. After advice therefore runs after the after-returning and after-throwing advice of its aspect. Advice of the same kind nests in declaration order: the first declared is the outermost, so before advice runs in declaration order, and after, after-returning and after-throwing advice in reverse declaration order.
 
 ```ts
 import {
@@ -772,13 +774,13 @@ await unmanaged.transfer("alice", "bob", 25);
 ```
 
 - **Unmanaged instances.** While exactly one live application advises a class, an object of that class created with `new` is advised by that application.
-- **Several applications in one process** stay apart. An instance is advised by the application whose container created it, also when that application excludes the class or matches nothing in it, and an instance of a closed application is not advised by a later one.
-- **Ambiguous objects.** When several live applications advise a class and nothing tells which of them an object belongs to, as for an object created with `new`, a call raises `AspectUsageError`. With `strict: false` in each of those applications, the most recently created one advises the object and logs a warning. An application that is never closed counts as live until it is garbage collected, so close the modules of earlier tests.
+- **Several applications in one process** stay apart. An instance is advised by the application whose container created it, also when that application excludes the class or matches nothing in it, and an instance of a closed application is not advised by a later one. An object that a container only holds, as the instance of a `useValue` or `useFactory` provider, belongs to that application while the application advises its class.
+- **Ambiguous objects.** When several live applications advise a class and nothing tells which of them an object belongs to, as for an object created with `new`, a call raises `AspectUsageError`. With `strict: false` in each of those applications, the most recently created one advises the object and logs a warning. An application that is never closed stays live as long as one of its instances is reachable, so close the modules of earlier tests.
 - **Replaced aspects.** An aspect replaced with `overrideProvider(...).useValue(...)` is no aspect any more: its advice does not run.
 
 ## Bootstrap validation
 
-`AspectModule` validates the configuration in its `onModuleInit` hook and raises the findings of one application as one `AspectConfigurationError`.
+`AspectModule` validates the configuration in its `onModuleInit` hook and raises the findings of one application as one `AspectConfigurationError`. `LazyModuleLoader.load()` validates the classes of the modules it loaded in the same way and rejects with that error.
 
 | Finding                                                                                   | `strict: true`               | `strict: false`                                  |
 | ----------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------ |
@@ -808,11 +810,14 @@ Independent of `strict`, `compile()` fails when `AspectModule` is registered mor
 ## Limitations
 
 - **Calls during instantiation.** A call made while Nest instantiates providers, in a constructor or a provider factory, is not guaranteed to be advised. Before the weaver has run it runs without advice; after that, a call that reaches a woven member before the instance of its aspect or advisor exists raises `AspectNotReadyError`.
-- **Import order.** With a global module imported before `AspectModule`, the `onApplicationShutdown` hooks of that module run after `AspectModule` has shut down, without advice.
+- **Import order.** With a global module imported before `AspectModule`, the `onApplicationShutdown` hooks of that module run after `AspectModule` has shut down, without advice; a member that requires advice rejects the call.
 - **Middleware.** A middleware class that is only passed to `consumer.apply()` becomes known when the application initializes, after the router has bound its `use` method: `use` itself is not advised, the methods it calls are. Register the middleware as a provider as well to have `use` advised.
-- **Factory and value providers.** A singleton factory or value provider is woven by the class of its instance when the application initializes; the instance of a request-scoped or transient factory provider when the container first resolves one.
+- **Factory and value providers.** A singleton factory or value provider is woven by the class of its instance when the application initializes; the instance of a request-scoped or transient factory provider when the container first resolves one. A pointcut that matches only such instances is reported as matching nothing when the application initializes.
 - **Aspects are class providers.** An aspect or advisor that a `useFactory`, `useValue` or `useExisting` provider supplies is rejected.
-- **Lazy-loaded modules** (`LazyModuleLoader`) are not woven.
+- **Lazy-loaded modules.** The classes of a module loaded with `LazyModuleLoader` are woven when `load()` resolves, after their instances exist: a call that a constructor of such a module makes is not advised. An aspect or advisor in a lazy-loaded module is rejected; register aspects in a module the application loads at bootstrap.
+- **Object identity.** An application recognizes its instances by identity. A `Proxy` around an instance, or an object created with `Object.create(instance)`, counts as an object no container created: the live applications that advise its class advise it, also when the application of the wrapped instance excludes the class or matches nothing in it.
+- **`requiresAdvice` outside an application.** The rule protects the objects of an application. On an object created with `new`, a member that requires advice runs without it while no live application advises the class.
+- **Applications without a handle.** An application stays live while one of its instances is reachable. An instance that leaves its constructor through a side channel, and is neither injected, resolved nor called before the last reference to the application is dropped, does not keep it live.
 - **Not join points**: arrow-function class fields, `#private` methods, constructors, introduced members, and the members of aspects, advisors, module classes and excluded classes.
 - **Subclasses.** A subclass the container manages that matches no advisor is not advised through the dispatcher it inherits from a woven superclass; a `super` call from an override is advised when the superclass is woven.
 - **No type patterns.** A pointcut cannot match by return type or parameter type; `P.method`, `P.args` and annotation contracts carry types.

@@ -141,8 +141,130 @@ describe("introductions", () => {
     await introducing.moduleRef.close();
     expect(isIntroduced(report, UsageTracked)).toBe(false);
     expect(() => (report as Report & UsageTracked).useCount).toThrow(
-      "Report.useCount is introduced by an aspect",
+      AspectUsageError,
     );
+    expect(() => (report as Report & UsageTracked).useCount).toThrow(
+      "Report.useCount is introduced by an aspect, and the application of the instance it was called on is closed or does not declare the introduction",
+    );
+  });
+
+  it("does not introduce into a subclass in the container that the class filter rejects", async () => {
+    @Injectable()
+    class Base {}
+
+    @Injectable()
+    class Sub extends Base {}
+    const filter: ClassFilter = { matches: (ref) => ref.type === Base };
+
+    @Aspect()
+    class UsageTracking {
+      @DeclareParents(filter, { use: DefaultUsageTracked })
+      static readonly mixin: UsageTracked;
+    }
+    const { moduleRef } = await compileWoven({
+      providers: [Base, Sub, UsageTracking],
+    });
+    const sub = moduleRef.get(Sub);
+    expect(isIntroduced(moduleRef.get(Base), UsageTracked)).toBe(true);
+    expect(isIntroduced(sub, UsageTracked)).toBe(false);
+    expect(() => (sub as Sub & UsageTracked).incrementUseCount()).toThrow(
+      AspectUsageError,
+    );
+  });
+
+  it("gives an instance of a subclass outside the container the advice and the introductions of its woven superclass", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Report {
+      render() {
+        return "report";
+      }
+    }
+
+    class Outside extends Report {}
+    const reports = P.within(Report);
+
+    @Aspect()
+    class UsageTracking {
+      @DeclareParents(reports, { use: DefaultUsageTracked })
+      static readonly mixin: UsageTracked;
+
+      @Before(reports)
+      record(_jp: JoinPoint<AnyShape>) {
+        log.push("advice");
+      }
+    }
+    await compileWoven({ providers: [Report, UsageTracking] });
+
+    const outside = new Outside();
+    expect(outside.render()).toBe("report");
+    expect(log).toEqual(["advice"]);
+    if (!isIntroduced(outside, UsageTracked)) {
+      throw new Error("the subclass instance is introduced");
+    }
+    outside.incrementUseCount();
+    expect(outside.useCount).toBe(1);
+  });
+
+  it("applies the introductions that a superclass of the aspect declares", async () => {
+    @Injectable()
+    class Report {}
+    const reports = P.within(Report);
+
+    class TrackingSupport {
+      @DeclareParents(reports, { use: DefaultUsageTracked })
+      static readonly mixin: UsageTracked;
+    }
+
+    @Aspect()
+    class UsageTracking extends TrackingSupport {}
+
+    const { moduleRef } = await compileWoven({
+      providers: [Report, UsageTracking],
+    });
+    expect(isIntroduced(moduleRef.get(Report), UsageTracked)).toBe(true);
+  });
+
+  it("introduces a setter next to the getter the class has under the same name", async () => {
+    abstract class Labelled {
+      abstract set label(value: string);
+
+      abstract get current(): string;
+    }
+
+    class DefaultLabelled implements Labelled {
+      private value = "none";
+
+      set label(value: string) {
+        this.value = value;
+      }
+
+      get current(): string {
+        return this.value;
+      }
+    }
+
+    @Injectable()
+    class Report {
+      get label(): string {
+        return "own getter";
+      }
+    }
+    const reports = P.within(Report);
+
+    @Aspect()
+    class Labelling {
+      @DeclareParents(reports, { use: DefaultLabelled, override: true })
+      static readonly mixin: Labelled;
+    }
+    const { moduleRef } = await compileWoven({
+      providers: [Report, Labelling],
+    });
+    const report = moduleRef.get(Report) as Report & Labelled;
+    (report as { label: string }).label = "introduced";
+    expect(report.current).toBe("introduced");
+    expect(moduleRef.get(Report).label).toBe("own getter");
   });
 
   it("rejects an introduced member that the class already has, unless the introduction overrides it", async () => {

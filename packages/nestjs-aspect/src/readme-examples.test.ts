@@ -5,11 +5,11 @@
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Injectable, Logger, Module, Scope } from "@nestjs/common";
+import { Injectable, Module, Scope } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { Test } from "@nestjs/testing";
+import { Test, TestingModuleBuilder } from "@nestjs/testing";
 import { lastValueFrom, type Observable, of } from "rxjs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Advisor,
   After,
@@ -457,7 +457,37 @@ class UsageTrackingAspect {
 
 const billingProviders = [Ledger, RetryAspect];
 
-const opened: { close(): Promise<unknown> }[] = [];
+const opened: (() => Promise<unknown>)[] = [];
+
+/** Has `afterEach` close `application`, unless the test has closed it. */
+function track<T extends { close(): Promise<unknown> }>(application: T): T {
+  const close = application.close.bind(application);
+  let closing: Promise<unknown> | undefined;
+  application.close = () => {
+    closing ??= close();
+    return closing;
+  };
+  // Nest rejects close() with the error of a failed init().
+  opened.push(() => application.close().catch(() => undefined));
+  return application;
+}
+
+// The examples create their applications as the README shows it, without a
+// helper. The functions that create them are observed instead, so a test
+// that fails leaves no live application over the classes of this file.
+beforeEach(() => {
+  const compile = TestingModuleBuilder.prototype.compile;
+  vi.spyOn(TestingModuleBuilder.prototype, "compile").mockImplementation(
+    async function (this: TestingModuleBuilder, ...args) {
+      return track(await compile.apply(this, args));
+    },
+  );
+  const create = NestFactory.createApplicationContext.bind(NestFactory);
+  vi.spyOn(NestFactory, "createApplicationContext").mockImplementation(
+    async (module: Parameters<typeof create>[0]) =>
+      track(await create(module, { logger: false })),
+  );
+});
 
 /** A module with the billing module, the retry aspect and `providers`. */
 async function billing(...providers: (new (...args: any[]) => unknown)[]) {
@@ -465,13 +495,13 @@ async function billing(...providers: (new (...args: any[]) => unknown)[]) {
     imports: [AspectModule.forRoot({ report: false }), BillingModule],
     providers: [...billingProviders, ...providers],
   }).compile();
-  opened.push(moduleRef);
   return moduleRef.init();
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   trace.length = 0;
-  await Promise.all(opened.splice(0).map((closable) => closable.close()));
+  await Promise.all(opened.splice(0).map((close) => close()));
 });
 
 /** Drops what a README block and this file may differ in. */
@@ -500,7 +530,6 @@ describe("README examples", () => {
   });
 
   it("quick start: audits an annotated method through its outcome", async () => {
-    Logger.overrideLogger(false);
     const app = await NestFactory.createApplicationContext(AppModule);
     const transfers = app.get(TransferService);
 
@@ -508,7 +537,6 @@ describe("README examples", () => {
     await transfers.transfer("alice", "bob", 0).catch(() => undefined);
 
     const { entries } = app.get(AuditTrail);
-    opened.push(app);
     expect(entries).toEqual([
       'transfer: TransferService.transfer("alice", "bob", 25)',
       "transfer returned 25",
@@ -524,7 +552,6 @@ describe("README examples", () => {
     })
       .setLogger(logger)
       .compile();
-    opened.push(moduleRef);
     await moduleRef.init();
 
     expect(logger.messages("log")).toEqual([
@@ -640,7 +667,6 @@ describe("README examples", () => {
     const moduleRef = await Test.createTestingModule({
       imports: [FeedModule],
     }).compile();
-    opened.push(moduleRef);
     const feed = moduleRef.get(PriceFeed);
     const { closing } = moduleRef.get(ClosingPriceAspect);
 
@@ -656,7 +682,6 @@ describe("README examples", () => {
       imports: [AspectModule.forRoot({ report: false })],
       providers: [InvoiceService, TransactionManager, TransactionAdvisor],
     }).compile();
-    opened.push(moduleRef);
     const invoices = moduleRef.get(InvoiceService);
 
     await expect(invoices.issue(new Account("acc-1"), 10)).resolves.toBe(
@@ -679,7 +704,6 @@ describe("README examples", () => {
       imports: [AspectModule.forRoot({ report: false })],
       providers: [Session, Ledger, CallCountAspect],
     }).compile();
-    opened.push(moduleRef);
     await moduleRef.init();
     const first = await moduleRef.resolve(Session);
     const second = await moduleRef.resolve(Session);
@@ -700,7 +724,6 @@ describe("README examples", () => {
       imports: [AspectModule.forRoot({ report: false })],
       providers: [Session, UsageTrackingAspect],
     }).compile();
-    opened.push(app);
 
     const session = await app.resolve(Session);
     session.touch();

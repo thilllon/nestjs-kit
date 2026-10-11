@@ -15,11 +15,14 @@ import type {
   PointcutLike,
 } from "./types";
 import { constructorChain, isObject } from "./util";
+import { requireAdvice } from "./weaving-stub";
 import {
   advanceGeneration,
   classOf,
+  type ContextHandle,
   type DispatchContext,
   liveContexts,
+  type Ownership,
   recordOwner,
   registerType,
 } from "./weaving-registry";
@@ -74,8 +77,11 @@ export interface WeavingContextOptions {
   readonly chain: ChainOptions;
   /** See `DispatchContext.strict`. */
   readonly strict: boolean;
-  /** Static and static-transient instances the container holds for a class. */
-  instancesOf(type: Class): Iterable<unknown>;
+  /**
+   * Static and static-transient instances the container holds for a class,
+   * each with the way the container came to hold it.
+   */
+  instancesOf(type: Class): Iterable<readonly [unknown, Ownership]>;
   warn(message: string): void;
 }
 
@@ -86,6 +92,8 @@ export interface WeavingContextOptions {
  */
 export class WeavingContext implements DispatchContext {
   readonly ref: WeakRef<DispatchContext> = new WeakRef(this);
+
+  readonly handle: ContextHandle = { context: this };
 
   private isClosed = false;
 
@@ -169,6 +177,15 @@ export class WeavingContext implements DispatchContext {
     }
   }
 
+  /**
+   * Records that a member of an examined class carries an annotation that
+   * requires advice: once the context is closed, the stub of the member
+   * rejects the calls on the instances the container created.
+   */
+  requireAdvice(method: MethodRef): void {
+    requireAdvice(method, this.handle);
+  }
+
   /** Records that the instances of an examined class implement `token`. */
   introduce(type: Class, token: Class, use: new () => object): Introduction {
     const introduction = { token, use, delegates: new WeakMap() };
@@ -211,12 +228,28 @@ export class WeavingContext implements DispatchContext {
   }
 
   /**
-   * Records that the container of the application created `instance` or
-   * handed it out, which makes this context an owner of the object.
+   * Records that the container of the application created `instance`, or
+   * that it holds the object or handed it out, which makes this context an
+   * owner of the object.
    */
-  adopt(instance: object): void {
+  adopt(instance: object, ownership: Ownership): void {
     if (!this.isClosed) {
-      recordOwner(instance, this);
+      recordOwner(instance, this, ownership);
+    }
+  }
+
+  /**
+   * Records the instances the container holds for the examined classes as
+   * owned by this context. The registry then refers to the context from
+   * each of them, so the application stays live while one is reachable.
+   */
+  adoptInstances(): void {
+    for (const type of this.examined) {
+      for (const [instance, ownership] of this.options.instancesOf(type)) {
+        if (isObject(instance)) {
+          this.adopt(instance, ownership);
+        }
+      }
     }
   }
 
@@ -228,17 +261,21 @@ export class WeavingContext implements DispatchContext {
     advanceGeneration();
   }
 
-  owns(target: object): boolean {
+  owns(target: object): Ownership | undefined {
     const type = classOf(target);
     if (!type || !this.examined.has(type)) {
-      return false;
+      return undefined;
     }
-    for (const instance of this.options.instancesOf(type)) {
+    let found: Ownership | undefined;
+    for (const [instance, ownership] of this.options.instancesOf(type)) {
       if (instance === target) {
-        return true;
+        if (ownership === "created") {
+          return ownership;
+        }
+        found = ownership;
       }
     }
-    return false;
+    return found;
   }
 
   weaves(owner: Class): boolean {
@@ -285,11 +322,21 @@ export class WeavingContext implements DispatchContext {
     original: Fn,
   ): unknown {
     const member = this.members.get(owner)?.get(name)?.[kind];
-    if (!member || this.inheritsUnadvised(member, owner, target)) {
+    if (!member) {
       return original.apply(target, args as unknown[]);
     }
     if (member.denied !== undefined) {
       throw new AspectConfigurationError(member.denied);
+    }
+    // A stub that passes another function than the one the member was
+    // woven over lies below it: something replaced that stub on the
+    // prototype, and a later weaving took the replacement for the member.
+    // The call is already inside the chain of the member.
+    if (
+      original !== member.method.original ||
+      this.inheritsUnadvised(member, owner, target)
+    ) {
+      return original.apply(target, args as unknown[]);
     }
     if (member.introduction) {
       return this.runIntroduced(member, member.introduction, target, args);
@@ -340,22 +387,18 @@ export class WeavingContext implements DispatchContext {
   }
 
   /**
-   * Detaches the context: its stubs then run the original functions. The
-   * instances its container holds are recorded as its own, so no other
-   * application adopts them unless its own container holds them too.
+   * Detaches the context: its stubs then run the original functions, except
+   * those of members that require advice, which reject the calls on the
+   * instances the container created. The instances the container holds are
+   * recorded as its own, so no other application adopts those it created.
    */
   close(): void {
     if (this.isClosed) {
       return;
     }
-    for (const type of this.examined) {
-      for (const instance of this.options.instancesOf(type)) {
-        if (isObject(instance)) {
-          this.adopt(instance);
-        }
-      }
-    }
+    this.adoptInstances();
     this.isClosed = true;
+    this.handle.context = undefined;
     advanceGeneration();
     for (const type of this.examined) {
       liveContexts(type);
@@ -368,6 +411,12 @@ export class WeavingContext implements DispatchContext {
    * examined and matched no advisor for the member. A `super` call from an
    * override of a class that is not excluded is an execution of the owner's
    * member and stays advised.
+   *
+   * The class of an object is the nearest class along its prototype chain
+   * whose `prototype` is the object in the chain that names it. An object
+   * that has an instance as its prototype, and an instance of a constructor
+   * function whose prototype inherits `constructor`, are instances of the
+   * class they inherit from.
    */
   private inheritsUnadvised(
     member: MemberState,
@@ -383,20 +432,44 @@ export class WeavingContext implements DispatchContext {
     }
     let unadvised = member.unadvised.get(prototype);
     if (unadvised === undefined) {
-      const type = prototype.constructor as Class;
-      unadvised = this.examined.has(type);
-      for (
-        let current: object | null = prototype;
-        unadvised && current && current !== owner.prototype;
-        current = Object.getPrototypeOf(current)
-      ) {
-        if (Object.hasOwn(current, member.method.name)) {
-          unadvised = false;
+      const type = nearestClass(prototype);
+      unadvised = type !== undefined && type !== owner;
+      if (unadvised && type && !this.excluded.has(type)) {
+        unadvised = this.examined.has(type);
+        for (
+          let current: object | null = prototype;
+          unadvised && current && current !== owner.prototype;
+          current = Object.getPrototypeOf(current)
+        ) {
+          if (Object.hasOwn(current, member.method.name)) {
+            unadvised = false;
+          }
         }
       }
-      unadvised ||= this.excluded.has(type);
       member.unadvised.set(prototype, unadvised);
     }
     return unadvised;
   }
+}
+
+/**
+ * The class of the nearest object along the prototype chain from
+ * `prototype` that is the `prototype` of the class its own `constructor`
+ * property names.
+ */
+function nearestClass(prototype: object): Class | undefined {
+  for (
+    let current: object | null = prototype;
+    current;
+    current = Object.getPrototypeOf(current)
+  ) {
+    const type: unknown = Object.getOwnPropertyDescriptor(
+      current,
+      "constructor",
+    )?.value;
+    if (typeof type === "function" && type.prototype === current) {
+      return type as Class;
+    }
+  }
+  return undefined;
 }

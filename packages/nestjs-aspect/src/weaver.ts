@@ -69,9 +69,9 @@ import type {
   MethodRef,
   PointcutAdvisor,
 } from "./types";
-import { constructorChain, isObject } from "./util";
+import { isObject } from "./util";
 import { type WeavingAdvisor, WeavingContext } from "./weaving-context";
-import { claimContainer, stubRecord } from "./weaving-registry";
+import { claimContainer, type Ownership, stubRecord } from "./weaving-registry";
 import {
   describeMember,
   describeOrder,
@@ -201,10 +201,6 @@ function isSingleton(wrapper: InstanceWrapper): boolean {
   return !wrapper.isTransient && wrapper.isDependencyTreeStatic();
 }
 
-function inheritanceDepth(type: Class): number {
-  return [...constructorChain(type)].length;
-}
-
 /** True for a function that is a member of its class in every application. */
 function isMember(value: unknown): boolean {
   return typeof value === "function" && !stubRecord(value)?.introduced;
@@ -294,6 +290,8 @@ function declaresImport(importer: Class, imported: Class): boolean {
  * class with a metatype is known, and no instance is needed, because aspects
  * compile from class metadata and `@Advisor` classes expose a static
  * pointcut. `complete` is stage 2 and runs in `onModuleInit` of the module.
+ * After stage 2, each `LazyModuleLoader.load()` that adds modules weaves and
+ * validates their classes.
  */
 export class AspectWeaver {
   private readonly logger = new Logger("AspectModule");
@@ -332,10 +330,20 @@ export class AspectWeaver {
   private readonly observed = new WeakSet<InstanceWrapper>();
 
   /**
-   * Classes woven when the container first resolved an instance of them: the
-   * instances of request-scoped and transient factory providers.
+   * The request-scoped and transient factory providers that returned an
+   * instance of each class, which was woven when the container first
+   * resolved one.
    */
-  private readonly scopedTypes = new Set<Class>();
+  private readonly scopedRegistrations = new Map<Class, Registration[]>();
+
+  /** True once stage 2 has completed without a failure. */
+  private completed = false;
+
+  /** True while the validation that followed the last lazy load failed. */
+  private lazyLoadFailed = false;
+
+  /** The validation messages that were logged as warnings. */
+  private readonly warned = new Set<string>();
 
   private constructor(
     private readonly container: ModulesContainer,
@@ -424,36 +432,72 @@ export class AspectWeaver {
   complete(): void {
     try {
       this.weaveLateClasses();
-      // Advice that can never run fails the initialization in every mode:
-      // no call could report it.
-      const fatal = [
-        ...this.unwovenAdvisorProblems(),
-        ...this.misplacedAdviceProblems(),
-      ];
-      // Without strict mode these are warnings, and the calls they concern
-      // raise an error instead of running without advice.
-      const problems = [
-        ...this.scopeProblems(),
-        ...this.aspectDependencyProblems(),
-        ...this.invalidAdvisorProblems(),
-        ...this.requiredAdviceProblems(),
-      ];
-      const warnings = [
-        ...this.duplicateRegistrationWarnings(),
-        ...this.unmatchedPointcutWarnings(),
-        ...this.orderTieWarnings(),
-        ...this.shutdownOrderWarnings(),
-      ];
-      if (fatal.length > 0 || (this.strict && problems.length > 0)) {
-        throw new AspectConfigurationError([...fatal, ...problems].join("\n"));
-      }
-      for (const message of [...problems, ...warnings]) {
-        this.logger.warn(message);
-      }
-      this.logReport();
+      this.validate(false);
+      this.logReport(this.context.wovenTypes());
+      this.completed = true;
     } catch (error) {
       this.close();
       throw error;
+    }
+  }
+
+  /**
+   * Weaves the classes of the modules that a call of `LazyModuleLoader.load`
+   * added to the container, validates the configuration again and logs the
+   * report lines of those classes. `modulesBefore` is the number of modules
+   * the container had when the call started. A validation failure throws
+   * `AspectConfigurationError` from `load()`; the application stays live,
+   * and a later `load()` reports the failure again.
+   */
+  private completeLazyModules(modulesBefore: number): void {
+    if (
+      this.context.closed ||
+      !this.completed ||
+      (this.container.size === modulesBefore && !this.lazyLoadFailed)
+    ) {
+      return;
+    }
+    this.lazyLoadFailed = true;
+    const woven = this.weaveLateClasses();
+    this.validate(true);
+    this.logReport(woven);
+    this.lazyLoadFailed = false;
+  }
+
+  /**
+   * Throws `AspectConfigurationError` for the findings that fail the
+   * application and logs the other ones, each message once. `lazy` tells
+   * that the weaving followed the load of a lazy module.
+   */
+  private validate(lazy: boolean): void {
+    // Advice that can never run fails in every mode: no call could report
+    // it.
+    const fatal = [
+      ...this.unwovenAdvisorProblems(lazy),
+      ...this.misplacedAdviceProblems(),
+    ];
+    // Without strict mode these are warnings, and the calls they concern
+    // raise an error instead of running without advice.
+    const problems = [
+      ...this.scopeProblems(),
+      ...this.aspectDependencyProblems(),
+      ...this.invalidAdvisorProblems(),
+      ...this.requiredAdviceProblems(),
+    ];
+    const warnings = [
+      ...this.duplicateRegistrationWarnings(),
+      ...this.unmatchedPointcutWarnings(),
+      ...this.orderTieWarnings(),
+      ...this.shutdownOrderWarnings(),
+    ];
+    if (fatal.length > 0 || (this.strict && problems.length > 0)) {
+      throw new AspectConfigurationError([...fatal, ...problems].join("\n"));
+    }
+    for (const message of [...problems, ...warnings]) {
+      if (!this.warned.has(message)) {
+        this.warned.add(message);
+        this.logger.warn(message);
+      }
     }
   }
 
@@ -546,6 +590,34 @@ export class AspectWeaver {
     }
   }
 
+  /**
+   * Makes the `LazyModuleLoader` of the application weave the classes of
+   * each module it has loaded: `load()` resolves when they are woven.
+   */
+  private observeLazyModules(): void {
+    for (const module of this.container.values()) {
+      const loader: unknown = this.isNestCoreModule(module)
+        ? module.providers.get(LazyModuleLoader)?.instance
+        : undefined;
+      if (!isObject(loader) || typeof loader.load !== "function") {
+        continue;
+      }
+      const load = loader.load as LazyModuleLoader["load"];
+      const container = this.container;
+      const complete = (modulesBefore: number) =>
+        this.completeLazyModules(modulesBefore);
+      loader.load = async function (
+        this: LazyModuleLoader,
+        ...args: Parameters<LazyModuleLoader["load"]>
+      ) {
+        const modulesBefore = container.size;
+        const moduleRef = await load.apply(this, args);
+        complete(modulesBefore);
+        return moduleRef;
+      };
+    }
+  }
+
   private observe(
     registration: Registration,
     wrapper: InstanceWrapper,
@@ -555,7 +627,7 @@ export class AspectWeaver {
     if (this.context.closed || !host?.isResolved || !isObject(instance)) {
       return;
     }
-    this.context.adopt(instance);
+    this.context.adopt(instance, wrapper.isNotMetatype ? "held" : "created");
     if (wrapper.isNotMetatype && !isSingleton(wrapper)) {
       this.weaveScopedInstance(registration, instance);
     }
@@ -563,7 +635,9 @@ export class AspectWeaver {
 
   /**
    * Weaves the class of an instance that a request-scoped or transient
-   * factory provider returned, when the container resolves the first one.
+   * factory provider returned, when the container resolves the first one of
+   * that class for the provider. A class that is a candidate already is
+   * woven again with the token of the provider among its beans.
    * Throws `AspectConfigurationError` for an aspect or advisor: its advice
    * would never run.
    */
@@ -573,22 +647,33 @@ export class AspectWeaver {
     if (
       !isWeavable(type) ||
       type.prototype !== prototype ||
-      this.scopedTypes.has(type) ||
-      this.scan.candidates.has(type) ||
       this.scan.excluded.has(type) ||
       this.scan.advisorTypes.has(type)
+    ) {
+      return;
+    }
+    const known = this.scopedRegistrations.get(type) ?? [];
+    if (
+      known.some(
+        (other) =>
+          other.module === registration.module &&
+          other.collection === registration.collection &&
+          other.token === registration.token,
+      )
     ) {
       return;
     }
     if (isAspect(type) || isAdvisor(type)) {
       throw new AspectConfigurationError(this.unwovenAdvisorProblem(type));
     }
-    const { module, token } = registration;
-    const candidate: Candidate = {
+    const candidate = this.withScoped({
       type,
-      registrations: [registration],
-      beans: [{ token, module: module.metatype }],
-    };
+      registrations: [
+        ...(this.scan.candidates.get(type)?.registrations ?? []),
+        registration,
+      ],
+      beans: [],
+    });
     if (this.isExcluded(this.classRefOf(candidate))) {
       this.context.exclude(type);
       this.denyUnadvised(type);
@@ -597,7 +682,26 @@ export class AspectWeaver {
     }
     // Recorded once the class is woven: a failure repeats for every
     // instance instead of leaving the later ones without advice.
-    this.scopedTypes.add(type);
+    this.scopedRegistrations.set(type, [...known, registration]);
+  }
+
+  /**
+   * `candidate` with the registrations of the request-scoped and transient
+   * factory providers that returned an instance of its class.
+   */
+  private withScoped(candidate: Candidate): Candidate {
+    const registrations = [
+      ...candidate.registrations,
+      ...(this.scopedRegistrations.get(candidate.type) ?? []),
+    ];
+    return {
+      type: candidate.type,
+      registrations,
+      beans: registrations.map(({ token, module }) => ({
+        token,
+        module: module.metatype,
+      })),
+    };
   }
 
   /**
@@ -727,7 +831,9 @@ export class AspectWeaver {
     return reached;
   }
 
-  private *containerInstances(type: Class): Generator<unknown> {
+  private *containerInstances(
+    type: Class,
+  ): Generator<readonly [unknown, Ownership]> {
     const { candidates, excluded, advisorTypes } = this.scan;
     const registrations =
       (candidates.get(type) ?? excluded.get(type))?.registrations ??
@@ -738,10 +844,11 @@ export class AspectWeaver {
       if (!wrapper) {
         continue;
       }
-      yield wrapper.instance;
+      const ownership = wrapper.isNotMetatype ? "held" : "created";
+      yield [wrapper.instance, ownership];
       if (wrapper.isTransient) {
         for (const host of wrapper.getStaticTransientInstances()) {
-          yield host?.instance;
+          yield [host?.instance, ownership];
         }
       }
     }
@@ -754,6 +861,7 @@ export class AspectWeaver {
   private weaveClasses(): void {
     this.scan = this.scanContainer(false);
     this.observeInstances();
+    this.observeLazyModules();
     let registration = 0;
     for (const type of this.scan.advisorTypes.keys()) {
       this.advisors.push(
@@ -772,12 +880,7 @@ export class AspectWeaver {
       registration++;
     }
     this.examineSkipped(this.scan);
-    // Superclasses first: a subclass then captures the accessor stubs of its
-    // superclass like it inherits its method stubs.
-    const candidates = [...this.scan.candidates.values()].sort(
-      (a, b) => inheritanceDepth(a.type) - inheritanceDepth(b.type),
-    );
-    for (const candidate of candidates) {
+    for (const candidate of this.scan.candidates.values()) {
       this.weaveType(candidate);
     }
   }
@@ -808,6 +911,7 @@ export class AspectWeaver {
       const required = this.requiredAnnotations(method);
       if (required.length > 0) {
         installStub(method);
+        this.context.requireAdvice(method);
         this.context.deny(
           method,
           `${describeMember(method)} carries ${describeAnnotations(required)}, which requires advice, and ${type.name} is never advised: it is an aspect, an advisor, a module class or a class of the exclude option`,
@@ -981,6 +1085,9 @@ export class AspectWeaver {
       if (matched.length > 0) {
         installStub(method);
         this.context.setMember(method, matched);
+        if (this.requiredAnnotations(method).length > 0) {
+          this.context.requireAdvice(method);
+        }
       }
       // A member that requires advice no advisor supplies cannot be called:
       // the validation of stage 2 reports it, and an application that is
@@ -988,6 +1095,7 @@ export class AspectWeaver {
       const unhandled = this.unhandledAnnotations(method, matched);
       if (unhandled.length > 0) {
         installStub(method);
+        this.context.requireAdvice(method);
         this.context.deny(
           method,
           `${describeMember(method)} carries ${describeAnnotations(unhandled)}, which requires advice, and no advisor of the application handles it`,
@@ -1052,7 +1160,8 @@ export class AspectWeaver {
   // Stage 2
   // -------------------------------------------------------------------------
 
-  private weaveLateClasses(): void {
+  /** Returns the classes it wove. */
+  private weaveLateClasses(): Class[] {
     const previous = this.scan;
     const scan = this.scanContainer(true);
     this.observeInstances();
@@ -1068,17 +1177,18 @@ export class AspectWeaver {
         [...scan.skipped].filter((type) => !previous.skipped.has(type)),
       ),
     });
-    const changed = [...scan.candidates.values()]
-      .filter(
-        (candidate) =>
-          candidate.beans.length !==
-          previous.candidates.get(candidate.type)?.beans.length,
-      )
-      .sort((a, b) => inheritanceDepth(a.type) - inheritanceDepth(b.type));
+    const changed = [...scan.candidates.values()].filter(
+      (candidate) =>
+        candidate.beans.length !==
+        previous.candidates.get(candidate.type)?.beans.length,
+    );
     for (const candidate of changed) {
-      this.weaveType(candidate);
+      this.weaveType(this.withScoped(candidate));
     }
     this.context.refresh();
+    // From here on the instances keep the application live by themselves.
+    this.context.adoptInstances();
+    return changed.map((candidate) => candidate.type);
   }
 
   /** An aspect or advisor that is not a singleton, also by scope bubbling. */
@@ -1127,9 +1237,11 @@ export class AspectWeaver {
    * An aspect or advisor class that reaches the container only as the
    * instance of a factory, value or alias provider.
    */
-  private unwovenAdvisorProblems(): string[] {
+  private unwovenAdvisorProblems(lazy: boolean): string[] {
     return this.unwovenAdvisorTypes.map((type) =>
-      this.unwovenAdvisorProblem(type),
+      lazy
+        ? `The ${isAspect(type) ? "aspect" : "advisor"} ${type.name} is registered by a lazy-loaded module, so its advice does not run. Register aspects and advisors in a module that the application loads when it bootstraps.`
+        : this.unwovenAdvisorProblem(type),
     );
   }
 
@@ -1154,7 +1266,7 @@ export class AspectWeaver {
           member.advisors,
         ]),
       );
-      const classRef = this.classRefOf(candidate);
+      const classRef = this.classRefOf(this.withScoped(candidate));
       for (const [name, kind] of membersOf(candidate.type)) {
         const method = createMethodRef(classRef, name, kind);
         const required = this.unhandledAnnotations(
@@ -1350,12 +1462,13 @@ export class AspectWeaver {
     return warnings;
   }
 
-  private logReport(): void {
+  /** Logs the report lines of the advised members of `types`. */
+  private logReport(types: readonly Class[]): void {
     const level = this.reportLevel;
     if (level === false) {
       return;
     }
-    for (const type of this.context.wovenTypes()) {
+    for (const type of types) {
       for (const { method, advisors } of this.context.membersOf(type)) {
         for (const descriptor of this.describeAdvisors(method, advisors)) {
           this.logger[level](reportLine(method, descriptor));

@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { Inject, Injectable, Module } from "@nestjs/common";
 import { afterEach, describe, expect, it } from "vitest";
+import { createAnnotation } from "./annotation";
 import {
   Advisor,
   After,
@@ -10,8 +11,9 @@ import {
   Before,
 } from "./aspect-decorators";
 import { AspectInspector } from "./aspect-inspector";
+import { DeclareParents } from "./introduction";
 import { P } from "./pointcut-designators";
-import type { MethodInterceptor, PJP } from "./types";
+import type { JP, MethodInterceptor, PJP } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -198,6 +200,53 @@ describe("AspectInspector", () => {
 
     expect(inspector.advisedMembers(RushOrderService)).toEqual([]);
     expect(inspector.advisorsOf(OrderService, "cancel")).toHaveLength(2);
+  });
+
+  it("leaves out members that are introduced and members whose calls are rejected", async () => {
+    const Authorized = createAnnotation<"AuthorizedReport">(
+      "AuthorizedReport",
+      { requiresAdvice: true },
+    );
+
+    abstract class Tracked {
+      abstract track(): void;
+    }
+
+    class DefaultTracked implements Tracked {
+      track() {}
+    }
+
+    @Injectable()
+    class Report {
+      render() {}
+
+      @Authorized()
+      unsafe() {}
+    }
+    const render = P.method(Report, "render");
+
+    @Aspect()
+    class Reporting {
+      @DeclareParents(render, { use: DefaultTracked })
+      static readonly mixin: Tracked;
+
+      @Before(render)
+      record(_jp: JP<typeof render>) {}
+    }
+    const { moduleRef, logger } = await initWoven(
+      { providers: [Report, Reporting] },
+      { strict: false, report: "log" },
+    );
+
+    expect(
+      moduleRef
+        .get(AspectInspector)
+        .advisedMembers()
+        .map((member) => `${member.type.name}.${String(member.name)}`),
+    ).toEqual(["Report.render"]);
+    expect(logger.messages("log")).toEqual([
+      "Report.render <- Reporting.record (before, no order)",
+    ]);
   });
 
   it("is injectable in any module and already answers while providers are constructed", async () => {

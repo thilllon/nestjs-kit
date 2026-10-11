@@ -23,8 +23,10 @@ function brand(type: abstract new (...args: any[]) => Error, kind: string) {
 }
 
 /**
- * Thrown while the application bootstraps when aspects, pointcuts or advice
- * are misconfigured.
+ * Thrown when aspects, pointcuts, advice or module options are
+ * misconfigured: while the application bootstraps, when a lazy module is
+ * loaded, and at the call of a member whose required advice is missing or
+ * whose aspect or advisor has no usable instance.
  */
 export class AspectConfigurationError extends Error {
   static {

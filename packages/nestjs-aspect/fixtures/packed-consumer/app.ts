@@ -106,13 +106,17 @@ async function main(): Promise<void> {
     .advisorsOf(QuoteService, "price")
     .map(({ type, methodName, kind }) => [type.name, methodName, kind]);
   await app.close();
-  await service.price("C");
+  await lastValueFrom(service.stream("C"));
+  const afterClose = await Promise.resolve()
+    .then(() => service.price("C"))
+    .catch((error: unknown) => (error instanceof Error ? error.name : error));
   console.log(
     JSON.stringify({
       price,
       last,
       beforeSubscription,
       advisors,
+      afterClose,
       entries: log.entries,
     }),
   );

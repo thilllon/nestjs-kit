@@ -4,7 +4,7 @@ A NestJS HTTP application whose cross-cutting behavior lives in two aspects wove
 
 The example shows:
 
-- an annotation, `@Retryable({ attempts })`, that accepts only methods returning a promise and fails the bootstrap when no advice matches it;
+- an annotation, `@Retryable({ attempts })`, that accepts only methods returning a promise and fails the bootstrap when no advisor handles it: one whose pointcut refers to the annotation;
 - `RetryAspect`, whose `@Around` advice reads the annotation value from the join point and calls the method again after a transient error;
 - `AuditAspect`, whose `@Before`, `@AfterReturning` and `@AfterThrowing` advice records every call into `OrdersModule`, selected with `P.inModule(OrdersModule)`, through an injected `AuditLog` provider;
 - aspect order: `AuditAspect` (`order: 10`) runs outside `RetryAspect` (`order: 20`), so a retried call is audited once;

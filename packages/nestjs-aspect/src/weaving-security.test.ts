@@ -7,6 +7,7 @@ import { createAnnotation } from "./annotation";
 import { AspectModule } from "./aspect.module";
 import { Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectUsageError } from "./errors";
+import { DeclareParents } from "./introduction";
 import { ORIGINAL } from "./method-ref";
 import { P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
@@ -112,6 +113,59 @@ describe("attribution after an application closes", () => {
       ],
     });
     second.moduleRef.get(Shared).run();
+    expect(log).toEqual(["second", "run"]);
+  });
+});
+
+describe("applications whose weaving fails", () => {
+  function shared() {
+    const log: string[] = [];
+
+    @Injectable()
+    class Shared {
+      run() {
+        log.push("run");
+      }
+    }
+    return { Shared, log };
+  }
+
+  it("does not count an application as live when an introduction collides", async () => {
+    const { Shared, log } = shared();
+
+    abstract class Tracked {
+      abstract track(): void;
+    }
+
+    class DefaultTracked implements Tracked {
+      track() {}
+    }
+
+    @Injectable()
+    class Conflicted {
+      track() {}
+    }
+    const shares = P.within(Shared);
+    const conflicted = P.within(Conflicted);
+
+    @Aspect()
+    class Failing {
+      @DeclareParents(conflicted, { use: DefaultTracked })
+      static readonly mixin: Tracked;
+
+      @Before(shares)
+      record(_jp: JoinPoint<AnyShape>) {
+        log.push("failed");
+      }
+    }
+    await expect(
+      compileWoven({ providers: [Shared, Conflicted, Failing] }),
+    ).rejects.toThrow(AspectConfigurationError);
+
+    await compileWoven({
+      providers: [Shared, labelling(Shared, "second", log)],
+    });
+    new Shared().run();
     expect(log).toEqual(["second", "run"]);
   });
 });
@@ -345,6 +399,60 @@ describe("classes the weaver examines", () => {
     expect(moduleRef.get(RoleReflector).roles()).toEqual(["admin"]);
     expect(log).toEqual(["guarded"]);
     expect(isStub(Reflector.prototype.get)).toBe(false);
+  });
+
+  it("never weaves a class of Nest that a module of the application registers", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      constructor(readonly reflector: Reflector) {}
+
+      get() {
+        return "value";
+      }
+    }
+    const pointcut = P.name("get");
+
+    @Aspect()
+    class Everything {
+      @Before(pointcut)
+      record(jp: JoinPoint<AnyShape>) {
+        log.push(jp.signature.targetType.name);
+      }
+    }
+    const { moduleRef } = await initWoven({
+      providers: [Reflector, Service, Everything],
+    });
+    const service = moduleRef.get(Service);
+    service.get();
+    service.reflector.get("missing", Service);
+    expect(log).toEqual(["Service"]);
+    expect(isStub(Reflector.prototype.get)).toBe(false);
+  });
+
+  it("never weaves a native class whose instance a value provider supplies", async () => {
+    const log: string[] = [];
+    const pointcut = P.name("get");
+
+    @Aspect()
+    class Everything {
+      @Before(pointcut)
+      record(jp: JoinPoint<AnyShape>) {
+        log.push(jp.signature.targetType.name);
+      }
+    }
+    const { moduleRef } = await initWoven({
+      providers: [
+        { provide: "CACHE", useValue: new Map([["key", "value"]]) },
+        Everything,
+      ],
+    });
+    expect(moduleRef.get<Map<string, string>>("CACHE").get("key")).toBe(
+      "value",
+    );
+    expect(log).toEqual([]);
+    expect(isStub(Map.prototype.get)).toBe(false);
   });
 
   it("weaves the options factory class that forRootAsync registers in the module", async () => {
@@ -622,5 +730,298 @@ describe("state that stubs trust", () => {
     const key = Symbol.for("nestjs-aspect:weaving-registry");
     const host = Object.defineProperty({}, key, { value });
     expect(() => weavingRegistry(host)).toThrow(AspectConfigurationError);
+  });
+});
+
+describe("objects that reach a stub by other ways than their class", () => {
+  function guardedVault() {
+    const log: string[] = [];
+
+    @Injectable()
+    class Vault {
+      open() {
+        log.push("opened");
+        return "secret";
+      }
+    }
+    const pointcut = P.within(Vault);
+
+    @Aspect()
+    class Guard {
+      @Before(pointcut)
+      check(_jp: JoinPoint<AnyShape>) {
+        throw new Error("denied");
+      }
+    }
+    return { Vault, Guard, log };
+  }
+
+  it("advises an object that has a woven instance as its prototype", async () => {
+    const { Vault, Guard, log } = guardedVault();
+    const { moduleRef } = await initWoven({ providers: [Vault, Guard] });
+    const view = Object.create(moduleRef.get(Vault)) as InstanceType<
+      typeof Vault
+    >;
+    expect(() => view.open()).toThrow("denied");
+    expect(log).toEqual([]);
+  });
+
+  it("advises an instance of a constructor function whose prototype names the woven class", async () => {
+    const { Vault, Guard, log } = guardedVault();
+    await initWoven({ providers: [Vault, Guard] });
+    function Legacy() {}
+    Legacy.prototype = Object.create(Vault.prototype) as object;
+    const legacy = Reflect.construct(Legacy, []) as InstanceType<typeof Vault>;
+    expect(() => legacy.open()).toThrow("denied");
+    expect(log).toEqual([]);
+  });
+
+  it("rejects a requiresAdvice member on an object that has an instance as its prototype", async () => {
+    const log: string[] = [];
+    const Authorized = createAnnotation<"Authorized">("Authorized", {
+      requiresAdvice: true,
+    });
+
+    @Injectable()
+    class Vault {
+      @Authorized()
+      open() {
+        log.push("opened");
+      }
+    }
+    const { moduleRef } = await initWoven(
+      { providers: [Vault] },
+      { strict: false },
+    );
+    const view = Object.create(moduleRef.get(Vault)) as Vault;
+    expect(() => view.open()).toThrow(AspectConfigurationError);
+    expect(log).toEqual([]);
+  });
+
+  it("runs the method once when a wrapper around the stub is woven by a later application", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run() {
+        log.push("run");
+        return "done";
+      }
+    }
+    const first = await initWoven({
+      providers: [Service, labelling(Service, "first", log)],
+    });
+    const stub = Service.prototype.run;
+    Service.prototype.run = function wrapper(this: Service) {
+      log.push("wrapper");
+      return stub.call(this);
+    };
+    await first.moduleRef.close();
+
+    const second = await initWoven({
+      providers: [Service, labelling(Service, "second", log)],
+    });
+    expect(second.moduleRef.get(Service).run()).toBe("done");
+    expect(log).toEqual(["second", "wrapper", "run"]);
+  });
+});
+
+describe("objects that several applications know", () => {
+  it("keeps the advice of an application for an object that another application only holds", async () => {
+    const log: string[] = [];
+
+    class Account {
+      withdraw() {
+        log.push("withdraw");
+      }
+    }
+
+    @Injectable()
+    class Reporter {
+      constructor(@Inject("ACCOUNT") readonly account: Account) {}
+    }
+    await initWoven({
+      providers: [Account, labelling(Account, "guard", log)],
+    });
+    const account = new Account();
+    account.withdraw();
+    expect(log.splice(0)).toEqual(["guard", "withdraw"]);
+
+    const holding = await initWoven({
+      providers: [{ provide: "ACCOUNT", useValue: account }, Reporter],
+    });
+    holding.moduleRef.get(Reporter).account.withdraw();
+    expect(log.splice(0)).toEqual(["guard", "withdraw"]);
+
+    await holding.moduleRef.close();
+    account.withdraw();
+    expect(log).toEqual(["guard", "withdraw"]);
+  });
+
+  it("refuses an object whose dependencies belong to two applications", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Left {}
+
+    @Injectable()
+    class Right {}
+
+    class Pair {
+      constructor(
+        readonly left: Left,
+        readonly right: Right,
+      ) {}
+
+      run() {
+        log.push("run");
+      }
+    }
+    const providers = (label: string) => [
+      Left,
+      Right,
+      Pair,
+      labelling(Pair, label, log),
+    ];
+    const first = await initWoven({ providers: providers("first") });
+    const second = await initWoven({ providers: providers("second") });
+    const mixed = new Pair(
+      first.moduleRef.get(Left),
+      second.moduleRef.get(Right),
+    );
+    expect(() => mixed.run()).toThrow(AspectUsageError);
+    expect(log).toEqual([]);
+  });
+
+  it("does not attribute an object to the application of its dependencies when that application does not advise the class", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Dependency {}
+
+    class Holder {
+      constructor(readonly dependency: Dependency) {}
+
+      run() {
+        log.push("run");
+      }
+    }
+    const third = await initWoven({ providers: [Dependency, Holder] });
+    await initWoven({
+      providers: [Dependency, Holder, labelling(Holder, "first", log)],
+    });
+    await initWoven({
+      providers: [Dependency, Holder, labelling(Holder, "second", log)],
+    });
+    const holder = new Holder(third.moduleRef.get(Dependency));
+    expect(() => holder.run()).toThrow(AspectUsageError);
+    expect(log).toEqual([]);
+  });
+});
+
+describe("requiresAdvice members after the application closed", () => {
+  const Authorized = createAnnotation<"Authorized">("Authorized", {
+    requiresAdvice: true,
+  });
+
+  it("rejects the call on an instance of a closed application instead of running it without the advice", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Vault {
+      @Authorized()
+      open() {
+        log.push("opened");
+      }
+
+      describe() {
+        return "vault";
+      }
+    }
+    const pointcut = P.annotated(Authorized);
+
+    @Aspect()
+    class Authorizing {
+      @Before(pointcut)
+      check(_jp: JoinPoint<AnyShape>) {
+        log.push("checked");
+      }
+    }
+    const { moduleRef } = await initWoven({ providers: [Vault, Authorizing] });
+    const vault = moduleRef.get(Vault);
+    vault.open();
+    expect(log.splice(0)).toEqual(["checked", "opened"]);
+
+    await moduleRef.close();
+    expect(() => vault.open()).toThrow(AspectConfigurationError);
+    expect(() => vault.open()).toThrow(
+      "Vault.open requires advice, and the application of the instance it was called on is closed",
+    );
+    expect(vault.describe()).toBe("vault");
+    expect(log).toEqual([]);
+  });
+
+  it("keeps rejecting the call after the initialization failed its validation", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Vault {
+      @Authorized()
+      open() {
+        log.push("opened");
+      }
+    }
+    // Not a module of the fixture: Nest rejects close() after a failed init().
+    const moduleRef = await Test.createTestingModule({
+      imports: [AspectModule.forRoot()],
+      providers: [Vault],
+    }).compile();
+    const vault = moduleRef.get(Vault);
+    expect(() => vault.open()).toThrow(
+      "no advisor of the application handles it",
+    );
+
+    await expect(moduleRef.init()).rejects.toThrow(AspectConfigurationError);
+    expect(() => vault.open()).toThrow(AspectConfigurationError);
+    expect(log).toEqual([]);
+  });
+});
+
+describe("pointcuts on the token of a scoped factory provider", () => {
+  it("advises the instances of a request-scoped factory whose class is a provider as well", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run() {
+        log.push("run");
+      }
+    }
+    const pointcut = P.bean("ADMIN");
+
+    @Aspect()
+    class Guard {
+      @Before(pointcut)
+      check(_jp: JoinPoint<AnyShape>) {
+        log.push("guard");
+      }
+    }
+    const { moduleRef } = await initWoven({
+      providers: [
+        Service,
+        Guard,
+        {
+          provide: "ADMIN",
+          scope: Scope.REQUEST,
+          useFactory: () => new Service(),
+        },
+      ],
+    });
+    const admin = await moduleRef.resolve<Service>(
+      "ADMIN",
+      ContextIdFactory.create(),
+    );
+    admin.run();
+    expect(log).toEqual(["guard", "run"]);
   });
 });

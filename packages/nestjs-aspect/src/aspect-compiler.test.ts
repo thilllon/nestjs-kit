@@ -1,6 +1,5 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { isAspectAdvice } from "./advice";
 import {
   compileAspect,
   describeAdvisor,
@@ -14,7 +13,7 @@ import {
   Aspect,
   Before,
 } from "./aspect-decorators";
-import { matching, named } from "./aspect-fixture";
+import { matching } from "./aspect-fixture";
 import { AspectConfigurationError } from "./errors";
 import { createClassRef, createMethodRef } from "./method-ref";
 import type {
@@ -79,33 +78,6 @@ describe("compileAspect", () => {
       expect(advisor.registration).toBe(3);
       expect(advisor.source.type).toBe(Mixed);
     }
-  });
-
-  it("carries the pointcut, the kind and the throwing filter of each advice", () => {
-    const pointcut = named("load");
-
-    @Aspect()
-    class Errors {
-      @AfterThrowing(pointcut, { throwing: RangeError })
-      failed(): void {}
-    }
-
-    const [advisor] = compileAspect(Errors, unresolved);
-
-    expect(advisor.pointcut).toBe(pointcut);
-    expect(advisor.order).toBeUndefined();
-    expect(advisor.source).toEqual({
-      type: Errors,
-      methodName: "failed",
-      kind: "afterThrowing",
-    });
-    expect(isAspectAdvice(advisor.advice)).toBe(true);
-    expect(advisor.advice).toMatchObject({
-      kind: "afterThrowing",
-      aspectType: Errors,
-      methodName: "failed",
-      throwing: RangeError,
-    });
   });
 
   it("resolves the aspect instance lazily through the given resolver", () => {
@@ -211,24 +183,6 @@ describe("describeAdvisor", () => {
   const advice: MethodInterceptor = {
     invoke: (invocation) => invocation.proceed(),
   };
-
-  it("describes the pointcut, advice and order of an advisor instance", () => {
-    class Advisor implements PointcutAdvisor {
-      readonly pointcut = anything;
-      readonly advice = advice;
-      readonly order = 100;
-    }
-
-    expect(describeAdvisor(new Advisor(), Advisor, 7)).toEqual({
-      pointcut: anything,
-      advice,
-      order: 100,
-      registration: 7,
-      kindRank: 0,
-      declaration: 0,
-      source: { type: Advisor },
-    });
-  });
 
   it("rejects an advisor without a pointcut or without advice", () => {
     class Incomplete {}

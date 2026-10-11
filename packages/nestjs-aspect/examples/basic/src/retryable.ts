@@ -11,7 +11,8 @@ export class TransientError extends Error {}
 /**
  * Marks a method that `RetryAspect` calls again after a `TransientError`.
  * It applies only to methods that return a promise, and the application
- * fails to start when no advice matches a method that carries it.
+ * fails to start when no advisor whose pointcut refers to the annotation
+ * advises a method that carries it.
  */
 export const Retryable = createAnnotation<
   "Retryable",

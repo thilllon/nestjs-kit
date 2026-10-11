@@ -512,6 +512,9 @@ describe("consumer that installs the packed archive", () => {
           ["AuditAspect", "record", "afterReturning"],
           ["RetryAspect", "retry", "around"],
         ],
+        // A member that requires advice cannot be called on an instance of
+        // the closed application.
+        afterClose: "AspectConfigurationError",
         // Nothing is advised after the application closed.
         entries: [
           "retry 1",

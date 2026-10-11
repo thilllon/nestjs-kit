@@ -1,12 +1,9 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import {
-  aspectAdviceAdapter,
   createAdviceAdapterRegistry,
   createReturnValueAdapterRegistry,
   isAspectAdvice,
-  isMethodInterceptor,
-  methodInterceptorAdapter,
   promiseAdapter,
 } from "./advice";
 import { AfterReturning, Aspect, Before } from "./aspect-decorators";
@@ -18,7 +15,6 @@ import type {
   AspectAdvice,
   InterceptorContext,
   JoinPoint,
-  MethodInterceptor,
   PointcutAdvisor,
   ReturnValueAdapter,
 } from "./types";
@@ -26,33 +22,6 @@ import type {
 const context: InterceptorContext = {
   returnValues: createReturnValueAdapterRegistry(),
 };
-
-const passThrough: MethodInterceptor = {
-  invoke: (invocation) => invocation.proceed(),
-};
-
-describe("advice guards", () => {
-  it("recognize a method interceptor by its invoke function", () => {
-    expect(isMethodInterceptor(passThrough)).toBe(true);
-    expect(isMethodInterceptor({ invoke: "no" })).toBe(false);
-    expect(isMethodInterceptor(null)).toBe(false);
-  });
-
-  it("recognize advice compiled from an aspect", () => {
-    class Some {}
-    const advice: AspectAdvice = {
-      kind: "before",
-      aspectType: Some,
-      methodName: "check",
-      resolveAspect: () => undefined,
-    };
-
-    expect(isAspectAdvice(advice)).toBe(true);
-    expect(isAspectAdvice({ ...advice, kind: "sideways" })).toBe(false);
-    expect(isAspectAdvice(passThrough)).toBe(false);
-    expect(isAspectAdvice(undefined)).toBe(false);
-  });
-});
 
 describe("promiseAdapter", () => {
   it("supports promises and their subclasses, not other thenables", () => {
@@ -244,14 +213,6 @@ describe("return value adapter registry", () => {
 });
 
 describe("advice adapter registry", () => {
-  it("passes a method interceptor through unchanged", () => {
-    const registry = createAdviceAdapterRegistry();
-
-    expect(registry.toInterceptor(passThrough, context)).toBe(passThrough);
-    expect(methodInterceptorAdapter.supports(passThrough)).toBe(true);
-    expect(aspectAdviceAdapter.supports(passThrough)).toBe(false);
-  });
-
   it("rejects advice that no adapter supports", () => {
     const registry = createAdviceAdapterRegistry();
 

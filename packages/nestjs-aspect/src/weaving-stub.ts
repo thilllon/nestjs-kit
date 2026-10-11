@@ -3,7 +3,14 @@
 import { AspectConfigurationError, AspectUsageError } from "./errors";
 import { ORIGINAL } from "./method-ref";
 import type { Class, Fn, JoinPointKind, MethodRef } from "./types";
-import { registerStub, resolveContext, stubRecord } from "./weaving-registry";
+import {
+  type ContextHandle,
+  registerStub,
+  requiresClosedAdvice,
+  resolveContext,
+  type StubRecord,
+  stubRecord,
+} from "./weaving-registry";
 
 /** Descriptor field that holds the function of a join point kind. */
 const DESCRIPTOR_FIELD = {
@@ -49,6 +56,9 @@ function findDescriptor(
 /**
  * A function that runs the interceptor chain of the application `this`
  * belongs to, or `original` for an object no live application advises.
+ * For an object that a closed application created it raises
+ * `AspectConfigurationError` when the member requires advice in that
+ * application: such a member never runs without its advice.
  *
  * It keeps the name and the length of `original` and has `original` as its
  * prototype, so Reflect metadata defined on `original`, such as route and
@@ -61,11 +71,30 @@ function createStub(
   original: Fn,
   introduced = false,
 ): Fn {
+  const record: StubRecord = {
+    owner,
+    original,
+    introduced,
+    required: new WeakSet(),
+  };
   const stub = function (this: unknown, ...args: unknown[]): unknown {
     const context = resolveContext(this, owner);
-    return context
-      ? context.dispatch(owner, name, kind, this as object, args, original)
-      : original.apply(this, args);
+    if (context) {
+      return context.dispatch(
+        owner,
+        name,
+        kind,
+        this as object,
+        args,
+        original,
+      );
+    }
+    if (requiresClosedAdvice(this, record)) {
+      throw new AspectConfigurationError(
+        `${owner.name}.${String(name)} requires advice, and the application of the instance it was called on is closed`,
+      );
+    }
+    return original.apply(this, args);
   };
   Object.defineProperty(stub, "name", {
     value: original.name,
@@ -77,8 +106,21 @@ function createStub(
   });
   Object.setPrototypeOf(stub, original);
   Object.defineProperty(stub, ORIGINAL, { value: original });
-  registerStub(stub, { owner, original, introduced });
+  registerStub(stub, record);
   return stub;
+}
+
+/**
+ * Records that the member `method` requires advice in the application of
+ * `handle`. The stub of the member is installed.
+ */
+export function requireAdvice(method: MethodRef, handle: ContextHandle): void {
+  const { targetType, name, kind } = method;
+  const own = Object.getOwnPropertyDescriptor(targetType.prototype, name);
+  const record = stubRecord(own?.[DESCRIPTOR_FIELD[kind]]);
+  if (record?.owner === targetType) {
+    record.required.add(handle);
+  }
 }
 
 /**

@@ -32,8 +32,10 @@ export const ANNOTATIONS_METADATA: unique symbol = Symbol.for(
 
 export interface AnnotationOptions {
   /**
-   * Bootstrap fails when a method carries the annotation and no advisor
-   * matches it.
+   * A member that carries the annotation must be advised by an advisor
+   * whose pointcut refers to the annotation, or whose pointcut has a
+   * caller-supplied matcher. Otherwise the bootstrap fails and every call of
+   * the member raises `AspectConfigurationError`.
    */
   requiresAdvice?: boolean;
 }
