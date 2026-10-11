@@ -112,28 +112,28 @@ run from after init
 NestFactory.create / Test.createTestingModule().compile()
  └─ DependenciesScanner.scan()                 modules, wrappers and metatypes are final
  └─ InstanceLoader.createInstancesOfDependencies()
-     └─ AOP_WEAVER factory (inside the @Global AopModule)   ◄── phase 1
-          1. Collect aspects/advisors: wrappers whose metatype has @Aspect / @AopAdvisor
+     └─ ASPECT_WEAVER factory (inside the @Global AspectModule)   ◄── phase 1
+          1. Collect aspects/advisors: wrappers whose metatype has @Aspect / @Advisor
           2. Compile aspects → Advisor[] (pointcut + advice descriptor + order)
           3. For each candidate class (providers, controllers, injectables, middleware;
              excluding aspects, advisors, Nest core and this module):
                for each method/accessor on the prototype chain:
                  static advisor matching (ClassFilter, then MethodMatcher)
                  if 1 or more match: install dispatcher stub, register (class, key) → advisors
-          4. Register the AopContext of this application
+          4. Register the WeavingContext of this application
  └─ (other providers are instantiated)
  └─ app.init(): registerRouter → captures stubs; callInitHook → already advised
- └─ AopModule.onModuleInit                                 ◄── phase 2
+ └─ AspectModule.onModuleInit                                    ◄── phase 2
           - resolve aspect instances; validate scopes (§5.6)
           - weave factory/value provider instances (metatype unknown in phase 1)
           - validate `requiresAdvice` annotations and introductions; print the weaving report
- └─ AopModule.onApplicationShutdown → unregister the AopContext
+ └─ AspectModule.onApplicationShutdown → unregister the WeavingContext
 ```
 
 Guarantee: **advice is active from the first lifecycle hook and at every framework entry point**.
 Calls made inside a constructor are not guaranteed to be advised (Spring has the same caveat: the
 proxy is created after initialization). A call that reaches a stub before its owning aspect is
-instantiated throws `AopNotReadyError` instead of silently skipping the advice.
+instantiated throws `AspectNotReadyError` instead of silently skipping the advice.
 
 ### 3.4 Dispatcher stub
 
@@ -170,7 +170,7 @@ function installStub(proto, key, original, kind /* method | get | set */) {
 
 | Spring                                                                   | This library                                                                                      | Notes                                                                                   |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `@EnableAspectJAutoProxy`                                                | `AopModule.forRoot(options)` (global)                                                             | Imported once.                                                                          |
+| `@EnableAspectJAutoProxy`                                                | `AspectModule.forRoot(options)` (global)                                                          | Imported once.                                                                          |
 | `@Aspect` + `@Component`                                                 | `@Aspect({ order?, instantiation? })` - implies `@Injectable()`, listed in a module's `providers` | Nest has no component scanning, so registering in a module corresponds to `@Component`. |
 | `@Pointcut` method                                                       | `const pc = P.…` exported constant                                                                | A refactoring-safe reference instead of a string name.                                  |
 | AspectJ expression                                                       | `P` combinators (§4.3)                                                                            | Typed.                                                                                  |
@@ -186,8 +186,8 @@ function installStub(proto, key, original, kind /* method | get | set */) {
 | `Advisor`, `MethodInterceptor`, `Pointcut` (ClassFilter + MethodMatcher) | Same concepts, TS interfaces                                                                      | §4.7.                                                                                   |
 | `AdvisorAdapterRegistry`                                                 | `AdviceAdapter` SPI                                                                               | §4.7.                                                                                   |
 | `ReactiveAdapterRegistry`                                                | `ReturnValueAdapter` registry                                                                     | §5.3.                                                                                   |
-| `ProxyFactory` / `AspectJProxyFactory`                                   | `createAopProxy(target, { aspects, advisors })`                                                   | Phase 3; ES `Proxy`; the only path that supports `TargetSource`.                        |
-| `Advised` (introspection)                                                | `AopInspector` (read-only) + bootstrap weaving report                                             |                                                                                         |
+| `ProxyFactory` / `AspectJProxyFactory`                                   | `createProxy(target, { aspects, advisors })`                                                      | Phase 3; ES `Proxy`; the only path that supports `TargetSource`.                        |
+| `Advised` (introspection)                                                | `AspectInspector` (read-only) + bootstrap weaving report                                          |                                                                                         |
 | `AopContext.currentProxy()`                                              | Not needed                                                                                        | Self-invocation is advised.                                                             |
 | `bean(name*)`                                                            | `P.bean('userService' \| /Service$/ \| Class)`                                                    | Matches the provider token.                                                             |
 | package                                                                  | Nest module (`P.inModule`)                                                                        | C3.                                                                                     |
@@ -196,13 +196,13 @@ function installStub(proto, key, original, kind /* method | get | set */) {
 
 ```ts
 @Module({
-  imports: [AopModule.forRoot()],
+  imports: [AspectModule.forRoot()],
   providers: [ResilienceAspect, AuditAspect],
 })
 export class AppModule {}
 ```
 
-`AopModule.forRoot(options)`:
+`AspectModule.forRoot(options)`:
 
 | Option                | Default            | Purpose                                                                                                                                             |
 | --------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -351,7 +351,7 @@ Signatures enforced by the advice decorators (`JP<pc>` / `PJP<pc>` are helper al
 `R` is `void | PromiseLike<void>` when the join point is (or may be) asynchronous, and plain
 `void` when it is known to be synchronous. Returning a Promise from advice on a synchronous join
 point is a compile error (sketch: "async advice on a join point known to be synchronous"), and a
-runtime `AopUsageError` for broad pointcuts where this is not statically known.
+runtime `AspectUsageError` for broad pointcuts where this is not statically known.
 
 Compile-time errors verified with `docs/sketch/api.ts`:
 
@@ -459,7 +459,7 @@ interface PointcutAdvisor {
   order?: number;
 }
 
-@AopAdvisor() // injectable, auto-detected
+@Advisor() // injectable, auto-detected
 export class TransactionAdvisor implements PointcutAdvisor {
   constructor(private readonly tx: TransactionManager) {}
   readonly pointcut = P.annotated(Transactional).or(
@@ -523,13 +523,13 @@ only when the join point is declared asynchronous (a native `async` function or
 `design:returntype === Promise`); returned from any other method it is a plain value and passes
 through untouched, because following it would run it and replace it with a promise.
 
-| Kind            | Interceptor behavior                                                                                                                                                                                                                                                             |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Before          | `r = advice(jp)`; if `r` is a thenable: allowed only when the join point is asynchronous (a native `async` function or `design:returntype === Promise`), then `return r.then(() => inv.proceed())`; otherwise `AopUsageError`. If `r` is not a thenable, `return inv.proceed()`. |
-| After (finally) | `try { res = inv.proceed() } catch (e) { advice(jp); throw e }`; if `A.supports(res)` → `A.finally(res, () => advice(jp))`, otherwise `advice(jp)`; returns `res`.                                                                                                               |
-| AfterReturning  | `res = inv.proceed()`; async → `A.onSuccess(res, v => advice(jp, v))` (awaits the advice and keeps `v`); sync → `advice(jp, res)`. An advice error propagates instead of the result.                                                                                             |
-| AfterThrowing   | `try { res = inv.proceed() } catch (e) { if (matches(e)) advice(jp, e); throw e }`; async → `A.onError(res, e => { if (matches(e)) await advice(jp, e); throw e })`. An error thrown by the advice replaces `e`.                                                                 |
-| Around          | `advice(pjp)`, where `pjp.proceed()` = `inv.cloneFromHere().proceed()`; the return value of the advice is returned.                                                                                                                                                              |
+| Kind            | Interceptor behavior                                                                                                                                                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before          | `r = advice(jp)`; if `r` is a thenable: allowed only when the join point is asynchronous (a native `async` function or `design:returntype === Promise`), then `return r.then(() => inv.proceed())`; otherwise `AspectUsageError`. If `r` is not a thenable, `return inv.proceed()`. |
+| After (finally) | `try { res = inv.proceed() } catch (e) { advice(jp); throw e }`; if `A.supports(res)` → `A.finally(res, () => advice(jp))`, otherwise `advice(jp)`; returns `res`.                                                                                                                  |
+| AfterReturning  | `res = inv.proceed()`; async → `A.onSuccess(res, v => advice(jp, v))` (awaits the advice and keeps `v`); sync → `advice(jp, res)`. An advice error propagates instead of the result.                                                                                                |
+| AfterThrowing   | `try { res = inv.proceed() } catch (e) { if (matches(e)) advice(jp, e); throw e }`; async → `A.onError(res, e => { if (matches(e)) await advice(jp, e); throw e })`. An error thrown by the advice replaces `e`.                                                                    |
+| Around          | `advice(pjp)`, where `pjp.proceed()` = `inv.cloneFromHere().proceed()`; the return value of the advice is returned.                                                                                                                                                                 |
 
 Because the chain is ordered `Around → Before → After → AfterReturning → AfterThrowing →
 target`, AfterThrowing sees only join point errors and After runs last on the way out - the same
@@ -565,10 +565,10 @@ In-place weaving has no separate proxy object, so `perthis` and `pertarget` merg
 
 ### 5.5 Application context resolution (C8)
 
-An advice chain belongs to an `AopContext` (one per Nest application). The stub resolves the
+An advice chain belongs to a `WeavingContext` (one per Nest application). The stub resolves the
 context for `this` as follows:
 
-1. `WeakMap<instance, AopContext>` hit → use it.
+1. `WeakMap<instance, WeavingContext>` hit → use it.
 2. Otherwise look at the set of live contexts that wove this class:
    - none → call the original (an unmanaged instance, for example `new UserService()` in a unit
      test, or an application that is already closed);
@@ -644,35 +644,35 @@ transport.
 
 ## 7. Spring feature coverage
 
-| #   | Spring feature (analysis §12)                    | Phase         | Design                                                                                                   |
-| --- | ------------------------------------------------ | ------------- | -------------------------------------------------------------------------------------------------------- |
-| F1  | Aspects as beans with DI                         | 1             | §4.5                                                                                                     |
-| F2  | Auto-detection / auto-weaving                    | 1             | §3.3                                                                                                     |
-| F3  | Named, composable pointcuts                      | 1             | §4.3.3                                                                                                   |
-| F4  | `execution`                                      | 1             | `P.method`, `P.name`, `P.kind`; no return/parameter _type patterns_ (C1)                                 |
-| F5  | `within`                                         | 1             | `P.within`, `P.inModule`                                                                                 |
-| F6  | `this` / `target`                                | 1             | `P.target`                                                                                               |
-| F7  | `args` with binding                              | 1             | `P.args`                                                                                                 |
-| F8  | `@annotation`/`@within`/`@target`/`@args`        | 1 (`@args` 2) | §4.3.1                                                                                                   |
-| F9  | `bean()`                                         | 1             | `P.bean`                                                                                                 |
-| F10 | Static/dynamic matching, caching                 | 1             | §4.3.2, §5.1                                                                                             |
-| F11 | Custom / regex / control flow pointcuts          | 1 (cflow 3)   | `P.matching`, `P.name(RegExp)`, `P.cflow`                                                                |
-| F12 | Five advice kinds                                | 1             | §5.3                                                                                                     |
-| F13 | Typed advice parameters                          | 1             | §4.5                                                                                                     |
-| F14 | `proceed()` / `proceed(args)` / multiple proceed | 1             | §5.2                                                                                                     |
-| F15 | JoinPoint API                                    | 1             | §4.5                                                                                                     |
-| F16 | Ordering                                         | 1             | §5.1                                                                                                     |
-| F17 | Advisor / MethodInterceptor API                  | 1             | §4.7                                                                                                     |
-| F18 | Advice adapter SPI                               | 2             | §4.7                                                                                                     |
-| F19 | Introductions                                    | 2             | §4.6                                                                                                     |
-| F20 | Instantiation models                             | 2             | §5.4                                                                                                     |
-| F21 | Programmatic proxies                             | 3             | `createAopProxy`                                                                                         |
-| F22 | `Advised`                                        | 2 (read-only) | `AopInspector`                                                                                           |
-| F23 | `TargetSource`                                   | 3             | `createAopProxy` only                                                                                    |
-| F24 | `exposeProxy` / `AopContext`                     | -             | Unnecessary (self-invocation is advised)                                                                 |
-| F25 | Schema-style aspects                             | 3             | `AopModule.forRoot({ aspects: [{ ref, before: [{ pointcut, method }] }] })`, `method` typed with `keyof` |
-| F26 | Proxy type control                               | -             | Not applicable                                                                                           |
-| F27 | Full AspectJ                                     | -             | Non-goal                                                                                                 |
+| #   | Spring feature (analysis §12)                    | Phase         | Design                                                                                                      |
+| --- | ------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| F1  | Aspects as beans with DI                         | 1             | §4.5                                                                                                        |
+| F2  | Auto-detection / auto-weaving                    | 1             | §3.3                                                                                                        |
+| F3  | Named, composable pointcuts                      | 1             | §4.3.3                                                                                                      |
+| F4  | `execution`                                      | 1             | `P.method`, `P.name`, `P.kind`; no return/parameter _type patterns_ (C1)                                    |
+| F5  | `within`                                         | 1             | `P.within`, `P.inModule`                                                                                    |
+| F6  | `this` / `target`                                | 1             | `P.target`                                                                                                  |
+| F7  | `args` with binding                              | 1             | `P.args`                                                                                                    |
+| F8  | `@annotation`/`@within`/`@target`/`@args`        | 1 (`@args` 2) | §4.3.1                                                                                                      |
+| F9  | `bean()`                                         | 1             | `P.bean`                                                                                                    |
+| F10 | Static/dynamic matching, caching                 | 1             | §4.3.2, §5.1                                                                                                |
+| F11 | Custom / regex / control flow pointcuts          | 1 (cflow 3)   | `P.matching`, `P.name(RegExp)`, `P.cflow`                                                                   |
+| F12 | Five advice kinds                                | 1             | §5.3                                                                                                        |
+| F13 | Typed advice parameters                          | 1             | §4.5                                                                                                        |
+| F14 | `proceed()` / `proceed(args)` / multiple proceed | 1             | §5.2                                                                                                        |
+| F15 | JoinPoint API                                    | 1             | §4.5                                                                                                        |
+| F16 | Ordering                                         | 1             | §5.1                                                                                                        |
+| F17 | Advisor / MethodInterceptor API                  | 1             | §4.7                                                                                                        |
+| F18 | Advice adapter SPI                               | 2             | §4.7                                                                                                        |
+| F19 | Introductions                                    | 2             | §4.6                                                                                                        |
+| F20 | Instantiation models                             | 2             | §5.4                                                                                                        |
+| F21 | Programmatic proxies                             | 3             | `createProxy`                                                                                               |
+| F22 | `Advised`                                        | 2 (read-only) | `AspectInspector`                                                                                           |
+| F23 | `TargetSource`                                   | 3             | `createProxy` only                                                                                          |
+| F24 | `exposeProxy` / `AopContext`                     | -             | Unnecessary (self-invocation is advised)                                                                    |
+| F25 | Schema-style aspects                             | 3             | `AspectModule.forRoot({ aspects: [{ ref, before: [{ pointcut, method }] }] })`, `method` typed with `keyof` |
+| F26 | Proxy type control                               | -             | Not applicable                                                                                              |
+| F27 | Full AspectJ                                     | -             | Non-goal                                                                                                    |
 
 Phase 1 = core release. Phase 2 = introductions, instantiation models, Observable adapter,
 advice SPI, inspector. Phase 3 = cflow, programmatic proxies with TargetSource,
@@ -690,7 +690,7 @@ configuration-style aspects, optional string expression front end.
 | Order = decorator application order                                                                                                                                                            | No precedence between aspects                                                                            | `order` + Spring's in-aspect order (§5.1)                                                                          |
 | Weaving in `AutoAspectExecutor.onModuleInit` of a non-global module                                                                                                                            | Earlier hooks run without advice - reproduced (`spike/nestjs-aop-lifecycle.ts`)                          | Weaving during instantiation (§3.3)                                                                                |
 | Missing aspect provider → the decorated method silently runs without advice                                                                                                                    | Silent production bug                                                                                    | `requiresAdvice`, strict validation (§5.8)                                                                         |
-| For non-static wrappers the wrapper function is stored on `metatype.prototype[aopSymbol]`                                                                                                      | Shared between applications in one process                                                               | Per-application `AopContext` (§5.5)                                                                                |
+| For non-static wrappers the wrapper function is stored on `metatype.prototype[aopSymbol]`                                                                                                      | Shared between applications in one process                                                               | Per-application `WeavingContext` (§5.5)                                                                            |
 | Per-instance lazy wrapping with a `WeakMap` cache; `wrap()` is rebuilt per instance (toss/nestjs-aop#28)                                                                                       | Per-instance work; easy to regress                                                                       | Chain cached per application and per (class, key); per-instance state only for `perTarget` aspects / introductions |
 | `Object.setPrototypeOf(wrapperFn, originalFn)` to keep metadata (toss/nestjs-aop#15)                                                                                                           | Works                                                                                                    | Kept (C10)                                                                                                         |
 | Supports accessors, but not get+set of one property                                                                                                                                            | Limitation                                                                                               | Getter and setter are woven independently (`P.kind`)                                                               |
@@ -717,13 +717,13 @@ configuration-style aspects, optional string expression front end.
 ```
 src/
   index.ts                      public exports
-  module/aop.module.ts          AopModule.forRoot, AOP_WEAVER factory, lifecycle
+  module/aspect.module.ts          AspectModule.forRoot, ASPECT_WEAVER factory, lifecycle
   annotation/                   createAnnotation, Reflector interop, lookup order
   pointcut/
     pointcut.ts                 Pointcut, ClassFilter, MethodMatcher, combinators
     designators/                method, within, target, name, kind, annotated, args, bean, in-module, metadata, matching
   aspect/
-    decorators.ts               @Aspect, @Before … @Around, @DeclareParents, @AopAdvisor
+    decorators.ts               @Aspect, @Before … @Around, @DeclareParents, @Advisor
     aspect-compiler.ts          aspect metadata → PointcutAdvisor[]
     instantiation/              singleton, per-target, per-class
   advice/
@@ -736,10 +736,10 @@ src/
   weaving/
     weaver.ts                   candidate scan, static matching, stub installation
     stub.ts                     dispatcher, ORIGINAL unwrap, metadata preservation
-    context.ts                  AopContext registry (§5.5)
+    context.ts                  WeavingContext registry (§5.5)
   introduction/                 delegates, isIntroduced
-  inspect/                      AopInspector, weaving report
-  errors.ts                     AopConfigurationError, AopUsageError, AopNotReadyError
+  inspect/                      AspectInspector, weaving report
+  errors.ts                     AspectConfigurationError, AspectUsageError, AspectNotReadyError
 ```
 
 Build: tsdown produces separate CJS and ESM outputs with matching declarations; type tests in the
@@ -762,12 +762,12 @@ style of `docs/sketch/api.ts` (`@ts-expect-error` fixtures) are checked by the p
    Node.js 24 and ships both module formats (CJS and ESM). Whether to support earlier Nest majors
    remains open.
 5. **Lazy-loaded modules** (`LazyModuleLoader`): weave on load through an explicit
-   `AopWeaver.weave(moduleRef)` call, or wrap `LazyModuleLoader`?
+   `AspectWeaver.weave(moduleRef)` call, or wrap `LazyModuleLoader`?
 
 ## 12. Accepted trade-offs
 
 - Calls made in a constructor before the weaver runs may not be advised (§3.3). A call made before
-  the aspect is instantiated throws `AopNotReadyError` instead of skipping the advice.
+  the aspect is instantiated throws `AspectNotReadyError` instead of skipping the advice.
 - Parallel Nest applications in one process that weave the same class differently fall back to the
   "most recent context" for scoped instances (§5.5).
 - Arrow-function fields and `#private` methods cannot be advised (C9).

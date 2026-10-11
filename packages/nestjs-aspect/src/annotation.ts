@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import type { ReflectableDecorator } from "@nestjs/core";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import type {
   Annotation,
   AnnotationLike,
@@ -67,7 +67,7 @@ function nestKey(annotation: AnnotationLike<any>): unknown {
       ? (annotation as { KEY?: unknown }).KEY
       : undefined;
   if (key === undefined) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       "Expected an annotation created by createAnnotation() or Reflector.createDecorator()",
     );
   }
@@ -112,14 +112,14 @@ function findOnClass(
 /**
  * Creates a typed annotation usable on methods and classes, and on accessors
  * when it declares no method contract.
- * Throws `AopConfigurationError` for an empty name.
+ * Throws `AspectConfigurationError` for an empty name.
  */
 export function createAnnotation<N extends string, V = void, F extends Fn = Fn>(
   name: N,
   options: AnnotationOptions = {},
 ): Annotation<V, F, N> {
   if (typeof name !== "string" || name.length === 0) {
-    throw new AopConfigurationError("An annotation needs a non-empty name");
+    throw new AspectConfigurationError("An annotation needs a non-empty name");
   }
   const requiresAdvice = options.requiresAdvice === true;
   const annotation = (...value: unknown[]) => {

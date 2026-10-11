@@ -1,7 +1,7 @@
 // Join points of one invocation.
 
 import { findAnnotation } from "./annotation";
-import { AopUsageError } from "./errors";
+import { AspectUsageError } from "./errors";
 import type {
   AnnotationLike,
   AnyShape,
@@ -23,7 +23,7 @@ function describeAnnotation(annotation: AnnotationLike<any>): string {
  *   and `args` from the invocation.
  * - `annotation` and `findAnnotation` use `findAnnotation` of
  *   `./annotation` (the method, the declaring class, the target class);
- *   `annotation` raises `AopUsageError` when nothing is found.
+ *   `annotation` raises `AspectUsageError` when nothing is found.
  * - `toString()` is `"<TargetType>.<name>(<args>)"`, with the arguments
  *   rendered by `formatArgument`.
  */
@@ -44,7 +44,7 @@ export function createJoinPoint(
     annotation(annotation: AnnotationLike<any>) {
       const match = findAnnotation(annotation, method);
       if (!match) {
-        throw new AopUsageError(
+        throw new AspectUsageError(
           `${joinPoint.toString()} does not carry ${describeAnnotation(annotation)}; use findAnnotation() when the pointcut does not guarantee it`,
         );
       }

@@ -19,7 +19,7 @@ class Service {
 @Module({
   providers: [
     {
-      provide: "AOP_WEAVER",
+      provide: "ASPECT_WEAVER",
       inject: [ModulesContainer],
       useFactory: (container: ModulesContainer) => {
         woven = container.size > 0;
@@ -28,10 +28,10 @@ class Service {
     },
   ],
 })
-class AopModule {}
+class AspectModule {}
 
 @Module({
-  imports: [AopModule],
+  imports: [AspectModule],
   providers: [Service],
 })
 class AppModule {}

@@ -253,7 +253,7 @@ export interface JoinPoint<S extends Shape> {
   readonly isAsync: boolean;
   /**
    * Value of an annotation the pointcut guarantees. Lookup order: the method,
-   * the declaring class, the target class. Throws `AopUsageError` when the
+   * the declaring class, the target class. Throws `AspectUsageError` when the
    * annotation is absent.
    */
   annotation<V, N extends S["ann"]>(a: Annotation<V, any, N>): V;
@@ -359,7 +359,7 @@ export interface AdviceAdapter {
 }
 
 export interface AdviceAdapterRegistry {
-  /** Throws `AopConfigurationError` when no adapter supports the advice. */
+  /** Throws `AspectConfigurationError` when no adapter supports the advice. */
   toInterceptor(advice: Advice, context: InterceptorContext): MethodInterceptor;
 }
 
@@ -410,7 +410,7 @@ export interface AdviceMetadata {
 
 /** Where an advisor comes from; used by reports and error messages. */
 export interface AdvisorSource {
-  /** Aspect class or `@AopAdvisor` class. */
+  /** Aspect class or `@Advisor` class. */
   readonly type: Class;
   /** Advice method and kind, for an advisor compiled from an aspect. */
   readonly methodName?: string | symbol;

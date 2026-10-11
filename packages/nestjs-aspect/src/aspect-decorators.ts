@@ -2,7 +2,7 @@
 
 import "reflect-metadata";
 import { Injectable } from "@nestjs/common";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { isPointcutLike } from "./pointcut";
 import type {
   AdviceKind,
@@ -40,7 +40,7 @@ export const ADVICE_METADATA: unique symbol = Symbol.for(
   "nestjs-aspect:advice",
 );
 
-/** Own Reflect metadata of an `@AopAdvisor` class constructor: `true`. */
+/** Own Reflect metadata of an `@Advisor` class constructor: `true`. */
 export const ADVISOR_METADATA: unique symbol = Symbol.for(
   "nestjs-aspect:advisor",
 );
@@ -102,18 +102,18 @@ function adviceDecorator(
 ): (target: object, key: string | symbol) => void {
   const decorator = `@${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
   if (!isPointcutLike(pointcut)) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `${decorator} requires a pointcut; an undefined pointcut usually comes from a circular import`,
     );
   }
   if (throwing !== undefined && typeof throwing !== "function") {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `${decorator} requires a class as its throwing option`,
     );
   }
   return (target, key) => {
     if (typeof target === "function") {
-      throw new AopConfigurationError(
+      throw new AspectConfigurationError(
         `${decorator} cannot be applied to the static member ${target.name}.${String(key)}`,
       );
     }
@@ -137,10 +137,12 @@ function adviceDecorator(
 export function Aspect(options: AspectOptions = {}): ClassDecorator {
   const { order, instantiation = "singleton" } = options;
   if (order !== undefined && !isOrder(order)) {
-    throw new AopConfigurationError("@Aspect requires a number as its order");
+    throw new AspectConfigurationError(
+      "@Aspect requires a number as its order",
+    );
   }
   if (!INSTANTIATION_MODELS.includes(instantiation)) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `@Aspect does not support the instantiation model ${String(instantiation)}`,
     );
   }
@@ -197,7 +199,7 @@ export function Around<S extends Shape>(
  * Marks a class whose instances implement `PointcutAdvisor` as an advisor and
  * as a Nest provider (`@Injectable()`).
  */
-export function AopAdvisor(): ClassDecorator {
+export function Advisor(): ClassDecorator {
   return (target) => {
     Injectable()(target);
     Reflect.defineMetadata(ADVISOR_METADATA, true, target);
@@ -234,7 +236,7 @@ export function getAdviceMetadata(type: Class): readonly AdviceMetadata[] {
   return perClass.flat();
 }
 
-/** True when the class itself is decorated with `@AopAdvisor`. */
-export function isAopAdvisor(type: Class): boolean {
+/** True when the class itself is decorated with `@Advisor`. */
+export function isAdvisor(type: Class): boolean {
   return Reflect.hasOwnMetadata(ADVISOR_METADATA, type);
 }

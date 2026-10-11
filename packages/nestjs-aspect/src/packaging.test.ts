@@ -49,7 +49,7 @@ const scenario = `
   try {
     kit.Before(undefined);
   } catch (error) {
-    rejected = error instanceof kit.AopConfigurationError && error instanceof Error;
+    rejected = error instanceof kit.AspectConfigurationError && error instanceof Error;
   }
   console.log(JSON.stringify({
     exports: Object.keys(kit).sort(),
@@ -69,7 +69,7 @@ ${scenario}`,
 };
 
 const declarations = `import {
-  AopAdvisor,
+  Advisor,
   Around,
   Aspect,
   Before,
@@ -127,7 +127,7 @@ class ResilienceAspect {
   }
 }
 
-@AopAdvisor()
+@Advisor()
 class TracingAdvisor implements PointcutAdvisor {
   readonly pointcut = retryable.or(rename);
   readonly advice: MethodInterceptor = {
@@ -154,15 +154,15 @@ describe("built nestjs-aspect package", () => {
       );
       expect(JSON.parse(output)).toEqual({
         exports: [
+          "Advisor",
           "After",
           "AfterReturning",
           "AfterThrowing",
-          "AopAdvisor",
-          "AopConfigurationError",
-          "AopNotReadyError",
-          "AopUsageError",
           "Around",
           "Aspect",
+          "AspectConfigurationError",
+          "AspectNotReadyError",
+          "AspectUsageError",
           "Before",
           "P",
           "createAnnotation",
@@ -187,15 +187,15 @@ describe("built nestjs-aspect package", () => {
         `import { createRequire } from "node:module";
 import * as esm from "${packageName}";
 const cjs = createRequire(import.meta.url)("${packageName}");
-class Custom extends esm.AopUsageError {}
+class Custom extends esm.AspectUsageError {}
 console.log(JSON.stringify([
-  cjs.AopUsageError !== esm.AopUsageError,
-  new cjs.AopUsageError("x") instanceof esm.AopUsageError,
-  new esm.AopNotReadyError("x") instanceof cjs.AopNotReadyError,
-  new cjs.AopUsageError("x") instanceof esm.AopConfigurationError,
-  new cjs.AopUsageError("x") instanceof Custom,
-  new Custom("x") instanceof cjs.AopUsageError,
-  new Error("x") instanceof esm.AopUsageError,
+  cjs.AspectUsageError !== esm.AspectUsageError,
+  new cjs.AspectUsageError("x") instanceof esm.AspectUsageError,
+  new esm.AspectNotReadyError("x") instanceof cjs.AspectNotReadyError,
+  new cjs.AspectUsageError("x") instanceof esm.AspectConfigurationError,
+  new cjs.AspectUsageError("x") instanceof Custom,
+  new Custom("x") instanceof cjs.AspectUsageError,
+  new Error("x") instanceof esm.AspectUsageError,
 ]));`,
       ],
       { cwd: root, encoding: "utf8" },

@@ -12,16 +12,16 @@ export {
   After,
   AfterReturning,
   AfterThrowing,
-  AopAdvisor,
+  Advisor,
   Around,
   Aspect,
   type AsyncGuard,
   Before,
 } from "./aspect-decorators";
 export {
-  AopConfigurationError,
-  AopNotReadyError,
-  AopUsageError,
+  AspectConfigurationError,
+  AspectNotReadyError,
+  AspectUsageError,
 } from "./errors";
 export {
   type AllShapes,

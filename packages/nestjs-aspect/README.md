@@ -143,7 +143,7 @@ export class ResilienceAspect {
 
 - Within one aspect the advice order is around, before, after, after returning, after throwing; advice of the same kind runs in declaration order.
 - Advice follows the settlement of a `Promise` result, not the synchronous return. Another thenable, such as a lazy query builder, is followed only when the method is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise`. Returned from any other method it reaches the caller untouched and is not run.
-- Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AopUsageError` when called.
+- Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AspectUsageError` when called.
 - `async` before advice needs a method that is declared asynchronous. A method that returns a promise without being `async` and without a decorated `Promise` return type counts as synchronous for before advice.
 - `jp.annotation(A)` is callable only when the pointcut guarantees `A`; `jp.findAnnotation(A)` returns `undefined` when `A` is absent. Both look at the method, then the declaring class, then the target class. Each class step includes inherited class annotations, so for an inherited method an annotation on a superclass of the declaring class wins over one on the target class.
 - `jp.args` is frozen. `jp.proceedWith(...args)` runs the rest of the chain with other arguments.
@@ -153,17 +153,17 @@ The compiler rejects an annotation on a method outside its contract, a missing o
 
 ## Advisors
 
-`@AopAdvisor()` marks a provider whose instances implement `PointcutAdvisor`: a pointcut, advice and an optional order. The advice is a `MethodInterceptor`.
+`@Advisor()` marks a provider whose instances implement `PointcutAdvisor`: a pointcut, advice and an optional order. The advice is a `MethodInterceptor`.
 
 ```ts
 import {
-  AopAdvisor,
+  Advisor,
   type MethodInterceptor,
   P,
   type PointcutAdvisor,
 } from "nestjs-aspect";
 
-@AopAdvisor()
+@Advisor()
 export class TransactionAdvisor implements PointcutAdvisor {
   constructor(private readonly transactions: TransactionManager) {}
 
@@ -181,11 +181,11 @@ The entry point also exports the extension interfaces `AdviceAdapter` and `Retur
 
 ## Errors
 
-| Class                   | Thrown when                                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------- |
-| `AopConfigurationError` | Aspects, pointcuts or advice are misconfigured, such as an advice decorator without a pointcut. |
-| `AopUsageError`         | Advice is misused at run time, such as asynchronous advice on a synchronous join point.         |
-| `AopNotReadyError`      | A woven method is invoked before the instance of an aspect that advises it exists.              |
+| Class                      | Thrown when                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `AspectConfigurationError` | Aspects, pointcuts or advice are misconfigured, such as an advice decorator without a pointcut. |
+| `AspectUsageError`         | Advice is misused at run time, such as asynchronous advice on a synchronous join point.         |
+| `AspectNotReadyError`      | A woven method is invoked before the instance of an aspect that advises it exists.              |
 
 `instanceof` recognizes these errors across the CommonJS and ES module builds of the package.
 

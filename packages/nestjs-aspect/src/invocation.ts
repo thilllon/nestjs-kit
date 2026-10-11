@@ -1,6 +1,6 @@
 // The interceptor chain of one member and its traversal.
 
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createJoinPoint } from "./join-point";
 import type {
   AdvisorDescriptor,
@@ -39,7 +39,7 @@ export function buildChain(
       return { interceptor, advisor };
     }
     if (typeof matcher.matchesRuntime !== "function") {
-      throw new AopConfigurationError(
+      throw new AspectConfigurationError(
         `The method matcher of an advisor of ${advisor.source.type.name} has isRuntime but no matchesRuntime()`,
       );
     }

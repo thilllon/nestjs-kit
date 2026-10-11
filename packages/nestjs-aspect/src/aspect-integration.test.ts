@@ -15,7 +15,7 @@ import {
   Aspect,
   Before,
 } from "./aspect-decorators";
-import { AopNotReadyError } from "./errors";
+import { AspectNotReadyError } from "./errors";
 import { buildChain, invoke } from "./invocation";
 import { createClassRef, createMethodRef } from "./method-ref";
 import { matchesStatically } from "./pointcut";
@@ -321,11 +321,13 @@ describe("aspects compiled into chains for a service class", () => {
     );
   });
 
-  it("raises AopNotReadyError while an aspect has no instance", () => {
+  it("raises AspectNotReadyError while an aspect has no instance", () => {
     const service = new UserService();
     const chain = chainsOf(UserService, UserModule, [])("deposit");
 
-    expect(() => invoke(chain, service, ["acc", 1])).toThrow(AopNotReadyError);
+    expect(() => invoke(chain, service, ["acc", 1])).toThrow(
+      AspectNotReadyError,
+    );
     expect(log).toEqual([]);
   });
 });

@@ -15,7 +15,7 @@ import {
   Before,
 } from "./aspect-decorators";
 import { matching, named } from "./aspect-fixture";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createClassRef, createMethodRef } from "./method-ref";
 import type {
   AdvisorDescriptor,
@@ -168,7 +168,7 @@ describe("compileAspect", () => {
     }
 
     expect(() => compileAspect(Forgotten, unresolved)).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
     expect(() => compileAspect(Forgotten, unresolved)).toThrow(/@Aspect/);
   });
@@ -180,7 +180,7 @@ describe("compileAspect", () => {
       class Scoped {}
 
       expect(() => compileAspect(Scoped, unresolved)).toThrow(
-        AopConfigurationError,
+        AspectConfigurationError,
       );
     },
   );
@@ -228,7 +228,7 @@ describe("describeAdvisor", () => {
 
     expect(() =>
       describeAdvisor({ advice } as unknown as PointcutAdvisor, Incomplete, 0),
-    ).toThrow(AopConfigurationError);
+    ).toThrow(AspectConfigurationError);
     expect(() =>
       describeAdvisor(
         { pointcut: anything } as unknown as PointcutAdvisor,
@@ -248,7 +248,7 @@ describe("describeAdvisor", () => {
         Malformed,
         0,
       ),
-    ).toThrow(AopConfigurationError);
+    ).toThrow(AspectConfigurationError);
   });
 
   it("rejects an order that cannot be compared", () => {

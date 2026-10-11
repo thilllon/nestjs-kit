@@ -2,7 +2,7 @@
 // chain builder and the weaver share.
 
 import "reflect-metadata";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import type {
   BeanRef,
   Class,
@@ -89,7 +89,7 @@ function isAsyncMember(
  * stub. Prototypes that do not define the member are skipped, so an inherited
  * member keeps its declaring type wherever stubs shadow it below.
  *
- * Throws `AopConfigurationError` when the class has no such member of that
+ * Throws `AspectConfigurationError` when the class has no such member of that
  * kind.
  */
 export function createMethodRef(
@@ -127,7 +127,7 @@ export function createMethodRef(
     }
   }
   if (!original) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `${classRef.type.name} has no ${kind} named ${String(name)}`,
     );
   }

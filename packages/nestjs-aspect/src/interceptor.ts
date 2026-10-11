@@ -2,7 +2,7 @@
 // - The advice method is `aspect[advice.methodName]`, called with the aspect
 //   instance as `this`. The instance comes from
 //   `advice.resolveAspect(invocation.method, invocation.target)` when the
-//   chain reaches the advice; `undefined` raises `AopNotReadyError` naming
+//   chain reaches the advice; `undefined` raises `AspectNotReadyError` naming
 //   the aspect and the join point. The error is thrown before the advice and
 //   everything inside it run; advice outside it has already started, and
 //   after asynchronous before advice outside it the error is a rejection.
@@ -17,17 +17,17 @@
 //   `invocation.method.isAsync` only.
 // - A before, after, afterReturning or afterThrowing advice that returns a
 //   thenable is awaited on an asynchronous join point. On a synchronous join
-//   point the interceptor raises `AopUsageError`: the advice must be
+//   point the interceptor raises `AspectUsageError`: the advice must be
 //   synchronous. The thenable it returned is still observed, so that its
 //   rejection is not reported as unhandled.
 // - A join point that throws synchronously has no result to follow. Advice
 //   that returns a thenable for it is awaited when `invocation.method.isAsync`
-//   and the error is delivered as a rejection; otherwise `AopUsageError`.
+//   and the error is delivered as a rejection; otherwise `AspectUsageError`.
 // - On a join point with `invocation.method.isAsync`, an error that before
 //   advice throws synchronously is delivered as a rejection, as the join
 //   point itself would deliver it.
 
-import { AopNotReadyError, AopUsageError } from "./errors";
+import { AspectNotReadyError, AspectUsageError } from "./errors";
 import { createProceedingJoinPoint } from "./join-point";
 import type {
   AspectAdvice,
@@ -73,13 +73,13 @@ function resolveAdvice(
   const aspect = advice.resolveAspect(invocation.method, invocation.target);
   if (!aspect) {
     const { method } = invocation;
-    throw new AopNotReadyError(
+    throw new AspectNotReadyError(
       `${method.targetType.name}.${String(method.name)} was called before an instance of the aspect ${advice.aspectType.name} exists (advice ${describeAdvice(advice)})`,
     );
   }
   const fn = (aspect as Record<string | symbol, unknown>)[advice.methodName];
   if (typeof fn !== "function") {
-    throw new AopUsageError(
+    throw new AspectUsageError(
       `${describeAdvice(advice)} is not a method of the aspect instance`,
     );
   }
@@ -90,9 +90,9 @@ function asyncAdviceError(
   advice: AspectAdvice,
   invocation: MethodInvocation,
   options?: ErrorOptions,
-): AopUsageError {
+): AspectUsageError {
   const { method } = invocation;
-  return new AopUsageError(
+  return new AspectUsageError(
     `The ${advice.kind} advice ${describeAdvice(advice)} returned a promise on the synchronous join point ${method.targetType.name}.${String(method.name)}; advice on a synchronous join point must be synchronous`,
     options,
   );
@@ -167,7 +167,7 @@ export function aroundInterceptor(
 /**
  * `r = advice(jp)`. A thenable `r` on an asynchronous join point
  * (`invocation.method.isAsync`) yields `r.then(() => invocation.proceed())`;
- * on a synchronous join point it raises `AopUsageError`. Otherwise the
+ * on a synchronous join point it raises `AspectUsageError`. Otherwise the
  * result is `invocation.proceed()`. An error from the advice prevents the
  * join point from running.
  */
