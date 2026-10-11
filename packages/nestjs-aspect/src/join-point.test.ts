@@ -60,17 +60,17 @@ describe("createJoinPoint", () => {
   it("describes the target, the arguments and the signature of the call", () => {
     const invocation = invocationOf("find", [7]);
 
-    const jp = createJoinPoint(invocation);
+    const joinPoint = createJoinPoint(invocation);
 
-    expect(jp.kind).toBe("method");
-    expect(jp.target).toBe(invocation.target);
-    expect(jp.args).toEqual([7]);
-    expect(jp.signature).toEqual({
+    expect(joinPoint.kind).toBe("method");
+    expect(joinPoint.target).toBe(invocation.target);
+    expect(joinPoint.args).toEqual([7]);
+    expect(joinPoint.signature).toEqual({
       name: "find",
       declaringType: BaseRepository,
       targetType: UserRepository,
     });
-    expect(jp.isAsync).toBe(false);
+    expect(joinPoint.isAsync).toBe(false);
   });
 
   it("reports asynchronous methods and accessor kinds", () => {
@@ -99,26 +99,28 @@ describe("createJoinPoint", () => {
   });
 
   it("raises AspectUsageError from annotation() and returns undefined from findAnnotation() when absent", () => {
-    const jp = createJoinPoint(invocationOf("find", [7]));
+    const joinPoint = createJoinPoint(invocationOf("find", [7]));
 
-    expect(jp.findAnnotation(Absent)).toBeUndefined();
-    expect(() => jp.annotation(Absent as never)).toThrow(AspectUsageError);
-    expect(() => jp.annotation(Absent as never)).toThrow(
+    expect(joinPoint.findAnnotation(Absent)).toBeUndefined();
+    expect(() => joinPoint.annotation(Absent as never)).toThrow(
+      AspectUsageError,
+    );
+    expect(() => joinPoint.annotation(Absent as never)).toThrow(
       /UserRepository\.find\(7\).*@Absent/,
     );
   });
 
   it("accepts a present annotation that carries no value", () => {
-    const jp = createJoinPoint(invocationOf("find", [7]));
+    const joinPoint = createJoinPoint(invocationOf("find", [7]));
 
-    expect(jp.annotation(Marker as never)).toBeUndefined();
+    expect(joinPoint.annotation(Marker as never)).toBeUndefined();
   });
 
   it("renders as TargetType.name(arguments)", () => {
-    const jp = createJoinPoint(invocationOf("find", [7, { limit: 1 }]));
+    const joinPoint = createJoinPoint(invocationOf("find", [7, { limit: 1 }]));
 
-    expect(jp.toString()).toBe("UserRepository.find(7, Object)");
-    expect(`${jp}`).toBe("UserRepository.find(7, Object)");
+    expect(joinPoint.toString()).toBe("UserRepository.find(7, Object)");
+    expect(`${joinPoint}`).toBe("UserRepository.find(7, Object)");
   });
 });
 
@@ -144,25 +146,25 @@ describe("join points in advice", () => {
     @Aspect()
     class Trace {
       @Around(named("find"))
-      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        seen.push(jp);
-        return jp.proceedWith(8);
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        seen.push(joinPoint);
+        return joinPoint.proceedWith(8);
       }
 
       @Before(named("find"))
-      first(jp: JoinPoint<AnyShape>): void {
-        seen.push(jp);
+      first(joinPoint: JoinPoint<AnyShape>): void {
+        seen.push(joinPoint);
       }
 
       @Before(named("find"))
-      second(jp: JoinPoint<AnyShape>): void {
-        seen.push(jp);
+      second(joinPoint: JoinPoint<AnyShape>): void {
+        seen.push(joinPoint);
       }
     }
     const repository = weave(new UserRepository(), [new Trace()]);
 
     expect(repository.find(7)).toBe("row 8");
-    expect(seen.map((jp) => jp.toString())).toEqual([
+    expect(seen.map((joinPoint) => joinPoint.toString())).toEqual([
       "UserRepository.find(7)",
       "UserRepository.find(8)",
       "UserRepository.find(8)",

@@ -34,9 +34,9 @@ import { P } from "./pointcut-designators";
 import type {
   AnyShape,
   JoinPoint,
-  JP,
+  JoinPointOf,
   MethodInterceptor,
-  PJP,
+  ProceedingJoinPointOf,
   Pointcut,
   ReturnValueAdapter,
 } from "./types";
@@ -54,8 +54,8 @@ function recorder(pointcut: Pointcut<AnyShape>, log: string[], label = "") {
   @Aspect()
   class Recorder {
     @Before(pointcut)
-    record(jp: JoinPoint<AnyShape>) {
-      const { targetType, name } = jp.signature;
+    record(joinPoint: JoinPoint<AnyShape>) {
+      const { targetType, name } = joinPoint.signature;
       log.push(`${label}${targetType.name}.${String(name)}`);
     }
   }
@@ -499,9 +499,9 @@ describe("dispatcher stubs", () => {
     @Aspect()
     class SettingsAspect {
       @Around(getters)
-      upperCase(jp: PJP<typeof getters>) {
-        log.push(`${jp.kind} ${String(jp.signature.name)}`);
-        return String(jp.proceed()).toUpperCase();
+      upperCase(joinPoint: ProceedingJoinPointOf<typeof getters>) {
+        log.push(`${joinPoint.kind} ${String(joinPoint.signature.name)}`);
+        return String(joinPoint.proceed()).toUpperCase();
       }
     }
 
@@ -535,8 +535,8 @@ describe("dispatcher stubs", () => {
     @Aspect()
     class Broad {
       @Before(everything)
-      record(jp: JoinPoint<AnyShape>) {
-        log.push(`broad ${jp.toString()}`);
+      record(joinPoint: JoinPoint<AnyShape>) {
+        log.push(`broad ${joinPoint.toString()}`);
       }
 
       helper() {}
@@ -546,8 +546,8 @@ describe("dispatcher stubs", () => {
     @Aspect()
     class Hooks {
       @Before(hook)
-      record(jp: JP<typeof hook>) {
-        log.push(`hook ${jp.toString()}`);
+      record(joinPoint: JoinPointOf<typeof hook>) {
+        log.push(`hook ${joinPoint.toString()}`);
       }
     }
 
@@ -592,8 +592,8 @@ describe("aspects and advisors in a container", () => {
       constructor(private readonly metrics: Metrics) {}
 
       @AfterReturning(execute)
-      count(jp: JP<typeof execute>, result: string) {
-        this.metrics.count(`${String(jp.signature.name)}:${result}`);
+      count(joinPoint: JoinPointOf<typeof execute>, result: string) {
+        this.metrics.count(`${String(joinPoint.signature.name)}:${result}`);
       }
     }
 
@@ -623,7 +623,7 @@ describe("aspects and advisors in a container", () => {
       constructor(readonly cache: Cache) {}
 
       @Before(warm)
-      record(_jp: JP<typeof warm>) {}
+      record(_jp: JoinPointOf<typeof warm>) {}
     }
 
     await expect(
@@ -865,8 +865,10 @@ describe("module options", () => {
     @Aspect()
     class LoaderAspect {
       @AfterReturning(loads)
-      record(jp: JP<typeof loads>, result: unknown) {
-        log.push(`${String(jp.signature.name)} returned ${String(result)}`);
+      record(joinPoint: JoinPointOf<typeof loads>, result: unknown) {
+        log.push(
+          `${String(joinPoint.signature.name)} returned ${String(result)}`,
+        );
       }
     }
 
@@ -908,7 +910,7 @@ describe("module options", () => {
     @Aspect()
     class LoaderAspect {
       @AfterReturning(loads)
-      record(_jp: JP<typeof loads>, result: unknown) {
+      record(_jp: JoinPointOf<typeof loads>, result: unknown) {
         log.push(`returned ${String(result)}`);
       }
     }
@@ -1030,15 +1032,15 @@ describe("HTTP pipeline", () => {
     @Aspect({ order: 2 })
     class Inner {
       @Around(handlers)
-      around(jp: PJP<typeof handlers>) {
+      around(joinPoint: ProceedingJoinPointOf<typeof handlers>) {
         log.push("inner around");
-        const result = jp.proceed();
+        const result = joinPoint.proceed();
         log.push("inner around returns");
         return result;
       }
 
       @Before(brew)
-      refuse(_jp: JP<typeof brew>) {
+      refuse(_jp: JoinPointOf<typeof brew>) {
         throw new TeapotError("no coffee");
       }
     }
@@ -1046,15 +1048,15 @@ describe("HTTP pipeline", () => {
     @Aspect({ order: 1 })
     class Outer {
       @Before(handlers)
-      before(_jp: JP<typeof handlers>) {
+      before(_jp: JoinPointOf<typeof handlers>) {
         log.push("outer before");
       }
 
       @Around(handlers)
-      around(jp: PJP<typeof handlers>) {
+      around(joinPoint: ProceedingJoinPointOf<typeof handlers>) {
         log.push("outer around");
         try {
-          return jp.proceed();
+          return joinPoint.proceed();
         } finally {
           log.push("outer around returns");
         }

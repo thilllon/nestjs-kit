@@ -7,7 +7,7 @@ import type {
   AnnotationMatch,
   AnnotationRecord,
   Class,
-  Fn,
+  AnyFunction,
   MethodRef,
 } from "./types";
 import { constructorChain } from "./util";
@@ -116,10 +116,11 @@ function findOnClass(
  * when it declares no method contract.
  * Throws `AspectConfigurationError` for an empty name.
  */
-export function createAnnotation<N extends string, V = void, F extends Fn = Fn>(
-  name: N,
-  options: AnnotationOptions = {},
-): Annotation<V, F, N> {
+export function createAnnotation<
+  N extends string,
+  V = void,
+  F extends AnyFunction = AnyFunction,
+>(name: N, options: AnnotationOptions = {}): Annotation<V, F, N> {
   if (typeof name !== "string" || name.length === 0) {
     throw new AspectConfigurationError("An annotation needs a non-empty name");
   }
@@ -151,7 +152,7 @@ export function createAnnotation<N extends string, V = void, F extends Fn = Fn>(
 /** True for a value created by `createAnnotation` (of any copy of the package). */
 export function isAnnotation(
   value: unknown,
-): value is Annotation<unknown, Fn, string> {
+): value is Annotation<unknown, AnyFunction, string> {
   return (
     typeof value === "function" &&
     (value as unknown as Record<symbol, unknown>)[ANNOTATION_MARKER] === true

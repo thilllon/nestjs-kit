@@ -12,7 +12,12 @@ import {
   Before,
 } from "./aspect-decorators";
 import { P } from "./pointcut-designators";
-import type { AnyShape, JoinPoint, JP, PJP } from "./types";
+import type {
+  AnyShape,
+  JoinPoint,
+  JoinPointOf,
+  ProceedingJoinPointOf,
+} from "./types";
 import { closeWoven, initWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -93,23 +98,25 @@ async function application() {
   @Aspect({ order: 10 })
   class ResilienceAspect {
     @AfterThrowing(findById, { throwing: RangeError })
-    onRangeError(_jp: JP<typeof findById>, error: RangeError): void {
+    onRangeError(_jp: JoinPointOf<typeof findById>, error: RangeError): void {
       log.push(`range error: ${error.message}`);
     }
 
     @AfterReturning(findById)
-    cacheUser(jp: JP<typeof findById>, user: User): void {
-      const [id] = jp.args;
+    cacheUser(joinPoint: JoinPointOf<typeof findById>, user: User): void {
+      const [id] = joinPoint.args;
       const key: number = id;
       log.push(`cache ${key} = ${user.name}`);
     }
 
     @Around(retryable)
-    async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-      const { attempts } = jp.annotation(Retryable);
+    async retry(
+      joinPoint: ProceedingJoinPointOf<typeof retryable>,
+    ): Promise<unknown> {
+      const { attempts } = joinPoint.annotation(Retryable);
       for (let attempt = 1; ; attempt++) {
         try {
-          return await jp.proceed();
+          return await joinPoint.proceed();
         } catch (error) {
           if (attempt >= attempts) {
             throw error;
@@ -122,37 +129,37 @@ async function application() {
   @Aspect({ order: 1 })
   class AuditAspect {
     @After(inUserModule)
-    leave(jp: JoinPoint<AnyShape>): void {
-      log.push(`leave ${String(jp.signature.name)}`);
+    leave(joinPoint: JoinPoint<AnyShape>): void {
+      log.push(`leave ${String(joinPoint.signature.name)}`);
     }
 
     @Before(inUserModule)
-    enter(jp: JoinPoint<AnyShape>): void {
-      log.push(`enter ${jp}`);
+    enter(joinPoint: JoinPoint<AnyShape>): void {
+      log.push(`enter ${joinPoint}`);
     }
 
     @Before(withRoles)
-    roles(jp: JP<typeof withRoles>): void {
-      const roles: string[] | undefined = jp.findAnnotation(Roles);
+    roles(joinPoint: JoinPointOf<typeof withRoles>): void {
+      const roles: string[] | undefined = joinPoint.findAnnotation(Roles);
       log.push(`roles ${roles?.join()}`);
     }
 
     @Before(audited)
-    audit(jp: JP<typeof audited>): void {
-      const { action } = jp.annotation(Audited);
+    audit(joinPoint: JoinPointOf<typeof audited>): void {
+      const { action } = joinPoint.annotation(Audited);
       log.push(`audit ${action}`);
     }
 
     @Before(accountOps)
-    checkAccount(jp: JP<typeof accountOps>): void {
-      const account: Account = jp.args[0];
+    checkAccount(joinPoint: JoinPointOf<typeof accountOps>): void {
+      const account: Account = joinPoint.args[0];
       log.push(`account ${account.id}`);
     }
 
     @Around(rename)
-    upperCase(jp: PJP<typeof rename>): User {
-      const [user, name] = jp.args;
-      return jp.proceedWith(user, name.toUpperCase());
+    upperCase(joinPoint: ProceedingJoinPointOf<typeof rename>): User {
+      const [user, name] = joinPoint.args;
+      return joinPoint.proceedWith(user, name.toUpperCase());
     }
   }
 

@@ -7,7 +7,7 @@ import type {
   BeanRef,
   Class,
   ClassRef,
-  Fn,
+  AnyFunction,
   JoinPointKind,
   MethodRef,
 } from "./types";
@@ -38,10 +38,10 @@ export function createClassRef(
   };
 }
 
-function unwrap(fn: Fn): Fn {
-  let current = fn;
+function unwrap(method: AnyFunction): AnyFunction {
+  let current = method;
   while (Object.hasOwn(current, ORIGINAL)) {
-    current = (current as unknown as Record<symbol, Fn>)[ORIGINAL];
+    current = (current as unknown as Record<symbol, AnyFunction>)[ORIGINAL];
   }
   return current;
 }
@@ -50,7 +50,7 @@ function memberFunction(
   prototype: object,
   name: string | symbol,
   kind: JoinPointKind,
-): Fn | undefined {
+): AnyFunction | undefined {
   const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
   if (!descriptor) {
     return undefined;
@@ -65,7 +65,7 @@ function memberFunction(
 }
 
 function isAsyncMember(
-  original: Fn,
+  original: AnyFunction,
   declaringType: Class,
   name: string | symbol,
   kind: JoinPointKind,
@@ -97,7 +97,7 @@ export function createMethodRef(
   name: string | symbol,
   kind: JoinPointKind = "method",
 ): MethodRef {
-  let original: Fn | undefined;
+  let original: AnyFunction | undefined;
   let declaringType: Class = classRef.type;
   for (
     let prototype: object | null = classRef.type.prototype;

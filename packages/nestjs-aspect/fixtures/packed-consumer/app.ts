@@ -11,9 +11,9 @@ import {
   AspectInspector,
   AspectModule,
   createAnnotation,
-  type JP,
+  type JoinPointOf,
   P,
-  type PJP,
+  type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { observableAdapter } from "nestjs-aspect/rxjs";
 import { lastValueFrom, type Observable, of } from "rxjs";
@@ -55,8 +55,8 @@ class AuditAspect {
   constructor(private readonly log: AuditLog) {}
 
   @AfterReturning(quotes)
-  record(jp: JP<typeof quotes>, value: unknown): void {
-    this.log.entries.push(`${jp.toString()} -> ${String(value)}`);
+  record(joinPoint: JoinPointOf<typeof quotes>, value: unknown): void {
+    this.log.entries.push(`${joinPoint.toString()} -> ${String(value)}`);
   }
 }
 
@@ -65,11 +65,13 @@ class RetryAspect {
   constructor(private readonly log: AuditLog) {}
 
   @Around(retryable)
-  async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const { attempts } = jp.annotation(Retryable);
+  async retry(
+    joinPoint: ProceedingJoinPointOf<typeof retryable>,
+  ): Promise<unknown> {
+    const { attempts } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await jp.proceed();
+        return await joinPoint.proceed();
       } catch (error) {
         if (attempt >= attempts) {
           throw error;

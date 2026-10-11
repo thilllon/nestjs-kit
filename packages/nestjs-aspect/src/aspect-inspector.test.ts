@@ -13,7 +13,11 @@ import {
 import { AspectInspector } from "./aspect-inspector";
 import { DeclareParents } from "./introduction";
 import { P } from "./pointcut-designators";
-import type { JP, MethodInterceptor, PJP } from "./types";
+import type {
+  JoinPointOf,
+  MethodInterceptor,
+  ProceedingJoinPointOf,
+} from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -71,8 +75,8 @@ function fixture() {
   @Aspect({ order: 10 })
   class RetryAspect {
     @Around(place)
-    retry(jp: PJP<typeof place>) {
-      return jp.proceed();
+    retry(joinPoint: ProceedingJoinPointOf<typeof place>) {
+      return joinPoint.proceed();
     }
   }
 
@@ -231,7 +235,7 @@ describe("AspectInspector", () => {
       static readonly mixin: Tracked;
 
       @Before(render)
-      record(_jp: JP<typeof render>) {}
+      record(_jp: JoinPointOf<typeof render>) {}
     }
     const { moduleRef, logger } = await initWoven(
       { providers: [Report, Reporting] },

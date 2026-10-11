@@ -69,8 +69,8 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Trace {
         @Before(targets)
-        before(jp: JoinPoint<AnyShape>): void {
-          log.push(`before ${jp.args.join("+")}`);
+        before(joinPoint: JoinPoint<AnyShape>): void {
+          log.push(`before ${joinPoint.args.join("+")}`);
         }
       }
       const calculator = weave(new Calculator(), [new Trace()]);
@@ -300,8 +300,8 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Double {
         @Around(targets)
-        double(jp: ProceedingJoinPoint<AnyShape>): unknown {
-          const result = jp.proceed();
+        double(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+          const result = joinPoint.proceed();
           return result instanceof Promise
             ? result.then((value) => value * 2)
             : (result as number) * 2;
@@ -317,13 +317,13 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Rewrite {
         @Around(targets)
-        rewrite(jp: ProceedingJoinPoint<AnyShape>): unknown {
-          return jp.proceedWith(10, 20);
+        rewrite(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+          return joinPoint.proceedWith(10, 20);
         }
 
         @Before(targets)
-        inner(jp: JoinPoint<AnyShape>): void {
-          seen.push(jp.args);
+        inner(joinPoint: JoinPoint<AnyShape>): void {
+          seen.push(joinPoint.args);
         }
       }
       const calculator = weave(new Calculator(), [new Rewrite()]);
@@ -337,15 +337,17 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect({ order: 1 })
       class Retry {
         @Around(targets)
-        retry(jp: ProceedingJoinPoint<AnyShape>): unknown {
+        retry(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
           if (mode === "synchronous") {
             try {
-              return jp.proceed();
+              return joinPoint.proceed();
             } catch {
-              return jp.proceed();
+              return joinPoint.proceed();
             }
           }
-          return (jp.proceed() as Promise<unknown>).catch(() => jp.proceed());
+          return (joinPoint.proceed() as Promise<unknown>).catch(() =>
+            joinPoint.proceed(),
+          );
         }
       }
       let attempts = 0;
@@ -374,9 +376,11 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Fallback {
         @Around(targets)
-        async fallback(jp: ProceedingJoinPoint<AnyShape>): Promise<unknown> {
+        async fallback(
+          joinPoint: ProceedingJoinPoint<AnyShape>,
+        ): Promise<unknown> {
           try {
-            return await jp.proceed();
+            return await joinPoint.proceed();
           } catch {
             return -1;
           }
@@ -409,8 +413,8 @@ describe("synchronous join points", () => {
     @Aspect()
     class All {
       @Around(targets)
-      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        return jp.proceed();
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        return joinPoint.proceed();
       }
 
       @Before(targets)
@@ -434,7 +438,7 @@ describe("synchronous join points", () => {
   const asyncAdvice: [
     string,
     (
-      pc: Pointcut<AnyShape>,
+      pointcut: Pointcut<AnyShape>,
     ) => AdviceDecorator<AnyShape, () => void | PromiseLike<void>>,
     "add" | "fail",
     string[],

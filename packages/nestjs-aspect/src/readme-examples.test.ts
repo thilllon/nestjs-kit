@@ -25,10 +25,10 @@ import {
   createAnnotation,
   DeclareParents,
   isIntroduced,
-  type JP,
+  type JoinPointOf,
   type MethodInterceptor,
   P,
-  type PJP,
+  type ProceedingJoinPointOf,
 } from "./index";
 import { observableAdapter } from "./rxjs";
 import { RecordingLogger } from "./weaving-fixture";
@@ -51,18 +51,24 @@ class AuditAspect {
   constructor(private readonly trail: AuditTrail) {}
 
   @Before(audited)
-  started(jp: JP<typeof audited>): void {
-    this.trail.entries.push(`${jp.annotation(Audited)}: ${jp.toString()}`);
+  started(joinPoint: JoinPointOf<typeof audited>): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)}: ${joinPoint.toString()}`,
+    );
   }
 
   @AfterReturning(audited)
-  returned(jp: JP<typeof audited>, result: unknown): void {
-    this.trail.entries.push(`${jp.annotation(Audited)} returned ${result}`);
+  returned(joinPoint: JoinPointOf<typeof audited>, result: unknown): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)} returned ${result}`,
+    );
   }
 
   @AfterThrowing(audited)
-  failed(jp: JP<typeof audited>, error: unknown): void {
-    this.trail.entries.push(`${jp.annotation(Audited)} failed: ${error}`);
+  failed(joinPoint: JoinPointOf<typeof audited>, error: unknown): void {
+    this.trail.entries.push(
+      `${joinPoint.annotation(Audited)} failed: ${error}`,
+    );
   }
 }
 
@@ -198,8 +204,8 @@ const deposits = P.within(AccountService).and(P.args(Account, Number));
 @Aspect()
 class DepositLimitAspect {
   @Before(deposits)
-  check(jp: JP<typeof deposits>): void {
-    const [account, amount] = jp.args;
+  check(joinPoint: JoinPointOf<typeof deposits>): void {
+    const [account, amount] = joinPoint.args;
     if (amount <= 0) {
       throw new RangeError(`Cannot deposit ${amount} into ${account.id}`);
     }
@@ -216,8 +222,8 @@ class ReceiptAspect {
   constructor(private readonly ledger: Ledger) {}
 
   @AfterReturning(charge)
-  record(jp: JP<typeof charge>, receipt: string): void {
-    const [account, amount] = jp.args;
+  record(joinPoint: JoinPointOf<typeof charge>, receipt: string): void {
+    const [account, amount] = joinPoint.args;
     this.ledger.lines.push(`${receipt}: ${amount} from ${account.id}`);
   }
 }
@@ -227,8 +233,10 @@ class DeclineAspect {
   constructor(private readonly ledger: Ledger) {}
 
   @AfterThrowing(charge, { throwing: DeclinedError })
-  record(jp: JP<typeof charge>, error: DeclinedError): void {
-    this.ledger.lines.push(`declined ${jp.args[0].id}: ${error.message}`);
+  record(joinPoint: JoinPointOf<typeof charge>, error: DeclinedError): void {
+    this.ledger.lines.push(
+      `declined ${joinPoint.args[0].id}: ${error.message}`,
+    );
   }
 }
 
@@ -250,11 +258,13 @@ class InFlightAspect {
 @Aspect({ order: 20 })
 class RetryAspect {
   @Around(retryable)
-  async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const { attempts } = jp.annotation(Retryable);
+  async retry(
+    joinPoint: ProceedingJoinPointOf<typeof retryable>,
+  ): Promise<unknown> {
+    const { attempts } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await jp.proceed();
+        return await joinPoint.proceed();
       } catch (error) {
         if (error instanceof DeclinedError || attempt >= attempts) {
           throw error;
@@ -270,8 +280,8 @@ class QueryAspect {
   readonly seen: string[] = [];
 
   @Before(queries)
-  record(jp: JP<typeof queries>): void {
-    this.seen.push(String(jp.signature.name));
+  record(joinPoint: JoinPointOf<typeof queries>): void {
+    this.seen.push(String(joinPoint.signature.name));
   }
 }
 
@@ -284,9 +294,11 @@ const trace: string[] = [];
 @Aspect({ order: 1 })
 class OuterAspect {
   @Around(charge)
-  async around(jp: PJP<typeof charge>): Promise<string> {
+  async around(
+    joinPoint: ProceedingJoinPointOf<typeof charge>,
+  ): Promise<string> {
     trace.push("outer around: before proceed");
-    const receipt = await jp.proceed();
+    const receipt = await joinPoint.proceed();
     trace.push("outer around: after proceed");
     return receipt;
   }
@@ -338,8 +350,8 @@ class ClosingPriceAspect {
   readonly closing = new Map<string, number>();
 
   @AfterReturning(quotes)
-  record(jp: JP<typeof quotes>, last: number): void {
-    this.closing.set(jp.args[0], last);
+  record(joinPoint: JoinPointOf<typeof quotes>, last: number): void {
+    this.closing.set(joinPoint.args[0], last);
   }
 }
 
@@ -448,8 +460,8 @@ class UsageTrackingAspect {
   static readonly mixin: UsageTracked;
 
   @Before(sessions)
-  record(jp: JP<typeof sessions>): void {
-    jp.introduced(UsageTracked).incrementUseCount();
+  record(joinPoint: JoinPointOf<typeof sessions>): void {
+    joinPoint.introduced(UsageTracked).incrementUseCount();
   }
 }
 

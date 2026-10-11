@@ -75,8 +75,8 @@ describe("introductions", () => {
       static readonly mixin: UsageTracked;
 
       @Before(reports)
-      record(jp: JoinPoint<AnyShape>) {
-        jp.introduced(UsageTracked).incrementUseCount();
+      record(joinPoint: JoinPoint<AnyShape>) {
+        joinPoint.introduced(UsageTracked).incrementUseCount();
       }
     }
     const { moduleRef } = await initWoven({

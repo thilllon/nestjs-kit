@@ -8,7 +8,13 @@ import { AspectModule } from "./aspect.module";
 import { Advisor, Around, Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
 import { P } from "./pointcut-designators";
-import type { AnyShape, JoinPoint, JP, MethodInterceptor, PJP } from "./types";
+import type {
+  AnyShape,
+  JoinPoint,
+  JoinPointOf,
+  MethodInterceptor,
+  ProceedingJoinPointOf,
+} from "./types";
 import {
   closeWoven,
   compileWoven,
@@ -48,7 +54,7 @@ describe("scope validation", () => {
       constructor(readonly state: RequestState) {}
 
       @Before(run)
-      record(_jp: JP<typeof run>) {
+      record(_jp: JoinPointOf<typeof run>) {
         log.push("advised");
       }
     }
@@ -83,7 +89,7 @@ describe("scope validation", () => {
     @Aspect()
     class TransientAspect {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
     const error = await initError({ providers: [Service, TransientAspect] });
     expect(error).toBeInstanceOf(AspectConfigurationError);
@@ -115,7 +121,7 @@ describe("bootstrap validation", () => {
     @Injectable()
     class Forgotten {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
     const error = await initError({ providers: [Service, Forgotten] });
     expect(error).toBeInstanceOf(AspectConfigurationError);
@@ -158,8 +164,8 @@ describe("bootstrap validation", () => {
     @Aspect()
     class OrderAspect {
       @Around(placing)
-      retry(jp: PJP<typeof placing>) {
-        return jp.proceed();
+      retry(joinPoint: ProceedingJoinPointOf<typeof placing>) {
+        return joinPoint.proceed();
       }
     }
 
@@ -167,7 +173,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class LoggingAspect {
       @Before(everything)
-      record(_jp: JP<typeof everything>) {}
+      record(_jp: JoinPointOf<typeof everything>) {}
     }
 
     const error = await initError({
@@ -208,13 +214,13 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Composed {
       @Before(either)
-      record(_jp: JP<typeof either>) {}
+      record(_jp: JoinPointOf<typeof either>) {}
     }
 
     @Aspect()
     class Custom {
       @Before(custom)
-      record(_jp: JP<typeof custom>) {}
+      record(_jp: JoinPointOf<typeof custom>) {}
     }
 
     await expect(
@@ -293,8 +299,8 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Securing {
       @Before(secured)
-      check(jp: JoinPoint<AnyShape>) {
-        log.push(String(jp.signature.name));
+      check(joinPoint: JoinPoint<AnyShape>) {
+        log.push(String(joinPoint.signature.name));
       }
     }
 
@@ -331,7 +337,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Helping {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
 
       @Retryable()
       helper() {}
@@ -356,7 +362,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class FromFactory {
       @Before(run)
-      record(_jp: JP<typeof run>) {
+      record(_jp: JoinPointOf<typeof run>) {
         log.push("factory");
       }
     }
@@ -400,7 +406,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Late {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
 
     const { moduleRef } = await initWoven({
@@ -481,7 +487,7 @@ describe("bootstrap validation", () => {
     @Aspect({ order: 5 })
     class First {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
 
       @Before(typo)
       never(_jp: JoinPoint<AnyShape>) {}
@@ -490,13 +496,13 @@ describe("bootstrap validation", () => {
     @Aspect({ order: 5 })
     class Second {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
 
     @Aspect({ order: 6 })
     class Third {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
 
     const { logger } = await initWoven({
@@ -521,22 +527,22 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Alone {
       @Before(stop)
-      first(_jp: JP<typeof stop>) {}
+      first(_jp: JoinPointOf<typeof stop>) {}
 
       @Before(stop)
-      second(_jp: JP<typeof stop>) {}
+      second(_jp: JoinPointOf<typeof stop>) {}
     }
 
     @Aspect()
     class First {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
 
     @Aspect()
     class Second {
       @Before(run)
-      record(_jp: JP<typeof run>) {}
+      record(_jp: JoinPointOf<typeof run>) {}
     }
 
     const { logger } = await initWoven({
@@ -561,7 +567,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Auditing {
       @Before(run)
-      record(_jp: JP<typeof run>) {
+      record(_jp: JoinPointOf<typeof run>) {
         log.push("advice");
       }
     }
@@ -606,7 +612,7 @@ describe("bootstrap validation", () => {
     @Aspect()
     class Twice {
       @Before(run)
-      record(_jp: JP<typeof run>) {
+      record(_jp: JoinPointOf<typeof run>) {
         log.push("advised");
       }
     }
@@ -648,17 +654,17 @@ describe("bootstrap validation", () => {
     @Aspect()
     class AuditAspect {
       @Before(findById)
-      audit(_jp: JP<typeof findById>) {}
+      audit(_jp: JoinPointOf<typeof findById>) {}
 
       @Before(getters)
-      read(_jp: JP<typeof getters>) {}
+      read(_jp: JoinPointOf<typeof getters>) {}
     }
 
     @Aspect({ order: 10 })
     class ResilienceAspect {
       @Around(findById)
-      retry(jp: PJP<typeof findById>) {
-        return jp.proceed();
+      retry(joinPoint: ProceedingJoinPointOf<typeof findById>) {
+        return joinPoint.proceed();
       }
     }
     const providers = [UserService, AuditAspect, ResilienceAspect];

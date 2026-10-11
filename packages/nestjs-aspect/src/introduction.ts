@@ -88,7 +88,7 @@ function ownIntroductions(type: object): readonly IntroductionMetadata[] {
  *
  * The methods and accessors of the `use` class become members of each
  * matched class and run on the delegate of the object they are called on.
- * `isIntroduced`, `introduced` and `jp.introduced` reach the delegate.
+ * `isIntroduced`, `introduced` and `joinPoint.introduced` reach the delegate.
  *
  * Throws `AspectConfigurationError` when `target` is no pointcut or class
  * filter, when `use` is no class, when the member is no static member, or

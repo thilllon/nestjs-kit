@@ -8,7 +8,7 @@ import type { ReflectableDecorator } from "@nestjs/core";
 // Primitives
 // ---------------------------------------------------------------------------
 
-export type Fn = (...args: any[]) => any;
+export type AnyFunction = (...args: any[]) => any;
 
 export type Class<T = any> = abstract new (...args: any[]) => T;
 
@@ -18,7 +18,7 @@ export interface Shape {
   args: readonly unknown[];
   returns: unknown;
   /** Annotation names guaranteed to be present on every matched join point. */
-  ann: string;
+  annotations: string;
 }
 
 /** The shape of a pointcut that guarantees nothing. */
@@ -26,7 +26,7 @@ export interface AnyShape extends Shape {
   target: object;
   args: readonly unknown[];
   returns: unknown;
-  ann: never;
+  annotations: never;
 }
 
 /** Shape of `a.and(b)`. */
@@ -34,7 +34,7 @@ export type AndShape<A extends Shape, B extends Shape> = {
   target: A["target"] & B["target"];
   args: A["args"] & B["args"];
   returns: A["returns"] & B["returns"];
-  ann: A["ann"] | B["ann"];
+  annotations: A["annotations"] | B["annotations"];
 };
 
 /** Shape of `a.or(b)`: an annotation stays guaranteed only when both sides guarantee it. */
@@ -42,7 +42,7 @@ export type OrShape<A extends Shape, B extends Shape> = {
   target: A["target"] | B["target"];
   args: A["args"] | B["args"];
   returns: A["returns"] | B["returns"];
-  ann: Extract<A["ann"], B["ann"]>;
+  annotations: Extract<A["annotations"], B["annotations"]>;
 };
 
 // ---------------------------------------------------------------------------
@@ -51,17 +51,19 @@ export type OrShape<A extends Shape, B extends Shape> = {
 
 /**
  * `unknown` for the descriptor of an accessor when `F` is no method contract
- * (exactly `Fn`), `never` otherwise. A method contract cannot hold for an
+ * (exactly `AnyFunction`), `never` otherwise. A method contract cannot hold for an
  * accessor, and a member whose type is a function goes through the method
  * overload.
  */
-export type AccessorGuard<F extends Fn, T> = [T] extends [Fn]
+export type AccessorGuard<F extends AnyFunction, T> = [T] extends [AnyFunction]
   ? never
-  : (<G>() => G extends F ? 1 : 2) extends <G>() => G extends Fn ? 1 : 2
+  : (<G>() => G extends F ? 1 : 2) extends <G>() => G extends AnyFunction
+        ? 1
+        : 2
     ? unknown
     : never;
 
-export type MethodOrClassDecorator<F extends Fn> = {
+export type MethodOrClassDecorator<F extends AnyFunction> = {
   <T extends F>(
     target: object,
     key: string | symbol,
@@ -83,7 +85,11 @@ export type MethodOrClassDecorator<F extends Fn> = {
  * The name is the identity of an annotation: two annotations created with one
  * name read and write the same metadata.
  */
-export interface Annotation<V, F extends Fn = Fn, N extends string = string> {
+export interface Annotation<
+  V,
+  F extends AnyFunction = AnyFunction,
+  N extends string = string,
+> {
   readonly annotationName: N;
   /**
    * A member that carries the annotation must be advised by an advisor
@@ -97,7 +103,7 @@ export interface Annotation<V, F extends Fn = Fn, N extends string = string> {
 /** Decorator created by Nest's `Reflector.createDecorator`. */
 export type NestAnnotation<V> = ReflectableDecorator<any, V>;
 
-/** Everything `P.annotated()` and `jp.findAnnotation()` accept. */
+/** Everything `P.annotated()` and `joinPoint.findAnnotation()` accept. */
 export type AnnotationLike<V = unknown> =
   | Annotation<V, any, any>
   | NestAnnotation<V>;
@@ -167,7 +173,7 @@ export interface MethodRef {
    * The function the join point executes: the method, the getter or the
    * setter, never a dispatcher stub.
    */
-  readonly original: Fn;
+  readonly original: AnyFunction;
   /**
    * True for a native `async` function and for a method whose
    * `design:returntype` metadata is `Promise`.
@@ -219,7 +225,7 @@ export interface PointcutLike {
   includesExplicitly?(method: MethodRef): boolean;
   /**
    * Names of the annotations present on every join point the pointcut
-   * matches; the run-time counterpart of `Shape["ann"]`.
+   * matches; the run-time counterpart of `Shape["annotations"]`.
    */
   readonly guarantees?: ReadonlySet<string>;
 }
@@ -235,7 +241,8 @@ export interface Pointcut<S extends Shape = AnyShape> extends PointcutLike {
   not(): Pointcut<AnyShape>;
 }
 
-export type ShapeOf<PC> = PC extends Pointcut<infer S> ? S : never;
+export type ShapeOf<PointcutType> =
+  PointcutType extends Pointcut<infer S> ? S : never;
 
 // ---------------------------------------------------------------------------
 // Join points
@@ -259,7 +266,7 @@ export interface JoinPoint<S extends Shape> {
    * the declaring class, the target class. Throws `AspectUsageError` when the
    * annotation is absent.
    */
-  annotation<V, N extends S["ann"]>(a: Annotation<V, any, N>): V;
+  annotation<V, N extends S["annotations"]>(a: Annotation<V, any, N>): V;
   /** Same lookup as `annotation`; `undefined` when the annotation is absent. */
   findAnnotation<V>(a: Annotation<V, any, any>): V | undefined;
   // Spelled without the `NestAnnotation` alias, through which `V` is not inferred.
@@ -283,9 +290,11 @@ export interface ProceedingJoinPoint<S extends Shape> extends JoinPoint<S> {
   ): S["returns"];
 }
 
-export type JP<PC> = JoinPoint<ShapeOf<PC>>;
+export type JoinPointOf<PointcutType> = JoinPoint<ShapeOf<PointcutType>>;
 
-export type PJP<PC> = ProceedingJoinPoint<ShapeOf<PC>>;
+export type ProceedingJoinPointOf<PointcutType> = ProceedingJoinPoint<
+  ShapeOf<PointcutType>
+>;
 
 // ---------------------------------------------------------------------------
 // Low-level advisor API
@@ -375,12 +384,12 @@ export interface AdviceAdapterRegistry {
 /** SPI that lets advice follow the settlement of an asynchronous result. */
 export interface ReturnValueAdapter<T = unknown> {
   supports(value: unknown): value is T;
-  /** Runs `cb` with the resolved value, waits for it and keeps the value. */
-  onSuccess(value: T, cb: (resolved: unknown) => unknown): T;
-  /** Runs `cb` with the error; `cb` rethrows the error that propagates. */
-  onError(value: T, cb: (error: unknown) => unknown): T;
-  /** Runs `cb` after settlement, waits for it and keeps the outcome. */
-  finally(value: T, cb: () => unknown): T;
+  /** Runs `callback` with the resolved value, waits for it and keeps the value. */
+  onSuccess(value: T, callback: (resolved: unknown) => unknown): T;
+  /** Runs `callback` with the error; `callback` rethrows the error that propagates. */
+  onError(value: T, callback: (error: unknown) => unknown): T;
+  /** Runs `callback` after settlement, waits for it and keeps the outcome. */
+  finally(value: T, callback: () => unknown): T;
 }
 
 export interface ReturnValueAdapterRegistry {

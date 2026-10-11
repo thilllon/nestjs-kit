@@ -77,13 +77,15 @@ function resolveAdvice(
       `${method.targetType.name}.${String(method.name)} was called before an instance of the aspect ${advice.aspectType.name} exists (advice ${describeAdvice(advice)})`,
     );
   }
-  const fn = (aspect as Record<string | symbol, unknown>)[advice.methodName];
-  if (typeof fn !== "function") {
+  const adviceMethod = (aspect as Record<string | symbol, unknown>)[
+    advice.methodName
+  ];
+  if (typeof adviceMethod !== "function") {
     throw new AspectUsageError(
       `${describeAdvice(advice)} is not a method of the aspect instance`,
     );
   }
-  return (...args) => fn.apply(aspect, args);
+  return (...args) => adviceMethod.apply(aspect, args);
 }
 
 function asyncAdviceError(
@@ -148,8 +150,8 @@ function returnAfterAdvice(
 }
 
 /**
- * `advice(pjp)`; its return value is the result. `pjp.proceed()` runs
- * `invocation.cloneFromHere().proceed()` and `pjp.proceedWith(...args)` runs
+ * `advice(joinPoint)`; its return value is the result. `joinPoint.proceed()` runs
+ * `invocation.cloneFromHere().proceed()` and `joinPoint.proceedWith(...args)` runs
  * `invocation.cloneFromHere(args).proceed()`.
  */
 export function aroundInterceptor(
@@ -165,7 +167,7 @@ export function aroundInterceptor(
 }
 
 /**
- * `r = advice(jp)`. A thenable `r` on an asynchronous join point
+ * `r = advice(joinPoint)`. A thenable `r` on an asynchronous join point
  * (`invocation.method.isAsync`) yields `r.then(() => invocation.proceed())`;
  * on a synchronous join point it raises `AspectUsageError`. Otherwise the
  * result is `invocation.proceed()`. An error from the advice prevents the
@@ -197,7 +199,7 @@ export function beforeInterceptor(
 
 /**
  * Finally semantics. A synchronous throw runs the advice and rethrows. An
- * asynchronous result yields `A.finally(result, () => advice(jp))`. A
+ * asynchronous result yields `A.finally(result, () => advice(joinPoint))`. A
  * synchronous result runs the advice and is returned; when the advice
  * returns a thenable and `invocation.method.isAsync`, as a promise that
  * waits for it. An error from the advice replaces the outcome.
@@ -226,9 +228,9 @@ export function afterInterceptor(
 }
 
 /**
- * Runs `advice(jp, value)` after a normal completion and keeps the result:
- * `A.onSuccess(result, (value) => advice(jp, value))` for an asynchronous
- * result, `advice(jp, result)` otherwise; when that advice returns a thenable
+ * Runs `advice(joinPoint, value)` after a normal completion and keeps the result:
+ * `A.onSuccess(result, (value) => advice(joinPoint, value))` for an asynchronous
+ * result, `advice(joinPoint, result)` otherwise; when that advice returns a thenable
  * and `invocation.method.isAsync`, the result is a promise that waits for
  * it. An error from the advice propagates instead of the result.
  */
@@ -258,7 +260,7 @@ export function afterReturningInterceptor(
 }
 
 /**
- * Runs `advice(jp, error)` when the join point throws or its asynchronous
+ * Runs `advice(joinPoint, error)` when the join point throws or its asynchronous
  * result fails (`A.onError`), then rethrows the same error. With
  * `advice.throwing`, only for an error that is `instanceof` that class. An
  * error from the advice replaces the original error.

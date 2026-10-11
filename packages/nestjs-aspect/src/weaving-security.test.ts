@@ -417,8 +417,8 @@ describe("classes the weaver examines", () => {
     @Aspect()
     class Everything {
       @Before(pointcut)
-      record(jp: JoinPoint<AnyShape>) {
-        log.push(jp.signature.targetType.name);
+      record(joinPoint: JoinPoint<AnyShape>) {
+        log.push(joinPoint.signature.targetType.name);
       }
     }
     const { moduleRef } = await initWoven({
@@ -438,8 +438,8 @@ describe("classes the weaver examines", () => {
     @Aspect()
     class Everything {
       @Before(pointcut)
-      record(jp: JoinPoint<AnyShape>) {
-        log.push(jp.signature.targetType.name);
+      record(joinPoint: JoinPoint<AnyShape>) {
+        log.push(joinPoint.signature.targetType.name);
       }
     }
     const { moduleRef } = await initWoven({

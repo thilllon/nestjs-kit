@@ -2,7 +2,7 @@
 
 import { AspectConfigurationError, AspectUsageError } from "./errors";
 import { ORIGINAL } from "./method-ref";
-import type { Class, Fn, JoinPointKind, MethodRef } from "./types";
+import type { Class, AnyFunction, JoinPointKind, MethodRef } from "./types";
 import {
   type ContextHandle,
   registerStub,
@@ -27,7 +27,7 @@ const ACCESSOR_KIND = { get: "getter", set: "setter" } as const;
  * process decides: a function that only carries the `ORIGINAL` property of a
  * stub is none.
  */
-export function isStub(value: unknown): value is Fn {
+export function isStub(value: unknown): value is AnyFunction {
   return stubRecord(value) !== undefined;
 }
 
@@ -68,9 +68,9 @@ function createStub(
   owner: Class,
   name: string | symbol,
   kind: JoinPointKind,
-  original: Fn,
+  original: AnyFunction,
   introduced = false,
-): Fn {
+): AnyFunction {
   const record: StubRecord = {
     owner,
     original,
@@ -197,7 +197,7 @@ export function installIntroductionStub(
   type: Class,
   name: string | symbol,
   kind: JoinPointKind,
-): Fn {
+): AnyFunction {
   const prototype: object = type.prototype;
   const field = DESCRIPTOR_FIELD[kind];
   const own = Object.getOwnPropertyDescriptor(prototype, name);
@@ -209,7 +209,7 @@ export function installIntroductionStub(
   const current: unknown = descriptor?.[field];
   const existing =
     typeof current === "function"
-      ? (stubRecord(current)?.original ?? (current as Fn))
+      ? (stubRecord(current)?.original ?? (current as AnyFunction))
       : undefined;
   const original =
     existing ??
@@ -234,7 +234,7 @@ export function installIntroductionStub(
               ACCESSOR_KIND[other],
               stubRecord(inherited)?.original ?? inherited,
             )
-          : (inherited as Fn);
+          : (inherited as AnyFunction);
     }
   }
   try {

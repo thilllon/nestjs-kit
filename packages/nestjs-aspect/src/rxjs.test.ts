@@ -26,7 +26,12 @@ import {
 } from "./aspect-decorators";
 import { P } from "./pointcut-designators";
 import { observableAdapter } from "./rxjs";
-import type { AnyShape, JoinPoint, JP, PJP } from "./types";
+import type {
+  AnyShape,
+  JoinPoint,
+  JoinPointOf,
+  ProceedingJoinPointOf,
+} from "./types";
 import { closeWoven, initWoven, listenWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -110,8 +115,8 @@ describe("observableAdapter with after-returning advice", () => {
     class AuditAspect {
       @AfterReturning(quotes)
       // The advice declares the type of the values the stream emits.
-      record(jp: JP<typeof quotes>, value: string) {
-        log.push(`returned ${jp.args[0]} ${value}`);
+      record(joinPoint: JoinPointOf<typeof quotes>, value: string) {
+        log.push(`returned ${joinPoint.args[0]} ${value}`);
       }
     }
 
@@ -323,12 +328,12 @@ describe("observableAdapter with after-throwing advice", () => {
     @Aspect()
     class AlertAspect {
       @AfterThrowing(failing)
-      alert(_jp: JP<typeof failing>, error: unknown) {
+      alert(_jp: JoinPointOf<typeof failing>, error: unknown) {
         log.push(`alert ${(error as Error).message}`);
       }
 
       @AfterThrowing(failing, { throwing: QuotaError })
-      throttle(_jp: JP<typeof failing>, error: QuotaError) {
+      throttle(_jp: JoinPointOf<typeof failing>, error: QuotaError) {
         log.push(`quota ${error.message}`);
       }
     }
@@ -420,8 +425,8 @@ describe("observableAdapter with after advice", () => {
     @Aspect()
     class ReleaseAspect {
       @After(P.within(PriceService))
-      release(jp: JoinPoint<AnyShape>) {
-        runs.push(String(jp.signature.name));
+      release(joinPoint: JoinPoint<AnyShape>) {
+        runs.push(String(joinPoint.signature.name));
       }
     }
 
@@ -522,12 +527,12 @@ describe("around advice on a method that returns an Observable", () => {
     @Aspect({ order: 1 })
     class AuditAspect {
       @AfterReturning(flaky)
-      record(_jp: JP<typeof flaky>, value: unknown) {
+      record(_jp: JoinPointOf<typeof flaky>, value: unknown) {
         log.push(`returned ${String(value)}`);
       }
 
       @AfterThrowing(flaky)
-      alert(_jp: JP<typeof flaky>, error: unknown) {
+      alert(_jp: JoinPointOf<typeof flaky>, error: unknown) {
         log.push(`threw ${(error as Error).message}`);
       }
     }
@@ -535,8 +540,10 @@ describe("around advice on a method that returns an Observable", () => {
     @Aspect({ order: 2 })
     class RetryAspect {
       @Around(flaky)
-      retry(jp: PJP<typeof flaky>): Observable<string> {
-        return jp.proceed().pipe(
+      retry(
+        joinPoint: ProceedingJoinPointOf<typeof flaky>,
+      ): Observable<string> {
+        return joinPoint.proceed().pipe(
           retry(2),
           map((value) => value.toUpperCase()),
         );

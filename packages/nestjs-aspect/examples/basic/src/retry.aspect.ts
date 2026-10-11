@@ -1,4 +1,4 @@
-import { Around, Aspect, P, type PJP } from "nestjs-aspect";
+import { Around, Aspect, P, type ProceedingJoinPointOf } from "nestjs-aspect";
 import { Retryable, TransientError } from "./retryable.js";
 
 const retryable = P.annotated(Retryable);
@@ -10,11 +10,13 @@ const retryable = P.annotated(Retryable);
 @Aspect({ order: 20 })
 export class RetryAspect {
   @Around(retryable)
-  async retry(jp: PJP<typeof retryable>): Promise<unknown> {
-    const { attempts } = jp.annotation(Retryable);
+  async retry(
+    joinPoint: ProceedingJoinPointOf<typeof retryable>,
+  ): Promise<unknown> {
+    const { attempts } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await jp.proceed();
+        return await joinPoint.proceed();
       } catch (error) {
         if (!(error instanceof TransientError) || attempt >= attempts) {
           throw error;

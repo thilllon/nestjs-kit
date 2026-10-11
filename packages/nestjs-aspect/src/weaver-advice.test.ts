@@ -64,9 +64,9 @@ async function calculator() {
   @Aspect()
   class Tracing {
     @Around(members)
-    around(jp: ProceedingJoinPoint<AnyShape>): unknown {
+    around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
       log.push("around");
-      return jp.proceed();
+      return joinPoint.proceed();
     }
 
     @Before(members)
@@ -262,8 +262,8 @@ describe("advice through the dispatcher stub", () => {
     @Aspect()
     class Tracing {
       @After(pointcut)
-      after(jp: JoinPoint<AnyShape>): void {
-        targets.push(jp.target);
+      after(joinPoint: JoinPoint<AnyShape>): void {
+        targets.push(joinPoint.target);
       }
     }
     const { moduleRef } = await compileWoven({
