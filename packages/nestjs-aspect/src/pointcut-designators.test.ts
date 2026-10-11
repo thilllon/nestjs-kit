@@ -3,7 +3,7 @@ import { SetMetadata } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { describe, expect, it } from "vitest";
 import { createAnnotation } from "./annotation";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import {
   type ClassRefFacts,
   createClassRef,
@@ -322,7 +322,7 @@ describe("annotation designators", () => {
   it("reject a value that is not an annotation", () => {
     const decorator = (() => () => undefined) as unknown as typeof Roles;
 
-    expect(() => P.annotated(decorator)).toThrow(AopConfigurationError);
+    expect(() => P.annotated(decorator)).toThrow(AspectConfigurationError);
   });
 });
 
@@ -390,7 +390,7 @@ describe("P.args", () => {
   });
 
   it("rejects REST anywhere but the last position", () => {
-    expect(() => P.args(P.REST, Account)).toThrow(AopConfigurationError);
+    expect(() => P.args(P.REST, Account)).toThrow(AspectConfigurationError);
   });
 });
 

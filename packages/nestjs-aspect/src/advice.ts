@@ -1,7 +1,7 @@
 // Advice guards, the Promise return value adapter and the two
 // adapter registries.
 
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import {
   afterInterceptor,
   afterReturningInterceptor,
@@ -151,7 +151,7 @@ export function createAdviceAdapterRegistry(
     toInterceptor(advice: Advice, context: InterceptorContext) {
       const adapter = ordered.find((candidate) => candidate.supports(advice));
       if (!adapter) {
-        throw new AopConfigurationError(
+        throw new AspectConfigurationError(
           "No advice adapter supports the advice: it is neither a MethodInterceptor nor advice compiled from an aspect",
         );
       }

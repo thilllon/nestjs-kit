@@ -26,34 +26,34 @@ function brand(type: abstract new (...args: any[]) => Error, kind: string) {
  * Thrown while the application bootstraps when aspects, pointcuts or advice
  * are misconfigured.
  */
-export class AopConfigurationError extends Error {
+export class AspectConfigurationError extends Error {
   static {
-    brand(AopConfigurationError, "AopConfigurationError");
+    brand(AspectConfigurationError, "AspectConfigurationError");
   }
 
-  override readonly name = "AopConfigurationError";
+  override readonly name = "AspectConfigurationError";
 }
 
 /**
  * Thrown at run time when advice is used in a way its join point does not
  * support, such as asynchronous advice on a synchronous join point.
  */
-export class AopUsageError extends Error {
+export class AspectUsageError extends Error {
   static {
-    brand(AopUsageError, "AopUsageError");
+    brand(AspectUsageError, "AspectUsageError");
   }
 
-  override readonly name = "AopUsageError";
+  override readonly name = "AspectUsageError";
 }
 
 /**
- * Thrown when a woven method is invoked before the instance of an aspect that
- * advises it exists.
+ * Thrown when a woven method is invoked before the instance of an aspect or
+ * advisor that advises it exists.
  */
-export class AopNotReadyError extends Error {
+export class AspectNotReadyError extends Error {
   static {
-    brand(AopNotReadyError, "AopNotReadyError");
+    brand(AspectNotReadyError, "AspectNotReadyError");
   }
 
-  override readonly name = "AopNotReadyError";
+  override readonly name = "AspectNotReadyError";
 }

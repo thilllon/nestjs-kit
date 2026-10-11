@@ -6,22 +6,28 @@ export {
   isAnnotation,
 } from "./annotation";
 export { promiseAdapter } from "./advice";
+export { AspectModule } from "./aspect.module";
+export type {
+  AspectModuleOptions,
+  AspectReportLevel,
+} from "./aspect.module-definition";
 export {
   type AdviceDecorator,
   type AdviceResult,
   After,
   AfterReturning,
   AfterThrowing,
-  AopAdvisor,
+  Advisor,
+  type AdvisorType,
   Around,
   Aspect,
   type AsyncGuard,
   Before,
 } from "./aspect-decorators";
 export {
-  AopConfigurationError,
-  AopNotReadyError,
-  AopUsageError,
+  AspectConfigurationError,
+  AspectNotReadyError,
+  AspectUsageError,
 } from "./errors";
 export {
   type AllShapes,

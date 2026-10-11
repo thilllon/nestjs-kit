@@ -2,8 +2,12 @@
 // `AdvisorDescriptor`s and orders them.
 
 import { ADVICE_KINDS } from "./advice";
-import { getAdviceMetadata, getAspectMetadata } from "./aspect-decorators";
-import { AopConfigurationError } from "./errors";
+import {
+  getAdviceMetadata,
+  getAspectMetadata,
+  isAspect,
+} from "./aspect-decorators";
+import { AspectConfigurationError } from "./errors";
 import { isPointcutLike } from "./pointcut";
 import type {
   AdvisorDescriptor,
@@ -12,7 +16,7 @@ import type {
   Class,
   PointcutAdvisor,
 } from "./types";
-import { isObject, isOrder } from "./util";
+import { constructorChain, isObject, isOrder } from "./util";
 
 export interface AspectCompilerOptions {
   /** Supplies aspect instances lazily, at call time. */
@@ -57,9 +61,10 @@ function compareOrder(a: number | undefined, b: number | undefined): number {
  * Each advisor carries an `AspectAdvice` bound to `options.resolveAspect`,
  * the aspect's `order` and `source: { type, methodName, kind }`.
  *
- * Throws `AopConfigurationError` when the class is not an `@Aspect`, when an
- * advice method is not a function on its prototype chain, or when the aspect
- * declares an instantiation model other than `"singleton"`.
+ * Throws `AspectConfigurationError` when the class is not an `@Aspect`, when it
+ * extends another `@Aspect` class, whose advice it would run a second time,
+ * when an advice method is not a function on its prototype chain, or when the
+ * aspect declares an instantiation model other than `"singleton"`.
  */
 export function compileAspect(
   aspectType: Class,
@@ -67,12 +72,19 @@ export function compileAspect(
 ): AdvisorDescriptor[] {
   const metadata = getAspectMetadata(aspectType);
   if (!metadata) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `${aspectType.name} is not decorated with @Aspect`,
     );
   }
+  const [, ...superclasses] = constructorChain(aspectType);
+  const parent = superclasses.find(isAspect);
+  if (parent) {
+    throw new AspectConfigurationError(
+      `The aspect ${aspectType.name} extends the aspect ${parent.name}, whose advice would run once for each of them. An aspect inherits advice only from a class without @Aspect.`,
+    );
+  }
   if (metadata.instantiation !== "singleton") {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `${aspectType.name} declares the instantiation model "${metadata.instantiation}"; only "singleton" is supported`,
     );
   }
@@ -81,7 +93,7 @@ export function compileAspect(
     (entry, declaration): AdvisorDescriptor => {
       const { kind, methodName, pointcut, throwing } = entry;
       if (!definesMethod(aspectType, methodName)) {
-        throw new AopConfigurationError(
+        throw new AspectConfigurationError(
           `The ${kind} advice ${aspectType.name}.${String(methodName)} is not a method`,
         );
       }
@@ -108,9 +120,9 @@ export function compileAspect(
 }
 
 /**
- * Describes an `@AopAdvisor` instance: its `pointcut`, `advice` and `order`
+ * Describes an `@Advisor` instance: its `pointcut`, `advice` and `order`
  * as they are at the time of the call, with `kindRank` 0 and `declaration` 0.
- * Throws `AopConfigurationError` when `pointcut` or `advice` is missing or
+ * Throws `AspectConfigurationError` when `pointcut` or `advice` is missing or
  * `order` is not a number.
  */
 export function describeAdvisor(
@@ -120,15 +132,17 @@ export function describeAdvisor(
 ): AdvisorDescriptor {
   const { pointcut, advice, order } = advisor;
   if (!isPointcutLike(pointcut)) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `The advisor ${type.name} has no pointcut with a classFilter and a methodMatcher`,
     );
   }
   if (!isObject(advice)) {
-    throw new AopConfigurationError(`The advisor ${type.name} has no advice`);
+    throw new AspectConfigurationError(
+      `The advisor ${type.name} has no advice`,
+    );
   }
   if (order !== undefined && !isOrder(order)) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       `The advisor ${type.name} has an order that is not a number`,
     );
   }

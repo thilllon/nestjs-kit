@@ -10,7 +10,7 @@ import {
   Aspect,
   Before,
 } from "./aspect-decorators";
-import { AopNotReadyError, AopUsageError } from "./errors";
+import { AspectNotReadyError, AspectUsageError } from "./errors";
 import type {
   AnyShape,
   JoinPoint,
@@ -388,7 +388,7 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
     });
   });
 
-  it("raises AopNotReadyError before the join point runs while the aspect has no instance", async () => {
+  it("raises AspectNotReadyError before the join point runs while the aspect has no instance", async () => {
     @Aspect()
     class Late {
       @After(targets)
@@ -398,7 +398,7 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       resolveAspect: () => undefined,
     });
 
-    expect(() => calculator[add](1, 2)).toThrow(AopNotReadyError);
+    expect(() => calculator[add](1, 2)).toThrow(AspectNotReadyError);
     expect(() => calculator[add](1, 2)).toThrow(/Late/);
     expect(log).toEqual([]);
   });
@@ -455,7 +455,7 @@ describe("synchronous join points", () => {
       }
       const calculator = weave(new Calculator(), [new Slow()]);
 
-      expect(() => calculator[member](1, 2)).toThrow(AopUsageError);
+      expect(() => calculator[member](1, 2)).toThrow(AspectUsageError);
       expect(log).toEqual(ran);
     },
   );
@@ -473,7 +473,7 @@ describe("synchronous join points", () => {
     }
     const calculator = weave(new Calculator(), [new Slow()]);
 
-    expect(() => calculator.add(1, 2)).toThrow(AopUsageError);
+    expect(() => calculator.add(1, 2)).toThrow(AspectUsageError);
     await new Promise((resolve) => setTimeout(resolve, 5));
     process.off("unhandledRejection", onRejection);
 

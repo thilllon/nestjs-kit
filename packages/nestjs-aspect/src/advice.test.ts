@@ -11,7 +11,7 @@ import {
 } from "./advice";
 import { AfterReturning, Aspect, Before } from "./aspect-decorators";
 import { named, outcome, weave } from "./aspect-fixture";
-import { AopConfigurationError, AopUsageError } from "./errors";
+import { AspectConfigurationError, AspectUsageError } from "./errors";
 import type {
   AdviceAdapter,
   AnyShape,
@@ -239,7 +239,7 @@ describe("return value adapter registry", () => {
 
     const result = await outcome(() => jobs.load());
 
-    expect(result).toEqual({ error: expect.any(AopUsageError) });
+    expect(result).toEqual({ error: expect.any(AspectUsageError) });
   });
 });
 
@@ -256,7 +256,7 @@ describe("advice adapter registry", () => {
     const registry = createAdviceAdapterRegistry();
 
     expect(() => registry.toInterceptor({ unknown: true }, context)).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
   });
 

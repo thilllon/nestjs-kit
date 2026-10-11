@@ -10,7 +10,7 @@ import {
   listAnnotations,
   requiredAdviceAnnotations,
 } from "./annotation";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createClassRef, createMethodRef, ORIGINAL } from "./method-ref";
 import type { Class, JoinPointKind, MethodRef } from "./types";
 
@@ -58,7 +58,7 @@ class GrandchildService extends ChildService {
 
 describe("createAnnotation", () => {
   it("rejects an empty name", () => {
-    expect(() => createAnnotation("")).toThrow(AopConfigurationError);
+    expect(() => createAnnotation("")).toThrow(AspectConfigurationError);
   });
 
   it("is recognized by isAnnotation, unlike other decorators factories", () => {
@@ -252,7 +252,7 @@ describe("Reflector.createDecorator interop", () => {
     const notAnAnnotation = (() => undefined) as unknown as typeof Roles;
 
     expect(() => findAnnotation(notAnAnnotation, ref(Guarded, "open"))).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
   });
 });

@@ -31,6 +31,26 @@ const EVERY_METHOD: MethodMatcher = { isRuntime: false, matches: () => true };
 
 const NO_ANNOTATIONS: ReadonlySet<string> = new Set();
 
+/**
+ * Property of a pointcut built by `createPointcut` that holds the names of
+ * the annotations its designators refer to, or `undefined` when a part of it
+ * is a caller-supplied matcher. Registered with `Symbol.for`, so every copy
+ * of the package reads it.
+ */
+const REFERENCES: unique symbol = Symbol.for(
+  "nestjs-aspect:referenced-annotations",
+);
+
+/** The union of the referenced annotations; unknown when either is unknown. */
+function mergeReferences(
+  a: PointcutLike,
+  b: PointcutLike,
+): Pick<PointcutParts, "references" | "custom"> {
+  const left = referencedAnnotations(a);
+  const right = referencedAnnotations(b);
+  return left && right ? { references: [...left, ...right] } : { custom: true };
+}
+
 /** True for a value with a class filter and a method matcher that can match. */
 export function isPointcutLike(value: unknown): value is PointcutLike {
   if (!isObject(value)) {
@@ -102,6 +122,7 @@ function conjunction(a: PointcutLike, b: PointcutLike): PointcutParts {
     includesExplicitly: (method) =>
       includesExplicitly(a, method) || includesExplicitly(b, method),
     guarantees: [...guaranteedAnnotations(a), ...guaranteedAnnotations(b)],
+    ...mergeReferences(a, b),
   };
 }
 
@@ -127,6 +148,7 @@ function disjunction(a: PointcutLike, b: PointcutLike): PointcutParts {
     guarantees: [...guaranteedAnnotations(a)].filter((name) =>
       common.has(name),
     ),
+    ...mergeReferences(a, b),
   };
 }
 
@@ -143,6 +165,7 @@ function negation(a: PointcutLike): PointcutParts {
           !matchesCompletely(a, method, args),
       }),
     },
+    ...mergeReferences(a, a),
   };
 }
 
@@ -160,6 +183,13 @@ export interface PointcutParts {
   methodMatcher?: MethodMatcher;
   includesExplicitly?: (method: MethodRef) => boolean;
   guarantees?: Iterable<string>;
+  /**
+   * Names of the annotations the parts refer to without guaranteeing them;
+   * the guaranteed ones are always referenced.
+   */
+  references?: Iterable<string>;
+  /** True when a part is a caller-supplied matcher, as in `P.matching`. */
+  custom?: boolean;
 }
 
 /**
@@ -206,6 +236,11 @@ export function createPointcut<S extends Shape = AnyShape>(
       createPointcut<OrShape<S, S2>>(disjunction(pointcut, other)),
     not: () => createPointcut<AnyShape>(negation(pointcut)),
   };
+  Object.defineProperty(pointcut, REFERENCES, {
+    value: parts.custom
+      ? undefined
+      : new Set([...(parts.guarantees ?? []), ...(parts.references ?? [])]),
+  });
   return Object.freeze(pointcut);
 }
 
@@ -230,4 +265,15 @@ export function guaranteedAnnotations(
   pointcut: PointcutLike,
 ): ReadonlySet<string> {
   return pointcut.guarantees ?? NO_ANNOTATIONS;
+}
+
+/**
+ * Names of the annotations the designators of the pointcut refer to, in any
+ * position of a composition. `undefined` for a pointcut whose annotations
+ * cannot be told: a hand-written one, or one composed with `P.matching`.
+ */
+export function referencedAnnotations(
+  pointcut: PointcutLike,
+): ReadonlySet<string> | undefined {
+  return (pointcut as { [REFERENCES]?: ReadonlySet<string> })[REFERENCES];
 }

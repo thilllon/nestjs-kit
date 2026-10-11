@@ -8,7 +8,7 @@ import {
 } from "./advice";
 import { Around, Aspect, Before } from "./aspect-decorators";
 import { named, weave } from "./aspect-fixture";
-import { AopUsageError } from "./errors";
+import { AspectUsageError } from "./errors";
 import { buildChain, Invocation } from "./invocation";
 import {
   createJoinPoint,
@@ -98,11 +98,11 @@ describe("createJoinPoint", () => {
     ).toBeUndefined();
   });
 
-  it("raises AopUsageError from annotation() and returns undefined from findAnnotation() when absent", () => {
+  it("raises AspectUsageError from annotation() and returns undefined from findAnnotation() when absent", () => {
     const jp = createJoinPoint(invocationOf("find", [7]));
 
     expect(jp.findAnnotation(Absent)).toBeUndefined();
-    expect(() => jp.annotation(Absent as never)).toThrow(AopUsageError);
+    expect(() => jp.annotation(Absent as never)).toThrow(AspectUsageError);
     expect(() => jp.annotation(Absent as never)).toThrow(
       /UserRepository\.find\(7\).*@Absent/,
     );

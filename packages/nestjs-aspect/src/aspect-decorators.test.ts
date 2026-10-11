@@ -5,17 +5,18 @@ import { describe, expect, it } from "vitest";
 import {
   After,
   AfterThrowing,
-  AopAdvisor,
+  Advisor,
   Around,
   Aspect,
   Before,
   getAdviceMetadata,
   getAspectMetadata,
-  isAopAdvisor,
+  getAdvisorPointcut,
+  isAdvisor,
   isAspect,
 } from "./aspect-decorators";
 import { matching, named } from "./aspect-fixture";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import type {
   AnyShape,
   MethodInterceptor,
@@ -73,10 +74,10 @@ describe("@Aspect", () => {
 
   it("rejects an order that is not a number and an unknown instantiation model", () => {
     expect(() => Aspect({ order: "1" as unknown as number })).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
     expect(() => Aspect({ instantiation: "request" as never })).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
   });
 });
@@ -197,7 +198,7 @@ describe("advice decorators", () => {
   it("reject a missing pointcut when the decorator is evaluated", () => {
     const notYetInitialized = undefined as unknown as Pointcut;
 
-    expect(() => Before(notYetInitialized)).toThrow(AopConfigurationError);
+    expect(() => Before(notYetInitialized)).toThrow(AspectConfigurationError);
     expect(() => Around({} as Pointcut)).toThrow(/pointcut/);
   });
 
@@ -208,18 +209,19 @@ describe("advice decorators", () => {
         static check(): void {}
       }
       return Static;
-    }).toThrow(AopConfigurationError);
+    }).toThrow(AspectConfigurationError);
   });
 });
 
-describe("@AopAdvisor", () => {
+describe("@Advisor", () => {
   it("marks the class as an advisor and as a Nest provider", async () => {
     @Injectable()
     class Transactions {}
 
-    @AopAdvisor()
-    class TransactionAdvisor implements PointcutAdvisor {
-      readonly pointcut = anything;
+    @Advisor()
+    class TransactionAdvisor {
+      static readonly pointcut = anything;
+
       readonly advice: MethodInterceptor = {
         invoke: (invocation) => invocation.proceed(),
       };
@@ -231,11 +233,34 @@ describe("@AopAdvisor", () => {
       providers: [Transactions, TransactionAdvisor],
     }).compile();
 
-    expect(isAopAdvisor(TransactionAdvisor)).toBe(true);
+    expect(isAdvisor(TransactionAdvisor)).toBe(true);
+    expect(getAdvisorPointcut(TransactionAdvisor)).toBe(anything);
     expect(isAspect(TransactionAdvisor)).toBe(false);
-    expect(isAopAdvisor(Transactions)).toBe(false);
+    expect(isAdvisor(Transactions)).toBe(false);
     expect(moduleRef.get(TransactionAdvisor).transactions).toBe(
       moduleRef.get(Transactions),
     );
+  });
+
+  it("rejects a class whose pointcut is not a static member", () => {
+    expect(() => {
+      // @ts-expect-error The pointcut must be a static member.
+      @Advisor()
+      class InstancePointcut implements PointcutAdvisor {
+        readonly pointcut = anything;
+        readonly advice: MethodInterceptor = {
+          invoke: (invocation) => invocation.proceed(),
+        };
+      }
+      return InstancePointcut;
+    }).toThrow(AspectConfigurationError);
+    expect(() => {
+      // @ts-expect-error Instances must supply advice.
+      @Advisor()
+      class NoAdvice {
+        static readonly pointcut = anything;
+      }
+      return NoAdvice;
+    }).not.toThrow();
   });
 });

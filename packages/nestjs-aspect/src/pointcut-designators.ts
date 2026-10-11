@@ -5,7 +5,7 @@ import {
   hasMethodAnnotation,
   isAnnotation,
 } from "./annotation";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createPointcut } from "./pointcut";
 import type {
   AndShape,
@@ -304,7 +304,7 @@ function annotationNames(annotation: AnnotationLike<any>): string[] {
     typeof annotation !== "function" ||
     (annotation as { KEY?: unknown }).KEY === undefined
   ) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       "Expected an annotation created by createAnnotation() or Reflector.createDecorator()",
     );
   }
@@ -320,7 +320,7 @@ function matchesArgument(matcher: Fn, value: unknown): boolean {
 function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
   const restIndex = matchers.indexOf(REST);
   if (restIndex !== -1 && restIndex !== matchers.length - 1) {
-    throw new AopConfigurationError(
+    throw new AspectConfigurationError(
       "P.REST is valid only as the last matcher of P.args()",
     );
   }
@@ -328,7 +328,7 @@ function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
   const positional = variadic ? matchers.slice(0, -1) : matchers;
   for (const matcher of positional) {
     if (matcher !== ANY && typeof matcher !== "function") {
-      throw new AopConfigurationError(
+      throw new AspectConfigurationError(
         "P.args() accepts classes, P.ANY and P.REST",
       );
     }
@@ -482,6 +482,7 @@ export const P: PointcutFactory = {
     createPointcut({
       classFilter: parts.classFilter,
       methodMatcher: parts.methodMatcher,
+      custom: true,
     }),
 
   all: (...pointcuts) =>

@@ -14,7 +14,7 @@ import {
   Before,
 } from "./aspect-decorators";
 import { matching, named, weave } from "./aspect-fixture";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { buildChain, Invocation, invoke } from "./invocation";
 import { createClassRef, createMethodRef } from "./method-ref";
 import type {
@@ -411,7 +411,7 @@ describe("buildChain", () => {
     );
 
     expect(() => buildChain(method, [advisor], chainOptions)).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
   });
 });

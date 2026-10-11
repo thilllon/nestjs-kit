@@ -123,7 +123,7 @@ class MidModule {}
 @Module({
   providers: [
     {
-      provide: "AOP_WEAVER",
+      provide: "ASPECT_WEAVER",
       inject: [ModulesContainer],
       useFactory: (c: ModulesContainer) => {
         const ctx = {};
@@ -133,12 +133,12 @@ class MidModule {}
       },
     },
   ],
-  exports: ["AOP_WEAVER"],
+  exports: ["ASPECT_WEAVER"],
 })
-class AopModule {}
+class AspectModule {}
 
 @Module({
-  imports: [AopModule, MidModule],
+  imports: [AspectModule, MidModule],
   controllers: [UserController],
   providers: [UserService, ScopedThing],
 })

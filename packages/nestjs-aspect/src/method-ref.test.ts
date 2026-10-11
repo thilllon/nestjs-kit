@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createClassRef, createMethodRef, ORIGINAL } from "./method-ref";
 
 function Marked(): MethodDecorator {
@@ -79,13 +79,13 @@ describe("createMethodRef", () => {
 
   it("rejects a missing member and a member of another kind", () => {
     expect(() => createMethodRef(classRef, "missing")).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
     expect(() => createMethodRef(classRef, "label")).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
     expect(() => createMethodRef(classRef, "plain", "getter")).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
   });
 

@@ -15,7 +15,7 @@ import {
   Before,
 } from "./aspect-decorators";
 import { matching, named } from "./aspect-fixture";
-import { AopConfigurationError } from "./errors";
+import { AspectConfigurationError } from "./errors";
 import { createClassRef, createMethodRef } from "./method-ref";
 import type {
   AdvisorDescriptor,
@@ -161,6 +161,25 @@ describe("compileAspect", () => {
     ).toEqual([Derived, Derived]);
   });
 
+  it("rejects an aspect that extends another aspect", () => {
+    @Aspect()
+    class Parent {
+      @Before(anything)
+      inherited(): void {}
+    }
+
+    @Aspect()
+    class Child extends Parent {}
+
+    expect(() => compileAspect(Child, unresolved)).toThrow(
+      AspectConfigurationError,
+    );
+    expect(() => compileAspect(Child, unresolved)).toThrow(
+      "The aspect Child extends the aspect Parent",
+    );
+    expect(compileAspect(Parent, unresolved)).toHaveLength(1);
+  });
+
   it("rejects a class that is not an aspect", () => {
     class Forgotten {
       @Before(anything)
@@ -168,7 +187,7 @@ describe("compileAspect", () => {
     }
 
     expect(() => compileAspect(Forgotten, unresolved)).toThrow(
-      AopConfigurationError,
+      AspectConfigurationError,
     );
     expect(() => compileAspect(Forgotten, unresolved)).toThrow(/@Aspect/);
   });
@@ -180,7 +199,7 @@ describe("compileAspect", () => {
       class Scoped {}
 
       expect(() => compileAspect(Scoped, unresolved)).toThrow(
-        AopConfigurationError,
+        AspectConfigurationError,
       );
     },
   );
@@ -228,7 +247,7 @@ describe("describeAdvisor", () => {
 
     expect(() =>
       describeAdvisor({ advice } as unknown as PointcutAdvisor, Incomplete, 0),
-    ).toThrow(AopConfigurationError);
+    ).toThrow(AspectConfigurationError);
     expect(() =>
       describeAdvisor(
         { pointcut: anything } as unknown as PointcutAdvisor,
@@ -248,7 +267,7 @@ describe("describeAdvisor", () => {
         Malformed,
         0,
       ),
-    ).toThrow(AopConfigurationError);
+    ).toThrow(AspectConfigurationError);
   });
 
   it("rejects an order that cannot be compared", () => {
