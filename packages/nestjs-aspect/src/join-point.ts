@@ -2,9 +2,11 @@
 
 import { findAnnotation } from "./annotation";
 import { AspectUsageError } from "./errors";
+import { introduced } from "./introduction";
 import type {
   AnnotationLike,
   AnyShape,
+  Class,
   JoinPoint,
   MethodInvocation,
   ProceedingJoinPoint,
@@ -24,6 +26,7 @@ function describeAnnotation(annotation: AnnotationLike<any>): string {
  * - `annotation` and `findAnnotation` use `findAnnotation` of
  *   `./annotation` (the method, the declaring class, the target class);
  *   `annotation` raises `AspectUsageError` when nothing is found.
+ * - `introduced` is `introduced(target, token)` of `./introduction`.
  * - `toString()` is `"<TargetType>.<name>(<args>)"`, with the arguments
  *   rendered by `formatArgument`.
  */
@@ -52,6 +55,9 @@ export function createJoinPoint(
     },
     findAnnotation(annotation: AnnotationLike<any>) {
       return findAnnotation(annotation, method)?.value as never;
+    },
+    introduced<I extends object>(token: Class<I>): I {
+      return introduced(invocation.target, token);
     },
     toString() {
       const args = invocation.args.map(formatArgument).join(", ");

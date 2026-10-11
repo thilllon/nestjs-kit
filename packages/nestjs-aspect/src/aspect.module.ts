@@ -15,6 +15,7 @@ import {
   ConfigurableModuleClass,
   MODULE_OPTIONS_TOKEN,
 } from "./aspect.module-definition";
+import { AspectInspector } from "./aspect-inspector";
 import { AspectWeaver } from "./weaver";
 
 /**
@@ -27,7 +28,8 @@ import { AspectWeaver } from "./weaver";
  * and before the first lifecycle hook. `onModuleInit` completes the weaving
  * with the instances that exist by then, validates the configuration and
  * logs the weaving report; `onApplicationShutdown` detaches the application
- * from the woven classes.
+ * from the woven classes. The classes of a module that `LazyModuleLoader`
+ * loads are woven and validated before `load()` resolves.
  */
 @Global()
 @Module({
@@ -53,7 +55,9 @@ import { AspectWeaver } from "./weaver";
           AspectWeaver.assertSingleton(container, AspectModule),
       }),
     },
+    AspectInspector,
   ],
+  exports: [AspectInspector],
 })
 export class AspectModule
   extends ConfigurableModuleClass

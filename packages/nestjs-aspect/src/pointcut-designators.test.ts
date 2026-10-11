@@ -118,6 +118,21 @@ describe("P.method", () => {
     ).toBe(false);
     expect(matches(pointcut, ref(Unrelated, "findOne"))).toBe(false);
   });
+
+  it("does not match a getter that returns a function", () => {
+    class Handlers {
+      get handler(): () => void {
+        return () => undefined;
+      }
+    }
+
+    expect(
+      matches(
+        P.method(Handlers, "handler"),
+        ref(Handlers, "handler", "getter"),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("P.within and P.target", () => {

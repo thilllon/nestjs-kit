@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { Injectable, Module, Scope } from "@nestjs/common";
+import { ContextIdFactory } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAnnotation } from "./annotation";
@@ -8,7 +9,12 @@ import { Advisor, Around, Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
 import { P } from "./pointcut-designators";
 import type { AnyShape, JoinPoint, JP, MethodInterceptor, PJP } from "./types";
-import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
+import {
+  closeWoven,
+  compileWoven,
+  initWoven,
+  RecordingLogger,
+} from "./weaving-fixture";
 
 afterEach(closeWoven);
 
@@ -219,6 +225,97 @@ describe("bootstrap validation", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("accepts a requiresAdvice annotation under a custom pointcut that is composed with an annotation pointcut", async () => {
+    const Retryable = createAnnotation<"RetryableMixed">("RetryableMixed", {
+      requiresAdvice: true,
+    });
+    const Other = createAnnotation<"OtherMixed">("OtherMixed");
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      @Retryable()
+      find() {
+        log.push("find");
+      }
+    }
+    const custom = P.matching({
+      classFilter: { matches: (classRef) => classRef.type === Service },
+      methodMatcher: { isRuntime: false, matches: () => true },
+    });
+    // The annotations a caller-supplied matcher refers to are unknown, and
+    // stay unknown in a composition.
+    const pointcuts = {
+      or: custom.or(P.annotated(Other)),
+      and: custom.and(P.annotated(Other).not()),
+    };
+
+    for (const pointcut of Object.values(pointcuts)) {
+      @Aspect()
+      class Mixed {
+        @Before(pointcut)
+        record(_jp: JoinPoint<AnyShape>) {
+          log.push("advice");
+        }
+      }
+      const { moduleRef } = await initWoven({ providers: [Service, Mixed] });
+      moduleRef.get(Service).find();
+      await moduleRef.close();
+    }
+    expect(log).toEqual(["advice", "find", "advice", "find"]);
+  });
+
+  it("requires advice for accessors and lifecycle hooks only by an annotation they carry themselves", async () => {
+    const Secured = createAnnotation<"SecuredClass">("SecuredClass", {
+      requiresAdvice: true,
+    });
+    const log: string[] = [];
+
+    @Secured()
+    @Injectable()
+    class Vault {
+      private opened = false;
+
+      onModuleInit() {
+        this.opened = true;
+      }
+
+      get isOpen() {
+        return this.opened;
+      }
+
+      read() {
+        return "content";
+      }
+    }
+    const secured = P.withinAnnotated(Secured);
+
+    @Aspect()
+    class Securing {
+      @Before(secured)
+      check(jp: JoinPoint<AnyShape>) {
+        log.push(String(jp.signature.name));
+      }
+    }
+
+    const { moduleRef } = await initWoven({ providers: [Vault, Securing] });
+    const vault = moduleRef.get(Vault);
+    expect(vault.isOpen).toBe(true);
+    expect(vault.read()).toBe("content");
+    expect(log).toEqual(["read"]);
+
+    @Injectable()
+    class Ledger {
+      @Secured()
+      get balance() {
+        return 0;
+      }
+    }
+    const error = await initError({ providers: [Ledger, Securing] });
+    expect(error).toBeInstanceOf(AspectConfigurationError);
+    expect(String(error)).toContain("Ledger.get balance (@SecuredClass)");
+  });
+
   it("rejects a requiresAdvice annotation on a member of an aspect", async () => {
     const Retryable = createAnnotation<"RetryableOnAspect">(
       "RetryableOnAspect",
@@ -243,7 +340,7 @@ describe("bootstrap validation", () => {
     const error = await initError({ providers: [Service, Helping] });
     expect(error).toBeInstanceOf(AspectConfigurationError);
     expect(String(error)).toContain(
-      "aspects and advisors are never advised: Helping.helper (@RetryableOnAspect).",
+      "aspects, advisors, module classes and the classes of the exclude option are never advised: Helping.helper (@RetryableOnAspect).",
     );
   });
 
@@ -285,16 +382,38 @@ describe("bootstrap validation", () => {
     );
     expect(String(error)).toContain("The advisor FromValue is the instance");
 
-    const { moduleRef, logger } = await initWoven(
-      { providers },
-      { strict: false },
+    // No call could report advice that never runs, so strict mode does not
+    // decide this error.
+    expect(String(await initError({ providers }, { strict: false }))).toBe(
+      String(error),
     );
-    moduleRef.get(Service).run();
     expect(log).toEqual([]);
-    expect(logger.messages("warn")).toEqual([
-      expect.stringContaining("The aspect FromFactory"),
-      expect.stringContaining("The advisor FromValue"),
-    ]);
+  });
+
+  it("rejects an aspect that a request-scoped factory provider returns when the container resolves it", async () => {
+    @Injectable()
+    class Service {
+      run() {}
+    }
+    const run = P.method(Service, "run");
+
+    @Aspect()
+    class Late {
+      @Before(run)
+      record(_jp: JP<typeof run>) {}
+    }
+
+    const { moduleRef } = await initWoven({
+      providers: [
+        Service,
+        { provide: "LATE", scope: Scope.REQUEST, useFactory: () => new Late() },
+      ],
+    });
+    await expect(
+      moduleRef.resolve("LATE", ContextIdFactory.create()),
+    ).rejects.toThrow(
+      "The aspect Late is the instance of a factory, value or alias provider, so its advice does not run.",
+    );
   });
 
   it("reports an invalid advisor instance as a validation problem", async () => {
@@ -386,6 +505,92 @@ describe("bootstrap validation", () => {
     expect(logger.messages("warn")).toEqual([
       "The pointcut of First.never (before) matches no member of the application",
       "First and Second advise Service.run with order 5; First runs first because it is registered first",
+    ]);
+  });
+
+  it("warns about aspects without an order on one member, and not about the advice of one aspect", async () => {
+    @Injectable()
+    class Service {
+      run() {}
+
+      stop() {}
+    }
+    const run = P.method(Service, "run");
+    const stop = P.method(Service, "stop");
+
+    @Aspect()
+    class Alone {
+      @Before(stop)
+      first(_jp: JP<typeof stop>) {}
+
+      @Before(stop)
+      second(_jp: JP<typeof stop>) {}
+    }
+
+    @Aspect()
+    class First {
+      @Before(run)
+      record(_jp: JP<typeof run>) {}
+    }
+
+    @Aspect()
+    class Second {
+      @Before(run)
+      record(_jp: JP<typeof run>) {}
+    }
+
+    const { logger } = await initWoven({
+      providers: [Service, Alone, First, Second],
+    });
+    expect(logger.messages("warn")).toEqual([
+      "First and Second advise Service.run with no order; First runs first because it is registered first",
+    ]);
+  });
+
+  it("runs no advice of an aspect that a test replaces with a value, and warns when the advised class is replaced", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run() {
+        log.push("run");
+      }
+    }
+    const run = P.method(Service, "run");
+
+    @Aspect()
+    class Auditing {
+      @Before(run)
+      record(_jp: JP<typeof run>) {
+        log.push("advice");
+      }
+    }
+    const metadata = {
+      imports: [AspectModule.forRoot()],
+      providers: [Service, Auditing],
+    };
+
+    const withoutAspect = await Test.createTestingModule(metadata)
+      .overrideProvider(Auditing)
+      .useValue({})
+      .compile();
+    await withoutAspect.init();
+    withoutAspect.get(Service).run();
+    await withoutAspect.close();
+    expect(log).toEqual(["run"]);
+
+    const logger = new RecordingLogger();
+    const withoutService = await Test.createTestingModule(metadata)
+      .overrideProvider(Service)
+      .useValue({ run: () => log.push("mock") })
+      .setLogger(logger)
+      .compile();
+    await withoutService.init();
+    withoutService.get(Service).run();
+    await withoutService.close();
+    expect(log).toEqual(["run", "mock"]);
+    expect(logger.messages("warn")).toEqual([
+      "The pointcut of Auditing.record (before) matches no member of the application",
     ]);
   });
 

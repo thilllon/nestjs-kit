@@ -11,8 +11,8 @@ Install only the integrations you need. Packages have their own npm releases and
 
 Each package README covers installation and usage.
 
-- [`nestjs-aspect`](packages/nestjs-aspect/README.md) (first release pending)
-  - Spring-style aspects, pointcuts and advice for Nest providers.
+- [`nestjs-aspect`](packages/nestjs-aspect/README.md) (0.0.0 on npm; automated releases pending)
+  - Spring-style aspects, pointcuts and advice for the classes a Nest application manages.
 - [`nestjs-azure-storage-blob`](packages/nestjs-azure-storage-blob/README.md) [![npm version of nestjs-azure-storage-blob](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob) [![Monthly npm downloads of nestjs-azure-storage-blob](https://img.shields.io/npm/dm/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
   - Azure Blob Storage operations and direct uploads through SAS URLs.
 - [`nestjs-drizzle-pg`](packages/nestjs-drizzle-pg/README.md) [![npm version of nestjs-drizzle-pg](https://img.shields.io/npm/v/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg) [![Monthly npm downloads of nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)

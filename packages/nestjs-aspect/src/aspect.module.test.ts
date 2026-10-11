@@ -26,7 +26,8 @@ import {
 const TAG = "aspect-module-test:tag";
 
 /**
- * The application of `docs/spike/weaving-timing.ts`, woven by `AspectModule`.
+ * An application with a controller, a service, a request-scoped provider and
+ * a module with a lifecycle hook, woven by `AspectModule`.
  * Every call declares its own classes: stubs live on class prototypes, which
  * the tests of one file share.
  */
@@ -178,11 +179,14 @@ describe("AspectModule", () => {
   });
 
   it.each([
-    { first: "AspectModule", advised: true },
-    { first: "StoreModule", advised: false },
+    { first: "AspectModule", scope: "global", advised: true },
+    { first: "StoreModule", scope: "global", advised: false },
+    // Only the shutdown hooks of a global module run after AspectModule
+    // has shut down.
+    { first: "StoreModule", scope: "regular", advised: true },
   ])(
-    "advises the shutdown hook of a global module: $advised when $first is imported first",
-    async ({ first, advised }) => {
+    "advises the shutdown hook of a $scope module: $advised when $first is imported first",
+    async ({ first, scope, advised }) => {
       const log: string[] = [];
 
       @Injectable()
@@ -197,12 +201,14 @@ describe("AspectModule", () => {
       }
       const flush = P.method(Store, "flush");
 
-      @Global()
       @Module({
         providers: [Store],
         exports: [Store],
       })
       class StoreModule {}
+      if (scope === "global") {
+        Global()(StoreModule);
+      }
 
       @Aspect()
       class FlushAspect {

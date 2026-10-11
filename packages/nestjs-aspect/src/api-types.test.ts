@@ -1,4 +1,4 @@
-// Type fixture of the public API: the usage section of docs/sketch/api.ts.
+// Type fixture of the public API.
 // `pnpm typecheck` checks it; every `@ts-expect-error` marks a misuse the API
 // rejects at compile time. The tests evaluate the fixture and compare the
 // run-time guarantees of its pointcuts with their types.
@@ -234,7 +234,7 @@ function declareUsage() {
     }
   }
 
-  // Designators outside the sketch
+  // Further designators
   const allOf = P.all(findById, retryable, P.targetAnnotated(Audited));
   const anyOf = P.any(P.annotated(Audited), P.withinAnnotated(Audited));
   const roles = P.annotated(Roles);

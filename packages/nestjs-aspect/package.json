@@ -18,6 +18,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./rxjs": {
+      "import": {
+        "types": "./dist/rxjs.d.mts",
+        "default": "./dist/rxjs.mjs"
+      },
+      "require": {
+        "types": "./dist/rxjs.d.cts",
+        "default": "./dist/rxjs.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -54,7 +64,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
-    "build": "tsdown --config ../../tsdown.config.mts",
+    "build": "tsdown",
     "test": "vitest run --project unit",
     "test:packaging": "vitest run --project packaging"
   },
@@ -70,6 +80,8 @@
     "@nestjs/core": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
     "@nestjs/testing": "12.0.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.24",
     "tsdown": "0.23.0",

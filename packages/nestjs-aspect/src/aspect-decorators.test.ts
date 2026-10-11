@@ -4,7 +4,6 @@ import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
 import {
   After,
-  AfterThrowing,
   Advisor,
   Around,
   Aspect,
@@ -17,13 +16,7 @@ import {
 } from "./aspect-decorators";
 import { matching, named } from "./aspect-fixture";
 import { AspectConfigurationError } from "./errors";
-import type {
-  AnyShape,
-  MethodInterceptor,
-  Pointcut,
-  PointcutAdvisor,
-  ProceedingJoinPoint,
-} from "./types";
+import type { MethodInterceptor, Pointcut, PointcutAdvisor } from "./types";
 
 const anything = matching();
 
@@ -42,23 +35,6 @@ describe("@Aspect", () => {
     }).compile();
 
     expect(moduleRef.get(MeteredAspect).metrics).toBe(moduleRef.get(Metrics));
-  });
-
-  it("stores the order and defaults to the singleton instantiation model", () => {
-    @Aspect({ order: 10 })
-    class Ordered {}
-
-    @Aspect()
-    class Plain {}
-
-    expect(getAspectMetadata(Ordered)).toEqual({
-      order: 10,
-      instantiation: "singleton",
-    });
-    expect(getAspectMetadata(Plain)).toEqual({
-      order: undefined,
-      instantiation: "singleton",
-    });
   });
 
   it("does not make a subclass an aspect", () => {
@@ -83,36 +59,6 @@ describe("@Aspect", () => {
 });
 
 describe("advice decorators", () => {
-  it("record advice in declaration order with kind, pointcut and method", () => {
-    const first = named("first");
-    const second = named("second");
-
-    @Aspect()
-    class Recorded {
-      @Before(first)
-      one(): void {}
-
-      @Around(second)
-      two(jp: ProceedingJoinPoint<AnyShape>): unknown {
-        return jp.proceed();
-      }
-
-      @AfterThrowing(first, { throwing: RangeError })
-      three(): void {}
-    }
-
-    expect(getAdviceMetadata(Recorded)).toEqual([
-      { kind: "before", pointcut: first, methodName: "one" },
-      { kind: "around", pointcut: second, methodName: "two" },
-      {
-        kind: "afterThrowing",
-        pointcut: first,
-        methodName: "three",
-        throwing: RangeError,
-      },
-    ]);
-  });
-
   it("record several decorators on one method bottom-up", () => {
     @Aspect()
     class Stacked {

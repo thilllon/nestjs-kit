@@ -48,9 +48,17 @@ export const ADVISOR_METADATA: unique symbol = Symbol.for(
 );
 
 /**
+ * A result whose settlement advice can follow: a promise, or a value with a
+ * `subscribe` method, such as an Observable, which a `ReturnValueAdapter`
+ * follows.
+ */
+type Deferred = PromiseLike<any> | { subscribe: Fn };
+
+/**
  * Return type required of before, after, afterReturning and afterThrowing
  * advice: `void`, or also a promise when the join point is or may be
- * asynchronous.
+ * asynchronous. A join point that returns a value with a `subscribe` method
+ * may be asynchronous: whether an adapter follows it is known at run time.
  */
 export type AdviceResult<S extends Shape> = [S["returns"]] extends [
   PromiseLike<any>,
@@ -58,8 +66,8 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
   ? void | PromiseLike<void>
   : unknown extends S["returns"]
     ? void | PromiseLike<void>
-    : // A union with a promise member, as `or()` of a synchronous and an asynchronous method produces.
-      [Extract<S["returns"], PromiseLike<any>>] extends [never]
+    : // Also a union with such a member, as `or()` of a synchronous and an asynchronous method produces.
+      [Extract<S["returns"], Deferred>] extends [never]
       ? // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
         void
       : void | PromiseLike<void>;
@@ -80,6 +88,15 @@ export type AsyncGuard<S extends Shape, T extends Fn> =
           : unknown
       : unknown
     : unknown;
+
+/**
+ * Type of the result after-returning advice receives: the awaited result of
+ * the join point. For a result with a `subscribe` method it is `any`: a
+ * `ReturnValueAdapter` decides at run time what such a result settles to,
+ * as `observableAdapter` passes the last value an Observable emits, so the
+ * advice declares the type itself.
+ */
+export type AdviceValue<R> = R extends { subscribe: Fn } ? any : Awaited<R>;
 
 export type AdviceDecorator<S extends Shape, F extends Fn> = <T extends F>(
   target: object,
@@ -169,12 +186,12 @@ export function After<S extends Shape>(
   return adviceDecorator("after", pc);
 }
 
-/** Runs after a normal completion with the awaited result; cannot replace it. */
+/** Runs after a normal completion with the settled result; cannot replace it. */
 export function AfterReturning<S extends Shape>(
   pc: Pointcut<S>,
 ): AdviceDecorator<
   S,
-  (jp: JoinPoint<S>, result: Awaited<S["returns"]>) => AdviceResult<S>
+  (jp: JoinPoint<S>, result: AdviceValue<S["returns"]>) => AdviceResult<S>
 > {
   return adviceDecorator("afterReturning", pc);
 }

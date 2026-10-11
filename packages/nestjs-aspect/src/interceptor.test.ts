@@ -473,10 +473,12 @@ describe("synchronous join points", () => {
     }
     const calculator = weave(new Calculator(), [new Slow()]);
 
-    expect(() => calculator.add(1, 2)).toThrow(AspectUsageError);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    process.off("unhandledRejection", onRejection);
-
+    try {
+      expect(() => calculator.add(1, 2)).toThrow(AspectUsageError);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
     expect(rejections).toEqual([]);
   });
 });
@@ -527,21 +529,39 @@ describe("asynchronous join points", () => {
     await expect(promise).rejects.toThrow(OtherError);
   });
 
-  it("settle only after asynchronous after-advice has finished", async () => {
+  it("settle only after asynchronous after-returning advice has finished", async () => {
     @Aspect()
     class Slow {
-      @After(targets)
-      async after(): Promise<void> {
-        await tick();
-        log.push("after");
-      }
-
       @AfterReturning(targets)
       async returned(): Promise<void> {
         await tick();
         log.push("returned");
       }
+    }
+    const calculator = weave(new Calculator(), [new Slow()]);
 
+    expect(await calculator.addAsync(1, 2)).toBe(3);
+    expect(log).toEqual(["add(1, 2)", "returned"]);
+  });
+
+  it("reject with the error of asynchronous after-returning advice", async () => {
+    @Aspect()
+    class Strict {
+      @AfterReturning(targets)
+      async returned(): Promise<void> {
+        await tick();
+        throw new OtherError("advice failed");
+      }
+    }
+    const calculator = weave(new Calculator(), [new Strict()]);
+
+    await expect(calculator.addAsync(1, 2)).rejects.toThrow("advice failed");
+    expect(log).toEqual(["add(1, 2)"]);
+  });
+
+  it("settle only after asynchronous after-throwing advice has finished", async () => {
+    @Aspect()
+    class Slow {
       @AfterThrowing(targets)
       async failed(): Promise<void> {
         await tick();
@@ -550,13 +570,30 @@ describe("asynchronous join points", () => {
     }
     const calculator = weave(new Calculator(), [new Slow()]);
 
-    expect(await calculator.addAsync(1, 2)).toBe(3);
-    expect(log).toEqual(["add(1, 2)", "returned", "after"]);
-
-    log = [];
     await expect(calculator.failAsync()).rejects.toThrow(DomainError);
-    expect(log).toEqual(["fail", "failed", "after"]);
+    expect(log).toEqual(["fail", "failed"]);
   });
+
+  it.each([
+    ["fulfils", "addAsync", "add(1, 2)"],
+    ["rejects", "failAsync", "fail"],
+  ] as const)(
+    "settle only after asynchronous after advice has finished when the join point %s",
+    async (_outcome, member, ran) => {
+      @Aspect()
+      class Slow {
+        @After(targets)
+        async after(): Promise<void> {
+          await tick();
+          log.push("after");
+        }
+      }
+      const calculator = weave(new Calculator(), [new Slow()]);
+
+      await outcome(() => calculator[member](1, 2));
+      expect(log).toEqual([ran, "after"]);
+    },
+  );
 
   it("reject with the error of asynchronous afterThrowing advice", async () => {
     @Aspect()

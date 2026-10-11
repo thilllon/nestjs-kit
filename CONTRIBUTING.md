@@ -94,11 +94,11 @@ Use a Conventional Commit title to describe the change:
 
 Explain breaking changes in the PR description and update the affected package README. Prefer one concern per PR and squash merge with the Conventional Commit title. Do not add `Co-Authored-By` trailers.
 
-Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Packages awaiting their first npm release are held in Changesets `ignore` and are not offered there; write their Changesets by hand in a separate file that names only held packages (see [packages awaiting first publication](docs/releases.md#packages-awaiting-first-publication)). Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
+Package versions and changelogs are maintained by release automation. Do not manually bump versions for ordinary feature or fix PRs. Include an explicit Changeset in every PR with publishable package changes. Run `pnpm exec changeset` to select affected packages, bump types and a user-facing summary. Packages held from automated publication are listed in Changesets `ignore` and are not offered there; write their Changesets by hand in a separate file that names only held packages (see [packages held from automated publication](docs/releases.md#packages-held-from-automated-publication)). Commit messages do not determine versions. Documentation, tests and repository-only tooling changes need no Changeset. See [releases](docs/releases.md).
 
 ## Repository layout
 
-- `packages/nestjs-aspect`: Spring-style aspect-oriented programming for Nest providers, awaiting its first npm release.
+- `packages/nestjs-aspect`: Spring-style aspect-oriented programming for the classes a Nest application manages. npm serves version 0.0.0 with the declaration API; automated releases start once its trusted publisher is verified.
 - `packages/nestjs-azure-storage-blob`: the Azure Blob Storage adapter.
 - `packages/nestjs-drizzle-pg`: the Drizzle ORM adapter for PostgreSQL.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.

@@ -1,12 +1,13 @@
 import "reflect-metadata";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { Inject, Injectable, Scope } from "@nestjs/common";
-import { ContextIdFactory } from "@nestjs/core";
+import { Inject, Injectable } from "@nestjs/common";
+import { ModulesContainer } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { AspectModule } from "./aspect.module";
 import { Aspect, Before } from "./aspect-decorators";
+import { AspectUsageError } from "./errors";
 import { P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
@@ -28,14 +29,12 @@ function labelling(type: Class, label: string, log: string[]) {
   return Labelling;
 }
 
-/** Runs full garbage collections across a few turns of the event loop. */
+/** Runs a full garbage collection after a turn of the event loop. */
 async function collectGarbage(): Promise<void> {
   setFlagsFromString("--expose-gc");
   const collect = runInNewContext("gc") as () => void;
-  for (let turn = 0; turn < 5; turn++) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    collect();
-  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  collect();
 }
 
 describe("applications that share a class", () => {
@@ -157,7 +156,7 @@ describe("applications that share a class", () => {
     expect(log).toEqual(["advice", "run"]);
   });
 
-  it("drops an application that is abandoned without close()", async () => {
+  it("drops an application that is abandoned without close() once nothing refers to it", async () => {
     const log: string[] = [];
 
     @Injectable()
@@ -175,9 +174,15 @@ describe("applications that share a class", () => {
       }
     }
     const Labelling = labelling(Shared, "abandoned", log);
+    // The containers, which keep the applications reachable until released.
+    const containers: ModulesContainer[] = [];
     const slow = {
       provide: "SLOW",
-      useFactory: () => new Promise((resolve) => setTimeout(resolve, 5)),
+      inject: [ModulesContainer],
+      useFactory: (container: ModulesContainer) => {
+        containers.push(container);
+        return new Promise((resolve) => setTimeout(resolve, 5));
+      },
     };
 
     // The applications live in a function of their own, and not under
@@ -195,45 +200,89 @@ describe("applications that share a class", () => {
       // Compiled, never initialized and never closed.
       await Test.createTestingModule({
         imports: [AspectModule.forRoot()],
-        providers: [Shared, Labelling],
+        providers: [Shared, Labelling, slow],
       }).compile();
       return failure;
     }
     expect(await abandonApplications()).toEqual(new Error("boom"));
+    expect(containers).toHaveLength(2);
     expect(isStub(Shared.prototype.run)).toBe(true);
-    new Shared().run();
-    expect(log.splice(0)).toEqual(["abandoned", "run"]);
+    // Both applications are live: nothing tells which of them advises an
+    // instance that neither created.
+    expect(() => new Shared().run()).toThrow(AspectUsageError);
+    expect(log).toEqual([]);
 
-    await collectGarbage();
-    new Shared().run();
+    containers.length = 0;
+    const run = (): boolean => {
+      try {
+        new Shared().run();
+      } catch {
+        // An application is still live.
+      }
+      return log.includes("run");
+    };
+    for (let turn = 0; turn < 20 && !run(); turn++) {
+      await collectGarbage();
+    }
     expect(log).toEqual(["run"]);
   });
 
-  it("attributes an instance no container holds to the most recent application, with one warning", async () => {
+  it("keeps advising the instances of an application that only they keep reachable", async () => {
     const log: string[] = [];
 
-    @Injectable({ scope: Scope.REQUEST })
-    class PerRequest {
-      run() {}
+    /** A class of its own per application, with an aspect that guards it. */
+    function guarded() {
+      const constructed: Vault[] = [];
+
+      @Injectable()
+      class Vault {
+        constructor() {
+          constructed.push(this);
+        }
+
+        open() {
+          log.push("opened");
+          return "secret";
+        }
+      }
+      const pointcut = P.within(Vault);
+
+      @Aspect()
+      class Guard {
+        @Before(pointcut)
+        check(_jp: JoinPoint<AnyShape>) {
+          throw new Error("denied");
+        }
+      }
+      const metadata = {
+        imports: [AspectModule.forRoot()],
+        providers: [Vault, Guard],
+      };
+      return { Vault, metadata, constructed };
     }
 
-    const first = await compileWoven({
-      providers: [PerRequest, labelling(PerRequest, "first", log)],
-    });
-    const second = await compileWoven({
-      providers: [PerRequest, labelling(PerRequest, "second", log)],
-    });
-    for (const { moduleRef } of [first, second, first]) {
-      const instance = await moduleRef.resolve(
-        PerRequest,
-        ContextIdFactory.create(),
-      );
-      instance.run();
-      instance.run();
+    // The handles of the applications go out of scope with these functions.
+    // The container of the first application never hands its instance out:
+    // the initialization records it as an instance of the application.
+    async function initialized(): Promise<{ open(): string }> {
+      const { metadata, constructed } = guarded();
+      const moduleRef = await Test.createTestingModule(metadata).compile();
+      await moduleRef.init();
+      return constructed.splice(0)[0];
     }
-    expect(log).toEqual(Array(6).fill("second"));
-    expect(second.logger.messages("warn")).toEqual([
-      expect.stringContaining("Several live applications weave PerRequest"),
-    ]);
+    async function compiled(): Promise<{ open(): string }> {
+      const { Vault, metadata, constructed } = guarded();
+      const moduleRef = await Test.createTestingModule(metadata).compile();
+      constructed.length = 0;
+      return moduleRef.get(Vault);
+    }
+    const vaults = [await initialized(), await compiled()];
+    for (let turn = 0; turn < 10; turn++) {
+      await collectGarbage();
+    }
+    for (const vault of vaults) {
+      expect(() => vault.open()).toThrow("denied");
+    }
+    expect(log).toEqual([]);
   });
 });

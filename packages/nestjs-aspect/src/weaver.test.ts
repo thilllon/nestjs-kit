@@ -27,6 +27,7 @@ import {
   Aspect,
   Before,
 } from "./aspect-decorators";
+import { AspectInspector } from "./aspect-inspector";
 import { AspectNotReadyError } from "./errors";
 import { ORIGINAL } from "./method-ref";
 import { P } from "./pointcut-designators";
@@ -199,6 +200,70 @@ describe("module and bean pointcuts in a container", () => {
       "string Mailer.run",
       "factory Gateway.run",
     ]);
+  });
+
+  it("evaluates each side of a disjunction of bean pointcuts with its own member condition", async () => {
+    const log: string[] = [];
+
+    class Reader {
+      read() {}
+
+      write() {}
+    }
+
+    class Writer {
+      read() {}
+
+      write() {}
+    }
+    const pointcut = P.bean("READER")
+      .and(P.name("read"))
+      .or(P.bean("WRITER").and(P.name("write")));
+
+    const { moduleRef } = await compileWoven({
+      providers: [
+        { provide: "READER", useClass: Reader },
+        { provide: "WRITER", useClass: Writer },
+        recorder(pointcut, log),
+      ],
+    });
+    for (const token of ["READER", "WRITER"]) {
+      const bean = moduleRef.get<Reader | Writer>(token);
+      bean.read();
+      bean.write();
+    }
+    expect(log).toEqual(["Reader.read", "Writer.write"]);
+  });
+
+  it("weaves a class again when a factory supplies an instance of it under another token", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run() {}
+    }
+
+    const { moduleRef } = await compileWoven({
+      providers: [
+        Service,
+        { provide: "ALIAS", useFactory: () => new Service() },
+        recorder(P.bean("ALIAS"), log),
+      ],
+    });
+    // The class of a factory instance is known when the application
+    // initializes.
+    moduleRef.get<Service>("ALIAS").run();
+    expect(log).toEqual([]);
+
+    await moduleRef.init();
+    moduleRef.get<Service>("ALIAS").run();
+    expect(log).toEqual(["Service.run"]);
+    expect(
+      moduleRef
+        .get(AspectInspector)
+        .advisedMembers(Service)
+        .map((member) => [member.name, member.advisors.length]),
+    ).toEqual([["run", 1]]);
   });
 });
 
@@ -816,6 +881,44 @@ describe("module options", () => {
     // The built-in promise adapter stays registered.
     await moduleRef.get(Loader).loadAsync();
     expect(log).toEqual(["loaded", "load returned 42", "loadAsync returned 1"]);
+  });
+
+  it("consults the return value adapters of the options before the promise adapter", async () => {
+    const log: string[] = [];
+    const tracingAdapter: ReturnValueAdapter<Promise<unknown>> = {
+      supports: (value): value is Promise<unknown> => value instanceof Promise,
+      onSuccess: (value, callback) =>
+        value.then(async (resolved) => {
+          log.push("custom adapter");
+          await callback(resolved);
+          return resolved;
+        }),
+      onError: (value) => value,
+      finally: (value) => value,
+    };
+
+    @Injectable()
+    class Loader {
+      async load() {
+        return 1;
+      }
+    }
+    const loads = P.within(Loader);
+
+    @Aspect()
+    class LoaderAspect {
+      @AfterReturning(loads)
+      record(_jp: JP<typeof loads>, result: unknown) {
+        log.push(`returned ${String(result)}`);
+      }
+    }
+
+    const { moduleRef } = await compileWoven(
+      { providers: [Loader, LoaderAspect] },
+      { returnValueAdapters: [tracingAdapter] },
+    );
+    await moduleRef.get(Loader).load();
+    expect(log).toEqual(["custom adapter", "returned 1"]);
   });
 });
 

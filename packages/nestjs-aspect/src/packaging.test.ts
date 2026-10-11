@@ -234,13 +234,17 @@ describe("built nestjs-aspect package", () => {
           "Around",
           "Aspect",
           "AspectConfigurationError",
+          "AspectInspector",
           "AspectModule",
           "AspectNotReadyError",
           "AspectUsageError",
           "Before",
+          "DeclareParents",
           "P",
           "createAnnotation",
+          "introduced",
           "isAnnotation",
+          "isIntroduced",
           "promiseAdapter",
         ],
         matches: [true, false],
@@ -354,6 +358,7 @@ console.log(JSON.stringify([
   new cjs.AspectUsageError("x") instanceof Custom,
   new Custom("x") instanceof cjs.AspectUsageError,
   new Error("x") instanceof esm.AspectUsageError,
+  String(new cjs.AspectNotReadyError("x")),
 ]));`,
       ],
       { cwd: root, encoding: "utf8" },
@@ -367,6 +372,7 @@ console.log(JSON.stringify([
       false,
       true,
       false,
+      "AspectNotReadyError: x",
     ]);
   });
 

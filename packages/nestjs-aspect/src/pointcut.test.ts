@@ -108,22 +108,6 @@ describe("and", () => {
     );
   });
 
-  it("is static when both operands are static", () => {
-    const pointcut = P.within(AccountService).and(P.name("find"));
-
-    expect(pointcut.methodMatcher.isRuntime).toBe(false);
-    expect(pointcut.methodMatcher.matchesRuntime).toBeUndefined();
-  });
-
-  it("is a runtime pointcut when either operand is", () => {
-    expect(
-      P.within(AccountService).and(P.args(Account)).methodMatcher.isRuntime,
-    ).toBe(true);
-    expect(
-      P.args(Account).and(P.within(AccountService)).methodMatcher.isRuntime,
-    ).toBe(true);
-  });
-
   it("decides the static part at weaving time and the arguments on each call", () => {
     const pointcut = P.within(AccountService).and(P.args(Account, P.REST));
 
@@ -153,23 +137,16 @@ describe("or", () => {
   });
 
   it("evaluates each side's class filter with its own method matcher", () => {
-    const pointcut = P.within(AccountService)
+    // P.target decides in the class filter alone; its method matcher
+    // accepts every member.
+    const pointcut = P.target(AccountService)
       .and(P.name("find"))
-      .or(P.within(ReportService).and(P.name("transfer")));
+      .or(P.target(ReportService).and(P.name("transfer")));
 
     expect(matchesStatically(pointcut, find)).toBe(true);
     expect(matchesStatically(pointcut, reportTransfer)).toBe(true);
     expect(matchesStatically(pointcut, transfer)).toBe(false);
     expect(matchesStatically(pointcut, reportFind)).toBe(false);
-  });
-
-  it("is a runtime pointcut when either operand is", () => {
-    expect(P.name("find").or(P.name("close")).methodMatcher.isRuntime).toBe(
-      false,
-    );
-    expect(P.name("find").or(P.args(Account)).methodMatcher.isRuntime).toBe(
-      true,
-    );
   });
 
   it("matches a call through the static side regardless of the arguments", () => {

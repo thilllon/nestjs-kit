@@ -85,7 +85,10 @@ export type MethodOrClassDecorator<F extends Fn> = {
  */
 export interface Annotation<V, F extends Fn = Fn, N extends string = string> {
   readonly annotationName: N;
-  /** A method that carries the annotation must be matched by an advisor. */
+  /**
+   * A member that carries the annotation must be advised by an advisor
+   * whose pointcut refers to the annotation.
+   */
   readonly requiresAdvice: boolean;
   // biome-ignore lint/suspicious/noConfusingVoidType: void marks an annotation that takes no value
   (...value: [V] extends [void] ? [] : [value: V]): MethodOrClassDecorator<F>;
@@ -261,6 +264,12 @@ export interface JoinPoint<S extends Shape> {
   findAnnotation<V>(a: Annotation<V, any, any>): V | undefined;
   // Spelled without the `NestAnnotation` alias, through which `V` is not inferred.
   findAnnotation<V>(a: ReflectableDecorator<any, V>): V | undefined;
+  /**
+   * The delegate that implements the interface `token` for the target, which
+   * an aspect introduces with `@DeclareParents`. Throws `AspectUsageError`
+   * when the interface is not introduced into the class of the target.
+   */
+  introduced<I extends object>(token: Class<I>): I;
   /** `"UserService.findById(1)"`. */
   toString(): string;
 }
