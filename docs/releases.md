@@ -35,7 +35,7 @@ The workflow filename is part of every package's trusted-publisher registration,
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All twelve established package identities already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
+All thirteen established package identities already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
@@ -45,7 +45,7 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication and the verification of its trusted publisher, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-- `nestjs-aspect` (`packages/nestjs-aspect`): version 0.0.0 is on npm; the package stays held until its trusted publisher is verified.
+No package is currently held.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 

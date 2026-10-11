@@ -24,8 +24,6 @@
 pnpm add nestjs-aspect
 ```
 
-npm serves version `0.0.0`, which exports the declaration API only: annotations, pointcuts, the aspect and advice decorators, the advisor interfaces and the error classes. `AspectModule`, `AspectInspector`, introductions, the instantiation models and the `nestjs-aspect/rxjs` entry require version `0.0.1`.
-
 Requirements:
 
 - **Node.js 24** or later and **NestJS 12**.

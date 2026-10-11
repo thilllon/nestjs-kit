@@ -98,7 +98,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 ## Repository layout
 
-- `packages/nestjs-aspect`: Spring-style aspect-oriented programming for the classes a Nest application manages. npm serves version 0.0.0 with the declaration API; automated releases start once its trusted publisher is verified.
+- `packages/nestjs-aspect`: Spring-style aspect-oriented programming for the classes a Nest application manages.
 - `packages/nestjs-azure-storage-blob`: the Azure Blob Storage adapter.
 - `packages/nestjs-drizzle-pg`: the Drizzle ORM adapter for PostgreSQL.
 - `packages/nestjs-pg-listen`: the PostgreSQL notifications adapter.
