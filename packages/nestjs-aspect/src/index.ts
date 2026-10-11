@@ -7,6 +7,11 @@ export {
 } from "./annotation";
 export { promiseAdapter } from "./advice";
 export { AspectModule } from "./aspect.module";
+export {
+  type AdvisedMember,
+  AspectInspector,
+  type MemberAdvisor,
+} from "./aspect-inspector";
 export type {
   AspectModuleOptions,
   AspectReportLevel,
@@ -29,6 +34,13 @@ export {
   AspectNotReadyError,
   AspectUsageError,
 } from "./errors";
+export {
+  DeclareParents,
+  type DeclareParentsOptions,
+  type IntroductionDecorator,
+  introduced,
+  isIntroduced,
+} from "./introduction";
 export {
   type AllShapes,
   type AnyShapes,

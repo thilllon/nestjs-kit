@@ -192,18 +192,6 @@ describe("compileAspect", () => {
     expect(() => compileAspect(Forgotten, unresolved)).toThrow(/@Aspect/);
   });
 
-  it.each(["perTarget", "perClass"] as const)(
-    "rejects the %s instantiation model",
-    (instantiation) => {
-      @Aspect({ instantiation })
-      class Scoped {}
-
-      expect(() => compileAspect(Scoped, unresolved)).toThrow(
-        AspectConfigurationError,
-      );
-    },
-  );
-
   it("rejects advice that is not a method", () => {
     @Aspect()
     class Accessor {

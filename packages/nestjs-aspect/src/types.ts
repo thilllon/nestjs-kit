@@ -261,6 +261,12 @@ export interface JoinPoint<S extends Shape> {
   findAnnotation<V>(a: Annotation<V, any, any>): V | undefined;
   // Spelled without the `NestAnnotation` alias, through which `V` is not inferred.
   findAnnotation<V>(a: ReflectableDecorator<any, V>): V | undefined;
+  /**
+   * The delegate that implements the interface `token` for the target, which
+   * an aspect introduces with `@DeclareParents`. Throws `AspectUsageError`
+   * when the interface is not introduced into the class of the target.
+   */
+  introduced<I extends object>(token: Class<I>): I;
   /** `"UserService.findById(1)"`. */
   toString(): string;
 }

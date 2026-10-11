@@ -48,9 +48,17 @@ export const ADVISOR_METADATA: unique symbol = Symbol.for(
 );
 
 /**
+ * A result whose settlement advice can follow: a promise, or a value with a
+ * `subscribe` method, such as an Observable, which a `ReturnValueAdapter`
+ * follows.
+ */
+type Deferred = PromiseLike<any> | { subscribe: Fn };
+
+/**
  * Return type required of before, after, afterReturning and afterThrowing
  * advice: `void`, or also a promise when the join point is or may be
- * asynchronous.
+ * asynchronous. A join point that returns a value with a `subscribe` method
+ * may be asynchronous: whether an adapter follows it is known at run time.
  */
 export type AdviceResult<S extends Shape> = [S["returns"]] extends [
   PromiseLike<any>,
@@ -58,8 +66,8 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
   ? void | PromiseLike<void>
   : unknown extends S["returns"]
     ? void | PromiseLike<void>
-    : // A union with a promise member, as `or()` of a synchronous and an asynchronous method produces.
-      [Extract<S["returns"], PromiseLike<any>>] extends [never]
+    : // Also a union with such a member, as `or()` of a synchronous and an asynchronous method produces.
+      [Extract<S["returns"], Deferred>] extends [never]
       ? // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
         void
       : void | PromiseLike<void>;

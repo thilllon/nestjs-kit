@@ -59,12 +59,12 @@ function compareOrder(a: number | undefined, b: number | undefined): number {
  * afterReturning, afterThrowing; the same kind in declaration order.
  *
  * Each advisor carries an `AspectAdvice` bound to `options.resolveAspect`,
- * the aspect's `order` and `source: { type, methodName, kind }`.
+ * which selects the instance for the instantiation model of the aspect, the
+ * aspect's `order` and `source: { type, methodName, kind }`.
  *
  * Throws `AspectConfigurationError` when the class is not an `@Aspect`, when it
  * extends another `@Aspect` class, whose advice it would run a second time,
- * when an advice method is not a function on its prototype chain, or when the
- * aspect declares an instantiation model other than `"singleton"`.
+ * or when an advice method is not a function on its prototype chain.
  */
 export function compileAspect(
   aspectType: Class,
@@ -81,11 +81,6 @@ export function compileAspect(
   if (parent) {
     throw new AspectConfigurationError(
       `The aspect ${aspectType.name} extends the aspect ${parent.name}, whose advice would run once for each of them. An aspect inherits advice only from a class without @Aspect.`,
-    );
-  }
-  if (metadata.instantiation !== "singleton") {
-    throw new AspectConfigurationError(
-      `${aspectType.name} declares the instantiation model "${metadata.instantiation}"; only "singleton" is supported`,
     );
   }
   const { resolveAspect, registration } = options;

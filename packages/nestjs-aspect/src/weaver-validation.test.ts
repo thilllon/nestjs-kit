@@ -243,7 +243,7 @@ describe("bootstrap validation", () => {
     const error = await initError({ providers: [Service, Helping] });
     expect(error).toBeInstanceOf(AspectConfigurationError);
     expect(String(error)).toContain(
-      "aspects and advisors are never advised: Helping.helper (@RetryableOnAspect).",
+      "aspects, advisors, module classes and the classes of the exclude option are never advised: Helping.helper (@RetryableOnAspect).",
     );
   });
 
@@ -285,16 +285,12 @@ describe("bootstrap validation", () => {
     );
     expect(String(error)).toContain("The advisor FromValue is the instance");
 
-    const { moduleRef, logger } = await initWoven(
-      { providers },
-      { strict: false },
+    // No call could report advice that never runs, so strict mode does not
+    // decide this error.
+    expect(String(await initError({ providers }, { strict: false }))).toBe(
+      String(error),
     );
-    moduleRef.get(Service).run();
     expect(log).toEqual([]);
-    expect(logger.messages("warn")).toEqual([
-      expect.stringContaining("The aspect FromFactory"),
-      expect.stringContaining("The advisor FromValue"),
-    ]);
   });
 
   it("reports an invalid advisor instance as a validation problem", async () => {

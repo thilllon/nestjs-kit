@@ -1,9 +1,9 @@
 // The dispatcher stub that replaces a woven member on a class prototype.
 
-import { AspectConfigurationError } from "./errors";
+import { AspectConfigurationError, AspectUsageError } from "./errors";
 import { ORIGINAL } from "./method-ref";
 import type { Class, Fn, JoinPointKind, MethodRef } from "./types";
-import { resolveContext } from "./weaving-context";
+import { registerStub, resolveContext, stubRecord } from "./weaving-registry";
 
 /** Descriptor field that holds the function of a join point kind. */
 const DESCRIPTOR_FIELD = {
@@ -12,26 +12,20 @@ const DESCRIPTOR_FIELD = {
   setter: "set",
 } as const;
 
-/** Own property of a dispatcher stub that holds the class it is installed on. */
-const OWNER: unique symbol = Symbol.for("nestjs-aspect:stub-owner");
-
 /** Join point kind of each accessor field of a property descriptor. */
 const ACCESSOR_KIND = { get: "getter", set: "setter" } as const;
 
-/** True for a dispatcher stub of any copy of the package. */
+/**
+ * True for a dispatcher stub of any copy of the package. The registry of the
+ * process decides: a function that only carries the `ORIGINAL` property of a
+ * stub is none.
+ */
 export function isStub(value: unknown): value is Fn {
-  return typeof value === "function" && Object.hasOwn(value, ORIGINAL);
+  return stubRecord(value) !== undefined;
 }
 
 function isStubOf(value: unknown, owner: Class): boolean {
-  return (
-    isStub(value) &&
-    (value as unknown as Record<symbol, unknown>)[OWNER] === owner
-  );
-}
-
-function originalOf(stub: Fn): Fn {
-  return (stub as unknown as Record<symbol, Fn>)[ORIGINAL];
+  return stubRecord(value)?.owner === owner;
 }
 
 /** The nearest descriptor of `name` along the prototype chain. */
@@ -65,6 +59,7 @@ function createStub(
   name: string | symbol,
   kind: JoinPointKind,
   original: Fn,
+  introduced = false,
 ): Fn {
   const stub = function (this: unknown, ...args: unknown[]): unknown {
     const context = resolveContext(this, owner);
@@ -82,7 +77,7 @@ function createStub(
   });
   Object.setPrototypeOf(stub, original);
   Object.defineProperty(stub, ORIGINAL, { value: original });
-  Object.defineProperty(stub, OWNER, { value: owner });
+  registerStub(stub, { owner, original, introduced });
   return stub;
 }
 
@@ -100,7 +95,10 @@ function createStub(
  *   other accessor gets a stub of the class too, which runs the original
  *   function until an application weaves that accessor.
  *
- * Throws `AspectConfigurationError` when the property cannot be redefined.
+ * Throws `AspectConfigurationError` when the property cannot be redefined,
+ * and when the function on the prototype is not the one `method` describes:
+ * it carries the `ORIGINAL` property of a stub without being one, so the
+ * member cannot be woven reliably.
  */
 export function installStub(method: MethodRef): void {
   const { targetType, name, kind, original } = method;
@@ -111,6 +109,12 @@ export function installStub(method: MethodRef): void {
     return;
   }
   const descriptor = { ...(own ?? findDescriptor(prototype, name)) };
+  const current: unknown = descriptor[field];
+  if ((stubRecord(current)?.original ?? current) !== original) {
+    throw new AspectConfigurationError(
+      `${targetType.name}.${String(name)} cannot be woven: the function on its prototype carries the stub marker of nestjs-aspect without being a stub of it`,
+    );
+  }
   for (const other of ["get", "set"] as const) {
     const inherited: unknown = descriptor[other];
     if (
@@ -122,7 +126,7 @@ export function installStub(method: MethodRef): void {
         targetType,
         name,
         ACCESSOR_KIND[other],
-        originalOf(inherited),
+        stubRecord(inherited)?.original ?? inherited,
       );
     }
   }
@@ -137,4 +141,61 @@ export function installStub(method: MethodRef): void {
       { cause: error },
     );
   }
+}
+
+/**
+ * Installs the stub of a member that an introduction adds to `type` and
+ * returns the function the stub runs for an object whose application does
+ * not declare the introduction: the member the class already has, or, for a
+ * member that only the introduction adds, a function that raises
+ * `AspectUsageError`. The prototype is shared by every application, so the
+ * member exists for all of them.
+ */
+export function installIntroductionStub(
+  type: Class,
+  name: string | symbol,
+  kind: JoinPointKind,
+): Fn {
+  const prototype: object = type.prototype;
+  const field = DESCRIPTOR_FIELD[kind];
+  const own = Object.getOwnPropertyDescriptor(prototype, name);
+  const record = stubRecord(own?.[field]);
+  if (record?.owner === type) {
+    return record.original;
+  }
+  const current: unknown = (own ?? findDescriptor(prototype, name))?.[field];
+  const existing =
+    typeof current === "function"
+      ? (stubRecord(current)?.original ?? (current as Fn))
+      : undefined;
+  const original =
+    existing ??
+    function missing(): never {
+      throw new AspectUsageError(
+        `${type.name}.${String(name)} is introduced by an aspect, and the application of the instance it was called on is closed or does not declare the introduction`,
+      );
+    };
+  const introduced = existing === undefined || stubRecord(current)?.introduced;
+  const stub = createStub(type, name, kind, original, introduced);
+  try {
+    Object.defineProperty(
+      prototype,
+      name,
+      kind === "method"
+        ? { value: stub, writable: true, enumerable: false, configurable: true }
+        : {
+            get: own?.get,
+            set: own?.set,
+            [field]: stub,
+            enumerable: false,
+            configurable: true,
+          },
+    );
+  } catch (error) {
+    throw new AspectConfigurationError(
+      `${type.name}.${String(name)} cannot be introduced: its prototype does not allow the property to be defined`,
+      { cause: error },
+    );
+  }
+  return original;
 }

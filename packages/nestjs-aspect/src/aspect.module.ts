@@ -15,6 +15,7 @@ import {
   ConfigurableModuleClass,
   MODULE_OPTIONS_TOKEN,
 } from "./aspect.module-definition";
+import { AspectInspector } from "./aspect-inspector";
 import { AspectWeaver } from "./weaver";
 
 /**
@@ -53,7 +54,9 @@ import { AspectWeaver } from "./weaver";
           AspectWeaver.assertSingleton(container, AspectModule),
       }),
     },
+    AspectInspector,
   ],
+  exports: [AspectInspector],
 })
 export class AspectModule
   extends ConfigurableModuleClass

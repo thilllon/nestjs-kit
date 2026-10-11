@@ -1,12 +1,12 @@
 import "reflect-metadata";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { Inject, Injectable, Scope } from "@nestjs/common";
-import { ContextIdFactory } from "@nestjs/core";
+import { Inject, Injectable } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { AspectModule } from "./aspect.module";
 import { Aspect, Before } from "./aspect-decorators";
+import { AspectUsageError } from "./errors";
 import { P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
@@ -201,39 +201,13 @@ describe("applications that share a class", () => {
     }
     expect(await abandonApplications()).toEqual(new Error("boom"));
     expect(isStub(Shared.prototype.run)).toBe(true);
-    new Shared().run();
-    expect(log.splice(0)).toEqual(["abandoned", "run"]);
+    // Both applications count as live: nothing tells which of them advises
+    // an instance that neither created.
+    expect(() => new Shared().run()).toThrow(AspectUsageError);
+    expect(log).toEqual([]);
 
     await collectGarbage();
     new Shared().run();
     expect(log).toEqual(["run"]);
-  });
-
-  it("attributes an instance no container holds to the most recent application, with one warning", async () => {
-    const log: string[] = [];
-
-    @Injectable({ scope: Scope.REQUEST })
-    class PerRequest {
-      run() {}
-    }
-
-    const first = await compileWoven({
-      providers: [PerRequest, labelling(PerRequest, "first", log)],
-    });
-    const second = await compileWoven({
-      providers: [PerRequest, labelling(PerRequest, "second", log)],
-    });
-    for (const { moduleRef } of [first, second, first]) {
-      const instance = await moduleRef.resolve(
-        PerRequest,
-        ContextIdFactory.create(),
-      );
-      instance.run();
-      instance.run();
-    }
-    expect(log).toEqual(Array(6).fill("second"));
-    expect(second.logger.messages("warn")).toEqual([
-      expect.stringContaining("Several live applications weave PerRequest"),
-    ]);
   });
 });
