@@ -1,12 +1,13 @@
 import "reflect-metadata";
 import { Injectable, Module, Scope } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAnnotation } from "./annotation";
 import { AspectModule } from "./aspect.module";
-import { Around, Aspect, Before } from "./aspect-decorators";
+import { Advisor, Around, Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
 import { P } from "./pointcut-designators";
-import type { AnyShape, JoinPoint, JP, PJP } from "./types";
+import type { AnyShape, JoinPoint, JP, MethodInterceptor, PJP } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -117,7 +118,7 @@ describe("bootstrap validation", () => {
     );
   });
 
-  it("rejects a requiresAdvice annotation that no advisor matches, listing the members", async () => {
+  it("rejects a requiresAdvice annotation that no advisor handles, listing the members", async () => {
     const Retryable = createAnnotation<"Retryable">("Retryable", {
       requiresAdvice: true,
     });
@@ -145,7 +146,8 @@ describe("bootstrap validation", () => {
       @Retryable()
       place() {}
     }
-    const placing = P.method(OrderService, "place");
+    const placing = P.within(OrderService).and(P.annotated(Retryable));
+    const everything = P.within(UserService, OrderService);
 
     @Aspect()
     class OrderAspect {
@@ -155,8 +157,15 @@ describe("bootstrap validation", () => {
       }
     }
 
+    /** Matches the annotated members without referring to their annotations. */
+    @Aspect()
+    class LoggingAspect {
+      @Before(everything)
+      record(_jp: JP<typeof everything>) {}
+    }
+
     const error = await initError({
-      providers: [UserService, OrderService, OrderAspect],
+      providers: [UserService, OrderService, OrderAspect, LoggingAspect],
     });
     expect(error).toBeInstanceOf(AspectConfigurationError);
     expect(String(error)).toContain(
@@ -164,6 +173,152 @@ describe("bootstrap validation", () => {
     );
     expect(String(error)).not.toContain("rename");
     expect(String(error)).not.toContain("OrderService");
+  });
+
+  it("accepts a requiresAdvice annotation under a composed or a custom pointcut", async () => {
+    const Retryable = createAnnotation<"RetryableComposed">(
+      "RetryableComposed",
+      { requiresAdvice: true },
+    );
+    const Cached = createAnnotation<"CachedComposed">("CachedComposed", {
+      requiresAdvice: true,
+    });
+
+    @Injectable()
+    class Service {
+      @Retryable()
+      find() {}
+
+      @Cached()
+      load() {}
+    }
+    // Guarantees neither annotation and refers to both.
+    const either = P.annotated(Retryable).or(P.annotated(Cached));
+    const custom = P.matching({
+      classFilter: { matches: (classRef) => classRef.type === Service },
+      methodMatcher: { isRuntime: false, matches: () => true },
+    });
+
+    @Aspect()
+    class Composed {
+      @Before(either)
+      record(_jp: JP<typeof either>) {}
+    }
+
+    @Aspect()
+    class Custom {
+      @Before(custom)
+      record(_jp: JP<typeof custom>) {}
+    }
+
+    await expect(
+      initError({ providers: [Service, Composed] }),
+    ).resolves.toBeUndefined();
+    await expect(
+      initError({ providers: [Service, Custom] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a requiresAdvice annotation on a member of an aspect", async () => {
+    const Retryable = createAnnotation<"RetryableOnAspect">(
+      "RetryableOnAspect",
+      { requiresAdvice: true },
+    );
+
+    @Injectable()
+    class Service {
+      run() {}
+    }
+    const run = P.method(Service, "run");
+
+    @Aspect()
+    class Helping {
+      @Before(run)
+      record(_jp: JP<typeof run>) {}
+
+      @Retryable()
+      helper() {}
+    }
+
+    const error = await initError({ providers: [Service, Helping] });
+    expect(error).toBeInstanceOf(AspectConfigurationError);
+    expect(String(error)).toContain(
+      "aspects and advisors are never advised: Helping.helper (@RetryableOnAspect).",
+    );
+  });
+
+  it("rejects an aspect or advisor that a factory or value provider supplies", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run() {}
+    }
+    const run = P.method(Service, "run");
+
+    @Aspect()
+    class FromFactory {
+      @Before(run)
+      record(_jp: JP<typeof run>) {
+        log.push("factory");
+      }
+    }
+
+    @Advisor()
+    class FromValue {
+      static readonly pointcut = run;
+
+      readonly advice: MethodInterceptor = {
+        invoke: (invocation) => invocation.proceed(),
+      };
+    }
+    const providers = [
+      Service,
+      { provide: FromFactory, useFactory: () => new FromFactory() },
+      { provide: "ADVISOR", useValue: new FromValue() },
+    ];
+
+    const error = await initError({ providers });
+    expect(error).toBeInstanceOf(AspectConfigurationError);
+    expect(String(error)).toContain(
+      "The aspect FromFactory is the instance of a factory, value or alias provider, so its advice does not run.",
+    );
+    expect(String(error)).toContain("The advisor FromValue is the instance");
+
+    const { moduleRef, logger } = await initWoven(
+      { providers },
+      { strict: false },
+    );
+    moduleRef.get(Service).run();
+    expect(log).toEqual([]);
+    expect(logger.messages("warn")).toEqual([
+      expect.stringContaining("The aspect FromFactory"),
+      expect.stringContaining("The advisor FromValue"),
+    ]);
+  });
+
+  it("rejects options that depend on a request-scoped provider", async () => {
+    @Injectable({ scope: Scope.REQUEST })
+    class Tenant {}
+
+    @Module({
+      providers: [Tenant],
+      exports: [Tenant],
+    })
+    class TenantModule {}
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        AspectModule.forRootAsync({
+          imports: [TenantModule],
+          inject: [Tenant],
+          useFactory: () => ({}),
+        }),
+      ],
+    }).compile();
+    await expect(moduleRef.init()).rejects.toThrow(
+      "The options of AspectModule.forRootAsync depend on a request-scoped or transient provider",
+    );
   });
 
   it("warns about a pointcut that matches nothing and about aspects that share an order", async () => {
@@ -289,10 +444,18 @@ describe("bootstrap validation", () => {
     expect(silent.logger.entries).toEqual([]);
   });
 
-  it("rejects a second import with other options and an unknown report level", async () => {
-    await expect(
-      compileWoven({ imports: [AspectModule.forRoot({ strict: false })] }),
-    ).rejects.toThrow("AspectModule is imported 2 times");
+  it("rejects a second registration and an unknown report level", async () => {
+    @Module({
+      imports: [AspectModule.forRoot()],
+    })
+    class FeatureModule {}
+
+    // Every forRoot() call registers a module of its own, whatever its options.
+    for (const second of [AspectModule, FeatureModule]) {
+      await expect(compileWoven({ imports: [second] })).rejects.toThrow(
+        "AspectModule is registered 2 times. Import AspectModule.forRoot() or forRootAsync() once",
+      );
+    }
     await expect(compileWoven({}, { report: "info" as never })).rejects.toThrow(
       AspectConfigurationError,
     );

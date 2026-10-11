@@ -112,7 +112,7 @@ run from after init
 NestFactory.create / Test.createTestingModule().compile()
  └─ DependenciesScanner.scan()                 modules, wrappers and metatypes are final
  └─ InstanceLoader.createInstancesOfDependencies()
-     └─ ASPECT_WEAVER factory (inside the @Global AspectModule)   ◄── phase 1
+     └─ ASPECT_WEAVER factory (inside the @Global AspectModule)   ◄── stage 1
           1. Collect aspects/advisors: wrappers whose metatype has @Aspect / @Advisor
           2. Compile aspects → Advisor[] (pointcut + advice descriptor + order);
              an @Advisor class contributes its static pointcut
@@ -125,29 +125,43 @@ NestFactory.create / Test.createTestingModule().compile()
           4. Register the WeavingContext of this application
  └─ (other providers are instantiated)
  └─ app.init(): registerRouter → captures stubs; callInitHook → already advised
- └─ AspectModule.onModuleInit                                    ◄── phase 2
-          - weave the classes that became known since phase 1: the class of the
+ └─ AspectModule.onModuleInit                                    ◄── stage 2
+          - weave the classes that became known since stage 1: the class of the
             singleton instance of a factory/value provider, and middleware classes
           - validate scopes (§5.6) and the configuration (§5.8); print the weaving report
  └─ AspectModule.onApplicationShutdown → unregister the WeavingContext
 ```
 
-Phase 1 needs no instance. Aspects compile from class metadata, and an `@Advisor` class exposes
+Stage 1 needs no instance. Aspects compile from class metadata, and an `@Advisor` class exposes
 its pointcut as a static member (§4.7). The instance of an aspect or advisor is read from its
 instance wrapper on the first call that needs it, once Nest has constructed it (the wrapper's
 `initTime` is set); until then the wrapper holds a placeholder object.
 
-Phase 2 scans the container again. A class whose registrations changed is matched again with the
+Stage 2 scans the container again. A class whose registrations changed is matched again with the
 complete list of its provider tokens, so `P.bean('TOKEN')` selects the instance of a factory
 provider. Nest fills a module's middleware map in `registerModules()`, after the instantiation
-phase and before `registerRouter()`: a middleware class that is no provider is woven in phase 2,
+phase and before `registerRouter()`: a middleware class that is no provider is woven in stage 2,
 after the router has bound its `use` method. A validation failure in strict mode closes the
 context, because Nest does not run the shutdown hooks of an application whose `init()` failed.
 
+An aspect or `@Advisor` class is woven only when it is registered as a class, by itself or with
+`useClass`. One that stage 2 finds as the instance of a factory, value or alias provider has no
+compiled advisors and is a validation error (§5.8). A `useExisting` token is a factory provider
+in Nest, so `P.bean` matches it in stage 2.
+
+Nest runs the `onModuleInit` hooks of global modules in registration order and their
+`onApplicationShutdown` hooks in reverse order. `AspectModule` is imported first: a global module
+registered before it runs its `onModuleInit` hooks before stage 2 and its `onApplicationShutdown`
+hooks after the context is closed. Stage 2 warns about such a module when one of its instances
+has an `onApplicationShutdown` hook.
+
 Guarantee: **advice is active from the first lifecycle hook and at every framework entry point**.
-Calls made inside a constructor are not guaranteed to be advised (Spring has the same caveat: the
-proxy is created after initialization). A call that reaches a stub before its owning aspect is
-instantiated throws `AspectNotReadyError` instead of silently skipping the advice.
+Calls made while the container instantiates providers, in a constructor or a provider factory,
+are not guaranteed to be advised (Spring has the same caveat for constructors: the proxy is
+created after initialization). Such a call runs without advice before the weaver factory has run,
+which `forRootAsync` delays by the time its options take to resolve. After that, a call that
+reaches a stub before its owning aspect or advisor is instantiated throws `AspectNotReadyError`
+instead of silently skipping the advice.
 
 ### 3.4 Dispatcher stub
 
@@ -178,9 +192,15 @@ function installStub(proto, key, original, kind /* method | get | set */) {
   class of the instance, so a pointcut that excludes the subclass (`P.bean`, `P.inModule`, the
   `exclude` option) holds. An instance of a class the container does not know runs the chain of
   the superclass.
-- A getter and a setter of one property are replaced independently. The accessor that is not
-  matched keeps the function it resolves to when the stub is installed; classes are woven
-  superclasses first, so that function is the stub of a woven superclass accessor.
+- A stub records the class it is installed on, next to `ORIGINAL`. A class has its own stub of a
+  member when the prototype holds a stub that names the class.
+- A getter and a setter of one property are replaced independently. An accessor that is not
+  matched keeps its function, except for the stub of a superclass accessor: defining the property
+  on the subclass prototype makes both accessors own members, so the other accessor gets a stub
+  of the subclass as well. That stub runs the original function until an application weaves the
+  accessor, which keeps the subclass rule above for both accessors.
+- An instance of a class of the `exclude` option runs the original function in every stub it
+  reaches, including a `super` call from an override.
 - Stubs are never removed. A stub whose class no live context weaves calls the original function.
 - Nest lifecycle hooks (`onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`,
   `beforeApplicationShutdown`, `onApplicationShutdown`) and `constructor` are excluded from broad
@@ -237,8 +257,13 @@ export class AppModule {}
 
 `AspectModule.forRootAsync(...)` takes the same options from a factory, a class or an existing
 provider. The weaver is a factory provider that injects the options, so Nest resolves them first
-and weaving still happens inside the instantiation phase: the guarantee of §3.3 is unchanged.
-Importing the module twice with different options is an `AspectConfigurationError`.
+and weaving still happens inside the instantiation phase. The options come from singleton
+providers: a request-scoped or transient dependency makes Nest skip the weaver factory, which a
+provider without dependencies of its own reports as an `AspectConfigurationError` in
+`onModuleInit`. Every `forRoot()` call registers a module of its own, so registering the module
+twice is an `AspectConfigurationError`, whatever the options. The weaver also claims the
+`ModulesContainer` in the process-wide registry (§5.5), which rejects a second weaver from
+another copy of the package in the same application.
 
 Testing: weaving happens during `compile()`, so advice works without `module.init()`
 (lifecycle hooks, the bootstrap validation and the weaving report still need it).
@@ -504,7 +529,7 @@ export class TransactionAdvisor {
 ```
 
 - The pointcut of an `@Advisor` class is the static member `pointcut`; the instance supplies
-  `advice` and `order`. Phase 1 of the weaving pipeline (§3.3) matches pointcuts before any instance exists, and
+  `advice` and `order`. Stage 1 of the weaving pipeline (§3.3) matches pointcuts before any instance exists, and
   Nest has no way to instantiate chosen providers ahead of the others, as Spring does for advisor
   beans. A pointcut read from the instance could be matched only in `onModuleInit`, after the
   router has bound route handlers and after earlier lifecycle hooks. The decorator rejects a class
@@ -609,18 +634,30 @@ one registry per process, stored on `globalThis` under a `Symbol.for` key, so th
 contexts of two copies of the package (the CJS build next to the ESM build) work together. The
 stub resolves the context for `this` as follows:
 
-1. `WeakMap<instance, WeavingContext>` hit → use it. When that context is closed, call the
-   original: an instance of a closed application is not adopted by another application.
-2. Otherwise look at the set of live contexts that wove this class:
-   - none → call the original (an unmanaged instance, for example `new UserService()` in a unit
-     test, or an application that is already closed);
-   - one → use it and cache it in the `WeakMap`; this includes an object created with `new` while
-     that application is live;
-   - several (parallel applications in one process) → static instances are compared against each
-     context's instance wrappers, and scoped instances fall back to the most recently created
-     context and print a warning once per class.
-3. `onApplicationShutdown` unregisters the context. Stubs of classes with no remaining context
-   pass straight through.
+1. `WeakMap<instance, WeakRef<WeavingContext>>` hit on a live context → use it.
+2. Otherwise the live context whose container holds the instance takes it and is cached. A
+   context is a candidate for every class it examined, woven or not, so an application that
+   excludes the class or matches nothing in it claims its own instances and runs the original
+   for them, also while another application weaves the class.
+3. An instance that no live container holds and that was attributed before runs the original: it
+   belongs to an application that is closed or gone and is not adopted by another one. `close()`
+   attributes the instances its container holds to the closing context, so this covers an instance
+   that was never called while its application was live. An instance that the container of a later
+   application holds as well, such as a shared `useValue` object, is taken by step 2.
+4. Any other object (a request-scoped or transient instance, an object under construction, an
+   object created with `new`) goes to the live contexts that weave the class of the stub:
+   - none → call the original;
+   - one → use it and cache it;
+   - several (parallel applications in one process) → the most recently created context, which
+     prints a warning once per class.
+5. `onApplicationShutdown` closes the context. Stubs of classes with no remaining context pass
+   straight through.
+
+The registry refers to contexts through `WeakRef`. An application that is never closed (a failed
+`compile()` or `init()`, for which Nest runs no shutdown hook, or a test module that is dropped)
+leaves the registry when it is garbage collected, and the registry keeps no container alive. Until
+then it counts as a live application. An application without `AspectModule` has no context: its
+instances fall under step 4.
 
 Sequential test suites (create → close → create) are the common case and work correctly.
 
@@ -655,15 +692,26 @@ Validation runs in `AspectModule.onModuleInit`. The errors of one application ar
 as one `AspectConfigurationError`; with `strict: false` they are logged as warnings.
 
 - Advice decorator used in a class without `@Aspect` → error.
-- `requiresAdvice` annotation with no matching advisor → error listing the methods. A class
-  annotation requires advice on the default join points of the class; an accessor or a lifecycle
-  hook only for an annotation it carries itself.
+- `requiresAdvice` annotation with no matching advisor that handles it → error listing the
+  methods. An advisor handles an annotation when its pointcut refers to it (`P.annotated`,
+  `P.withinAnnotated`, `P.targetAnnotated`, in any position of a composition) or when the pointcut
+  has a caller-supplied matcher (`P.matching`, a hand-written `PointcutLike`), whose annotations
+  cannot be told. A broad advisor such as `P.within(UserService)` does not stand in for a missing
+  aspect. A class annotation requires advice on the default join points of the class; an accessor
+  or a lifecycle hook only for an annotation it carries itself.
+- `requiresAdvice` annotation on a member of an aspect or advisor → error: they are never advised.
+- Aspect or advisor that is the instance of a factory, value or alias provider → error (§3.3).
+- `forRootAsync` options that depend on a request-scoped or transient provider → error (§4.2).
 - Request-scoped or transient aspect or advisor → error. Without strict mode its advice raises
   `AspectNotReadyError` on every call, because no singleton instance exists.
 - Pointcut that matches nothing → warning (Spring pitfall: typos fail silently).
 - Identical `order`, or no `order`, between different aspects advising the same join point →
   warning, once per pair of aspects.
 - Aspect or advisor class registered in several modules → warning.
+- Global module with an `onApplicationShutdown` hook registered before `AspectModule` → warning
+  (§3.3).
+- Aspect that extends another `@Aspect` class → `AspectConfigurationError` when the aspect is
+  compiled, in every mode (Spring: "cannot extend concrete aspect").
 - Async advice on a synchronous join point (when not statically known) → `AspectUsageError` on the
   first call, in every mode.
 - Introduction member conflict and non-singleton dependency of a `perTarget` aspect → error
@@ -682,21 +730,23 @@ as one `AspectConfigurationError`; with `strict: false` they are logged as warni
 
 ## 6. Deliberate differences from Spring
 
-| Topic                                       | Spring AOP                       | This design                                         | Reason                                                                          |
-| ------------------------------------------- | -------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Self-invocation                             | Not advised (proxy)              | **Advised**                                         | In-place weaving; removes Spring's most common pitfall (AspectJ semantics).     |
-| `this` versus `target`                      | Different objects                | The same object                                     | There is no proxy. `P.target` covers both.                                      |
-| Order of same-kind advice within one aspect | Undefined                        | Declaration order                                   | TS decorators preserve it.                                                      |
-| Asynchronous results                        | Advice sees the future/publisher | Advice follows settlement                           | C4.                                                                             |
-| Join point kinds                            | Methods                          | Methods + accessors (opt-in with `P.kind`)          | Cheap under prototype weaving.                                                  |
-| Pointcut language                           | AspectJ strings                  | Typed combinators                                   | C1.                                                                             |
-| Packages                                    | `within(pkg..*)`                 | `P.inModule`                                        | C3.                                                                             |
-| Silent non-matches                          | Silent                           | `requiresAdvice`, match warnings                    | Determinism goal.                                                               |
-| `Advised` mutation                          | Supported                        | Read-only inspector                                 | Prototype-level weaving is shared, so mutations leak between instances.         |
-| Introduction conflicts                      | The introduction wins            | Error unless `override`                             | Determinism goal.                                                               |
-| `perthis`/`pertarget`                       | Separate                         | Merged into `perTarget`                             | There is no proxy.                                                              |
-| Pointcut of an `Advisor` bean               | `getPointcut()` of the instance  | Static member `pointcut` of the class               | Nest cannot instantiate advisors before other providers (§4.7).                 |
-| Objects created with `new`                  | Never advised                    | Advised while one live application weaves the class | The stub is on the prototype and cannot tell them from scoped instances (§5.5). |
+| Topic                                       | Spring AOP                       | This design                                       | Reason                                                                          |
+| ------------------------------------------- | -------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Self-invocation                             | Not advised (proxy)              | **Advised**                                       | In-place weaving; removes Spring's most common pitfall (AspectJ semantics).     |
+| `this` versus `target`                      | Different objects                | The same object                                   | There is no proxy. `P.target` covers both.                                      |
+| Order of same-kind advice within one aspect | Undefined                        | Declaration order                                 | TS decorators preserve it.                                                      |
+| Asynchronous results                        | Advice sees the future/publisher | Advice follows settlement                         | C4.                                                                             |
+| Join point kinds                            | Methods                          | Methods + accessors (opt-in with `P.kind`)        | Cheap under prototype weaving.                                                  |
+| Pointcut language                           | AspectJ strings                  | Typed combinators                                 | C1.                                                                             |
+| Packages                                    | `within(pkg..*)`                 | `P.inModule`                                      | C3.                                                                             |
+| Silent non-matches                          | Silent                           | `requiresAdvice`, match warnings                  | Determinism goal.                                                               |
+| `Advised` mutation                          | Supported                        | Read-only inspector                               | Prototype-level weaving is shared, so mutations leak between instances.         |
+| Introduction conflicts                      | The introduction wins            | Error unless `override`                           | Determinism goal.                                                               |
+| `perthis`/`pertarget`                       | Separate                         | Merged into `perTarget`                           | There is no proxy.                                                              |
+| Pointcut of an `Advisor` bean               | `getPointcut()` of the instance  | Static member `pointcut` of the class             | Nest cannot instantiate advisors before other providers (§4.7).                 |
+| Objects created with `new`                  | Never advised                    | Advised while a live application weaves the class | The stub is on the prototype and cannot tell them from scoped instances (§5.5). |
+| Call before the aspect instance exists      | The aspect bean is created       | `AspectNotReadyError`                             | Nest cannot instantiate a provider on demand during instantiation (§3.3).       |
+| Aspect returned by a factory                | A regular aspect (`@Bean`)       | Rejected at bootstrap                             | A factory provider has no class before its instance exists (§3.3).              |
 
 ---
 
@@ -789,7 +839,7 @@ src/
   invocation.ts                 chain construction and traversal, clone for proceed
   join-point.ts                 JoinPoint / ProceedingJoinPoint
   method-ref.ts                 ClassRef / MethodRef, ORIGINAL
-  weaver.ts                     candidate scan, static matching, phases 1 and 2, validation
+  weaver.ts                     candidate scan, static matching, stages 1 and 2, validation
   weaving-stub.ts               dispatcher stub, metadata preservation
   weaving-context.ts            WeavingContext, process-wide registry (§5.5)
   weaving-report.ts             report and diagnostic text
@@ -823,7 +873,7 @@ style of `docs/sketch/api.ts` (`@ts-expect-error` fixtures) are checked by the p
 
 ## 12. Accepted trade-offs
 
-- Calls made in a constructor before the weaver runs may not be advised (§3.3). A call made before
+- Calls made in a constructor or a provider factory before the weaver runs may not be advised (§3.3). A call made before
   the aspect is instantiated throws `AspectNotReadyError` instead of skipping the advice.
 - Parallel Nest applications in one process that weave the same class differently fall back to the
   "most recent context" for scoped instances (§5.5).
@@ -834,10 +884,22 @@ style of `docs/sketch/api.ts` (`@ts-expect-error` fixtures) are checked by the p
 - There is no live mutation of the advice chain.
 - A middleware class that is no provider is woven after the router has bound its `use` method
   (§3.3): `use` itself is not advised, the methods it calls are.
-- A factory or value provider is woven by the class of its singleton instance in weaving phase 2
+- A factory or value provider is woven by the class of its singleton instance in weaving stage 2
   (§3.3), so its
   advice is active from `AspectModule.onModuleInit` on. Request-scoped and transient factory
   providers are not woven.
-- An object created with `new` is advised while exactly one live application weaves its class
-  (§5.5).
+- An object created with `new` is advised while a live application weaves its class (§5.5).
+- An application that is never closed, such as one whose bootstrap failed, counts as live until
+  it is garbage collected (§5.5). Nest offers no hook for a failed bootstrap.
+- An application without `AspectModule` cannot claim its instances: another live application
+  that weaves their class advises them (§5.5).
+- A global module registered before `AspectModule` runs its `onApplicationShutdown` hooks without
+  advice and its `onModuleInit` hooks before stage 2 (§3.3).
+- Aspects and advisors are class providers; a factory, value or alias provider that supplies one
+  is rejected (§3.3).
+- `requiresAdvice` is satisfied only by an advisor whose pointcut refers to the annotation or has
+  a caller-supplied matcher; an aspect that finds the annotation with `jp.findAnnotation` under a
+  broad pointcut names it in the pointcut as well (§5.8).
+- `forRootAsync` widens the window in which provider factories run without advice by the time its
+  options take to resolve (§3.3).
 - Modules loaded with `LazyModuleLoader` are not woven (§11, question 5).

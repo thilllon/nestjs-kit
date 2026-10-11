@@ -161,6 +161,25 @@ describe("compileAspect", () => {
     ).toEqual([Derived, Derived]);
   });
 
+  it("rejects an aspect that extends another aspect", () => {
+    @Aspect()
+    class Parent {
+      @Before(anything)
+      inherited(): void {}
+    }
+
+    @Aspect()
+    class Child extends Parent {}
+
+    expect(() => compileAspect(Child, unresolved)).toThrow(
+      AspectConfigurationError,
+    );
+    expect(() => compileAspect(Child, unresolved)).toThrow(
+      "The aspect Child extends the aspect Parent",
+    );
+    expect(compileAspect(Parent, unresolved)).toHaveLength(1);
+  });
+
   it("rejects a class that is not an aspect", () => {
     class Forgotten {
       @Before(anything)

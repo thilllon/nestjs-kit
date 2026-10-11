@@ -39,7 +39,12 @@ import type {
   Pointcut,
   ReturnValueAdapter,
 } from "./types";
-import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
+import {
+  closeWoven,
+  compileWoven,
+  initWoven,
+  listenWoven,
+} from "./weaving-fixture";
 
 afterEach(closeWoven);
 
@@ -316,6 +321,85 @@ describe("dispatcher stubs", () => {
     expect(log).toEqual([]);
   });
 
+  it("leaves an excluded subclass unadvised when its override calls super", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class BaseService {
+      run() {
+        return "base";
+      }
+    }
+
+    @Injectable()
+    class Legacy extends BaseService {
+      override run() {
+        return `legacy ${super.run()}`;
+      }
+    }
+
+    const { moduleRef } = await compileWoven(
+      { providers: [BaseService, Legacy, recorder(P.name("run"), log)] },
+      { exclude: [Legacy] },
+    );
+    expect(moduleRef.get(Legacy).run()).toBe("legacy base");
+    expect(moduleRef.get(BaseService).run()).toBe("base");
+    expect(log).toEqual(["BaseService.run"]);
+  });
+
+  it("weaves both inherited accessors of a subclass with the advisors of the subclass", async () => {
+    const log: string[] = [];
+
+    @Injectable()
+    class BaseSettings {
+      private current = 1;
+
+      get level() {
+        return this.current;
+      }
+
+      set level(value: number) {
+        this.current = value;
+      }
+    }
+
+    @Injectable()
+    class UserSettings extends BaseSettings {}
+
+    /** Its getter is woven, its setter matches no advisor. */
+    @Injectable()
+    class ReadOnlySettings extends BaseSettings {}
+    const accessors = P.kind("getter").or(P.kind("setter"));
+
+    const { moduleRef } = await compileWoven({
+      providers: [
+        BaseSettings,
+        UserSettings,
+        ReadOnlySettings,
+        recorder(P.bean(BaseSettings).and(accessors), log, "base "),
+        recorder(P.bean(UserSettings).and(accessors), log, "user "),
+        recorder(P.bean(ReadOnlySettings).and(P.kind("getter")), log, "read "),
+      ],
+    });
+    const user = moduleRef.get(UserSettings);
+    user.level = 2;
+    expect(user.level).toBe(2);
+    expect(log.splice(0)).toEqual([
+      "user UserSettings.level",
+      "user UserSettings.level",
+    ]);
+
+    const readOnly = moduleRef.get(ReadOnlySettings);
+    readOnly.level = 3;
+    expect(readOnly.level).toBe(3);
+    expect(log.splice(0)).toEqual(["read ReadOnlySettings.level"]);
+
+    const base = moduleRef.get(BaseSettings);
+    base.level = 4;
+    expect(base.level).toBe(4);
+    expect(log).toEqual(["base BaseSettings.level", "base BaseSettings.level"]);
+  });
+
   it("weaves getters and setters independently when P.kind selects them", async () => {
     const log: string[] = [];
 
@@ -486,6 +570,40 @@ describe("aspects and advisors in a container", () => {
         ],
       }),
     ).rejects.toThrow(AspectNotReadyError);
+  });
+
+  it("raises AspectNotReadyError for a call that precedes the advisor instance", async () => {
+    @Injectable()
+    class Cache {
+      constructor(@Inject("SLOW") _slow: unknown) {
+        this.warm();
+      }
+
+      warm() {}
+    }
+
+    @Advisor()
+    class CacheAdvisor {
+      static readonly pointcut = P.method(Cache, "warm");
+
+      readonly advice: MethodInterceptor = {
+        invoke: (invocation) => invocation.proceed(),
+      };
+
+      constructor(readonly cache: Cache) {}
+    }
+
+    await expect(
+      compileWoven({
+        providers: [
+          Cache,
+          CacheAdvisor,
+          { provide: "SLOW", useFactory: () => sleep(5) },
+        ],
+      }),
+    ).rejects.toThrow(
+      "Cache.warm was called before an instance of the advisor CacheAdvisor exists",
+    );
   });
 
   it("runs an @Advisor class with a MethodInterceptor", async () => {
@@ -757,9 +875,7 @@ describe("enhancers and middleware", () => {
     }
 
     const { moduleRef } = await compileWoven({ imports: [PingModule] });
-    const app = moduleRef.createNestApplication();
-    await app.listen(0);
-    const url = (await app.getUrl()).replace("[::1]", "localhost");
+    const url = await listenWoven(moduleRef);
     expect(await (await fetch(`${url}/ping`)).text()).toBe("pong");
     // The router binds `TraceMiddleware.use` before the weaver learns of the
     // class, so that call is not advised; the calls it makes are.
@@ -851,9 +967,7 @@ describe("HTTP pipeline", () => {
         { provide: APP_FILTER, useClass: TeapotFilter },
       ],
     });
-    const app = moduleRef.createNestApplication();
-    await app.listen(0);
-    const url = (await app.getUrl()).replace("[::1]", "localhost");
+    const url = await listenWoven(moduleRef);
 
     const list = await fetch(`${url}/orders/list`);
     expect([list.status, await list.json()]).toEqual([200, ["order"]]);

@@ -2,8 +2,10 @@ import "reflect-metadata";
 import {
   Controller,
   Get,
+  Global,
   Injectable,
   Module,
+  type OnApplicationShutdown,
   type OnModuleInit,
   Scope,
   SetMetadata,
@@ -124,50 +126,118 @@ describe("AspectModule", () => {
   it("weaves before the router and the lifecycle hooks, and stops advising after close", async () => {
     const { AppModule, UserService, UserController, log } = createApplication();
     const app = await NestFactory.create(AppModule, { logger: false });
-    await app.listen(0);
-    const url = (await app.getUrl()).replace("[::1]", "localhost");
-
-    // The deepest non-global module runs its hook with advice in place.
-    expect(log).toEqual([
-      "deep onModuleInit",
-      "before UserService.load",
-      "afterReturning UserService.load",
-    ]);
-
-    log.length = 0;
-    const body = await (await fetch(`${url}/u`)).json();
-    expect(body).toEqual({ user: { id: 1 }, scoped: "scoped" });
-    expect(log).toEqual([
-      // The route handler the router captured is the stub.
-      "before UserController.get",
-      "before UserService.find",
-      // Self-invocation is advised.
-      "before UserService.load",
-      "afterReturning UserService.load",
-      "afterReturning UserService.find",
-      // A request-scoped provider is advised.
-      "before ScopedThing.hello",
-      "afterReturning ScopedThing.hello",
-      "afterReturning UserController.get",
-    ]);
-    expect(Reflect.getMetadata(TAG, UserController.prototype.get)).toBe("kept");
-    expect(Reflect.getMetadata("path", UserController.prototype.get)).toBe("u");
-
-    log.length = 0;
-    await expect(app.get(UserService).findAsync()).resolves.toBe("async");
-    expect(log).toEqual([
-      "before UserService.findAsync",
-      "findAsync settles",
-      "afterReturning UserService.findAsync",
-    ]);
-
     const service = app.get(UserService);
-    await app.close();
+    try {
+      await app.listen(0);
+      const url = (await app.getUrl()).replace("[::1]", "localhost");
+
+      // The deepest non-global module runs its hook with advice in place.
+      expect(log).toEqual([
+        "deep onModuleInit",
+        "before UserService.load",
+        "afterReturning UserService.load",
+      ]);
+
+      log.length = 0;
+      const body = await (await fetch(`${url}/u`)).json();
+      expect(body).toEqual({ user: { id: 1 }, scoped: "scoped" });
+      expect(log).toEqual([
+        // The route handler the router captured is the stub.
+        "before UserController.get",
+        "before UserService.find",
+        // Self-invocation is advised.
+        "before UserService.load",
+        "afterReturning UserService.load",
+        "afterReturning UserService.find",
+        // A request-scoped provider is advised.
+        "before ScopedThing.hello",
+        "afterReturning ScopedThing.hello",
+        "afterReturning UserController.get",
+      ]);
+      expect(Reflect.getMetadata(TAG, UserController.prototype.get)).toBe(
+        "kept",
+      );
+      expect(Reflect.getMetadata("path", UserController.prototype.get)).toBe(
+        "u",
+      );
+
+      log.length = 0;
+      await expect(service.findAsync()).resolves.toBe("async");
+      expect(log).toEqual([
+        "before UserService.findAsync",
+        "findAsync settles",
+        "afterReturning UserService.findAsync",
+      ]);
+    } finally {
+      await app.close();
+    }
     log.length = 0;
     expect(service.find(7)).toEqual({ id: 7 });
     expect(new UserService().find(7)).toEqual({ id: 7 });
     expect(log).toEqual([]);
   });
+
+  it.each([
+    { first: "AspectModule", advised: true },
+    { first: "StoreModule", advised: false },
+  ])(
+    "advises the shutdown hook of a global module: $advised when $first is imported first",
+    async ({ first, advised }) => {
+      const log: string[] = [];
+
+      @Injectable()
+      class Store implements OnApplicationShutdown {
+        onApplicationShutdown() {
+          this.flush();
+        }
+
+        flush() {
+          log.push("flush");
+        }
+      }
+      const flush = P.method(Store, "flush");
+
+      @Global()
+      @Module({
+        providers: [Store],
+        exports: [Store],
+      })
+      class StoreModule {}
+
+      @Aspect()
+      class FlushAspect {
+        @Before(flush)
+        record(_jp: JoinPoint<AnyShape>) {
+          log.push("advice");
+        }
+      }
+      const warnings: string[] = [];
+      const imports = [AspectModule.forRoot(), StoreModule];
+
+      @Module({
+        imports: first === "AspectModule" ? imports : imports.reverse(),
+        providers: [FlushAspect],
+      })
+      class AppModule {}
+
+      const app = await NestFactory.createApplicationContext(AppModule, {
+        logger: {
+          log: () => undefined,
+          error: () => undefined,
+          warn: (message: string) => warnings.push(message),
+        },
+      });
+      await app.close();
+      expect(log).toEqual(advised ? ["advice", "flush"] : ["flush"]);
+      expect(warnings).toEqual(
+        advised
+          ? []
+          : [
+              "The global module StoreModule is imported before AspectModule, so the onApplicationShutdown hook of Store runs after AspectModule has shut down and the calls it makes are not advised. Import AspectModule first.",
+            ],
+      );
+    },
+  );
 
   it("weaves during compile(), without init()", async () => {
     const { AppModule, UserService, log } = createApplication();

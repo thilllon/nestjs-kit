@@ -308,6 +308,34 @@ console.log(JSON.stringify({ sameStub: Greeter.prototype.greet === stub, log }))
     });
   });
 
+  it("rejects one application that registers the module of both formats", () => {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { createRequire } from "node:module";
+import * as common from "@nestjs/common";
+import * as core from "@nestjs/core";
+import * as esm from "${packageName}";
+const cjs = createRequire(import.meta.url)("${packageName}");
+class LibraryModule {}
+common.Module({ imports: [esm.AspectModule.forRoot({ strict: false })] })(LibraryModule);
+class AppModule {}
+common.Module({ imports: [cjs.AspectModule.forRoot(), LibraryModule] })(AppModule);
+const error = await core.NestFactory.createApplicationContext(AppModule, { logger: false, abortOnError: false }).then(() => undefined, (error) => error);
+console.log(JSON.stringify([error instanceof esm.AspectConfigurationError, String(error?.message)]));`,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+    expect(JSON.parse(output)).toEqual([
+      true,
+      expect.stringContaining(
+        "Two copies of AspectModule are registered in one application",
+      ),
+    ]);
+  });
+
   it("recognizes the errors of one format as instances of the other format's classes", () => {
     const output = execFileSync(
       process.execPath,

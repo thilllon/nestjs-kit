@@ -23,8 +23,12 @@ import { isObject } from "./util";
 export interface DispatchContext {
   /** True once the application shut down. */
   readonly closed: boolean;
+  /** The one weak reference to the context that the registry stores. */
+  readonly ref: WeakRef<DispatchContext>;
   /** True when `target` is an instance the application's container holds. */
   owns(target: object): boolean;
+  /** True when the application advises a member of `owner`. */
+  weaves(owner: Class): boolean;
   /**
    * Runs the interceptor chain of the member `name` of `owner` for one call,
    * or `original` when the application does not advise the member.
@@ -39,13 +43,22 @@ export interface DispatchContext {
   ): unknown;
   /** Reports, once per class, that an object was attributed by fallback. */
   reportAmbiguous(owner: Class): void;
+  /** Detaches the application from the classes it examined. */
+  close(): void;
 }
 
+/**
+ * The registry refers to contexts weakly: an application that is abandoned
+ * without `close()`, such as one whose bootstrap failed, leaves the registry
+ * when it is garbage collected, and no registry entry keeps a container alive.
+ */
 interface WeavingRegistry {
-  /** The context each object was attributed to on its first advised call. */
-  readonly instances: WeakMap<object, DispatchContext>;
-  /** Live contexts that wove a class, in creation order. */
-  readonly types: WeakMap<Class, DispatchContext[]>;
+  /** The context each object was last attributed to. */
+  readonly instances: WeakMap<object, WeakRef<DispatchContext>>;
+  /** Contexts that examined a class, woven or not, in creation order. */
+  readonly types: WeakMap<Class, WeakRef<DispatchContext>[]>;
+  /** The context of each Nest container, keyed by its `ModulesContainer`. */
+  readonly containers: WeakMap<object, WeakRef<DispatchContext>>;
 }
 
 /**
@@ -57,23 +70,77 @@ const REGISTRY: unique symbol = Symbol.for("nestjs-aspect:weaving-registry");
 
 function weavingRegistry(): WeavingRegistry {
   const host = globalThis as { [REGISTRY]?: WeavingRegistry };
-  host[REGISTRY] ??= { instances: new WeakMap(), types: new WeakMap() };
+  host[REGISTRY] ??= {
+    instances: new WeakMap(),
+    types: new WeakMap(),
+    containers: new WeakMap(),
+  };
   return host[REGISTRY];
 }
 
-const { instances, types } = weavingRegistry();
+const { instances, types, containers } = weavingRegistry();
+
+function isLive(
+  context: DispatchContext | undefined,
+): context is DispatchContext {
+  return context !== undefined && !context.closed;
+}
+
+/** The live contexts that examined `type`; drops the entries of the others. */
+function liveContexts(type: Class): DispatchContext[] {
+  const refs = types.get(type);
+  if (!refs) {
+    return [];
+  }
+  const live = refs.map((ref) => ref.deref()).filter(isLive);
+  if (live.length === 0) {
+    types.delete(type);
+  } else if (live.length !== refs.length) {
+    types.set(
+      type,
+      live.map((context) => context.ref),
+    );
+  }
+  return live;
+}
+
+/** The class whose prototype `target` has directly. */
+function classOf(target: object): Class | undefined {
+  const prototype: unknown = Object.getPrototypeOf(target);
+  const type = isObject(prototype) ? prototype.constructor : undefined;
+  return typeof type === "function" ? (type as Class) : undefined;
+}
+
+/**
+ * Makes `context` the weaving context of a Nest container. Returns the live
+ * context the container already has, which then keeps the container.
+ */
+export function claimContainer(
+  container: object,
+  context: DispatchContext,
+): DispatchContext | undefined {
+  const existing = containers.get(container)?.deref();
+  if (isLive(existing) && existing !== context) {
+    return existing;
+  }
+  containers.set(container, context.ref);
+  return undefined;
+}
 
 /**
  * The live context that advises `target` through a stub installed on
  * `owner`, or `undefined` when the call runs the original function.
  *
- * - An object already attributed keeps its context; after that application
- *   shut down, its calls run the original function.
- * - Otherwise the live contexts that wove `owner` decide: none leaves the
- *   object unadvised; a single one takes it; of several, the one whose
- *   container holds the object takes it, and an object no container holds
- *   (a request-scoped or transient instance) goes to the most recently
- *   created one, which reports the fallback.
+ * 1. An object attributed to a live context keeps it.
+ * 2. Otherwise the live context whose container holds the object takes it,
+ *    whether or not that application advises the member: an application that
+ *    excludes the class or matches nothing in it runs the original function
+ *    for its own instances.
+ * 3. An object no live container holds runs the original function when it was
+ *    attributed before: it belongs to an application that is closed or gone.
+ * 4. Any other object, such as a request-scoped or transient instance or one
+ *    created with `new`, goes to the most recently created live context that
+ *    weaves `owner`; that context reports the fallback when there are several.
  */
 export function resolveContext(
   target: unknown,
@@ -82,20 +149,29 @@ export function resolveContext(
   if (!isObject(target)) {
     return undefined;
   }
-  const attributed = instances.get(target);
-  if (attributed) {
-    return attributed.closed ? undefined : attributed;
+  const attribution = instances.get(target);
+  const attributed = attribution?.deref();
+  if (isLive(attributed)) {
+    return attributed;
   }
-  const live = types.get(owner);
-  if (!live || live.length === 0) {
+  const type = classOf(target);
+  const holder = type && liveContexts(type).find((c) => c.owns(target));
+  if (holder) {
+    instances.set(target, holder.ref);
+    return holder;
+  }
+  if (attribution) {
     return undefined;
   }
-  let context = live.length === 1 ? live[0] : live.find((c) => c.owns(target));
+  const weaving = liveContexts(owner).filter((c) => c.weaves(owner));
+  const context = weaving.at(-1);
   if (!context) {
-    context = live[live.length - 1];
+    return undefined;
+  }
+  if (weaving.length > 1) {
     context.reportAmbiguous(owner);
   }
-  instances.set(target, context);
+  instances.set(target, context.ref);
   return context;
 }
 
@@ -144,6 +220,8 @@ export interface WeavingContextOptions {
  * lifetime of the context.
  */
 export class WeavingContext implements DispatchContext {
+  readonly ref: WeakRef<DispatchContext> = new WeakRef(this);
+
   private isClosed = false;
 
   private readonly members = new Map<
@@ -154,6 +232,9 @@ export class WeavingContext implements DispatchContext {
   /** Classes the weaver examined, woven or not. */
   private readonly examined = new Set<Class>();
 
+  /** Examined classes whose instances are never advised. */
+  private readonly excluded = new Set<Class>();
+
   private readonly reported = new Set<Class>();
 
   constructor(private readonly options: WeavingContextOptions) {}
@@ -163,25 +244,32 @@ export class WeavingContext implements DispatchContext {
   }
 
   /**
-   * Records that the weaver examined `type` and drops the members recorded
+   * Records that the weaver examined `type`, which makes this context a
+   * candidate for the instances of the class, and drops the members recorded
    * for it; `setMember` then records the members that match.
    */
   examine(type: Class): void {
-    this.examined.add(type);
     this.members.delete(type);
+    if (this.examined.has(type)) {
+      return;
+    }
+    this.examined.add(type);
+    types.set(type, [...(types.get(type) ?? []), this.ref]);
   }
 
-  /** Records a woven member and makes this context a candidate for its class. */
+  /** Examines `type` as a class whose instances this context never advises. */
+  exclude(type: Class): void {
+    this.examine(type);
+    this.excluded.add(type);
+  }
+
+  /** Records a woven member of an examined class. */
   setMember(method: MethodRef, advisors: readonly WeavingAdvisor[]): void {
     const type = method.targetType;
     let byName = this.members.get(type);
     if (!byName) {
       byName = new Map();
       this.members.set(type, byName);
-      const live = types.get(type) ?? [];
-      if (!live.includes(this)) {
-        types.set(type, [...live, this]);
-      }
     }
     const kinds = byName.get(method.name) ?? {};
     kinds[method.kind] = { method, advisors, unadvised: new WeakMap() };
@@ -201,17 +289,20 @@ export class WeavingContext implements DispatchContext {
   }
 
   owns(target: object): boolean {
-    const prototype: unknown = Object.getPrototypeOf(target);
-    const type = isObject(prototype) ? prototype.constructor : undefined;
-    if (typeof type !== "function") {
+    const type = classOf(target);
+    if (!type || !this.examined.has(type)) {
       return false;
     }
-    for (const instance of this.options.instancesOf(type as Class)) {
+    for (const instance of this.options.instancesOf(type)) {
       if (instance === target) {
         return true;
       }
     }
     return false;
+  }
+
+  weaves(owner: Class): boolean {
+    return this.members.has(owner);
   }
 
   dispatch(
@@ -246,27 +337,34 @@ export class WeavingContext implements DispatchContext {
     );
   }
 
-  /** Unregisters the context; its stubs then run the original functions. */
+  /**
+   * Detaches the context: its stubs then run the original functions. The
+   * instances its container holds stay attributed to it, so no other
+   * application adopts them unless its own container holds them too.
+   */
   close(): void {
     if (this.isClosed) {
       return;
     }
-    this.isClosed = true;
-    for (const type of this.members.keys()) {
-      const live = (types.get(type) ?? []).filter((c) => c !== this);
-      if (live.length === 0) {
-        types.delete(type);
-      } else {
-        types.set(type, live);
+    for (const type of this.examined) {
+      for (const instance of this.options.instancesOf(type)) {
+        if (isObject(instance) && !isLive(instances.get(instance)?.deref())) {
+          instances.set(instance, this.ref);
+        }
       }
+    }
+    this.isClosed = true;
+    for (const type of this.examined) {
+      liveContexts(type);
     }
   }
 
   /**
-   * True for an instance of a subclass that reaches the owner's stub by
-   * inheritance while its own class was examined and matched no advisor for
-   * the member. A `super` call from an override is an execution of the
-   * owner's member and stays advised.
+   * True for an instance of a subclass that reaches the owner's stub while
+   * its own class is excluded, or by inheritance while its own class was
+   * examined and matched no advisor for the member. A `super` call from an
+   * override of a class that is not excluded is an execution of the owner's
+   * member and stays advised.
    */
   private inheritsUnadvised(
     member: MemberState,
@@ -279,7 +377,8 @@ export class WeavingContext implements DispatchContext {
     }
     let unadvised = member.unadvised.get(prototype);
     if (unadvised === undefined) {
-      unadvised = this.examined.has(prototype.constructor as Class);
+      const type = prototype.constructor as Class;
+      unadvised = this.examined.has(type);
       for (
         let current: object | null = prototype;
         unadvised && current && current !== owner.prototype;
@@ -289,6 +388,7 @@ export class WeavingContext implements DispatchContext {
           unadvised = false;
         }
       }
+      unadvised ||= this.excluded.has(type);
       member.unadvised.set(prototype, unadvised);
     }
     return unadvised;

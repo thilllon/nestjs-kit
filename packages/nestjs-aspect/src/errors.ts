@@ -47,8 +47,8 @@ export class AspectUsageError extends Error {
 }
 
 /**
- * Thrown when a woven method is invoked before the instance of an aspect that
- * advises it exists.
+ * Thrown when a woven method is invoked before the instance of an aspect or
+ * advisor that advises it exists.
  */
 export class AspectNotReadyError extends Error {
   static {

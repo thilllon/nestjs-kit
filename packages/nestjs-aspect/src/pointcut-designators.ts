@@ -482,6 +482,7 @@ export const P: PointcutFactory = {
     createPointcut({
       classFilter: parts.classFilter,
       methodMatcher: parts.methodMatcher,
+      custom: true,
     }),
 
   all: (...pointcuts) =>

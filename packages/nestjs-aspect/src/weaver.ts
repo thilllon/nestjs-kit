@@ -23,9 +23,10 @@ import {
   promiseAdapter,
 } from "./advice";
 import { ANNOTATIONS_METADATA, requiredAdviceAnnotations } from "./annotation";
-import type {
-  AspectModuleOptions,
-  AspectReportLevel,
+import {
+  ASPECT_WEAVER,
+  type AspectModuleOptions,
+  type AspectReportLevel,
 } from "./aspect.module-definition";
 import {
   compileAspect,
@@ -40,7 +41,11 @@ import {
 } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
 import { createClassRef, createMethodRef } from "./method-ref";
-import { isDefaultJoinPoint, matchesStatically } from "./pointcut";
+import {
+  isDefaultJoinPoint,
+  matchesStatically,
+  referencedAnnotations,
+} from "./pointcut";
 import type {
   AdvisorDescriptor,
   BeanRef,
@@ -51,7 +56,11 @@ import type {
   PointcutAdvisor,
 } from "./types";
 import { constructorChain, isObject } from "./util";
-import { type WeavingAdvisor, WeavingContext } from "./weaving-context";
+import {
+  claimContainer,
+  type WeavingAdvisor,
+  WeavingContext,
+} from "./weaving-context";
 import {
   describeMember,
   describeOrder,
@@ -91,8 +100,19 @@ interface Scan {
   readonly candidates: Map<Class, Candidate>;
   /** Registrations of the aspect and `@Advisor` classes, in that order. */
   readonly advisorTypes: Map<Class, Registration[]>;
+  /** Classes of the `exclude` option, with their container facts. */
+  readonly excluded: Map<Class, Candidate>;
   /** Classes that are no candidates: aspects, advisors and excluded classes. */
   readonly skipped: Set<Class>;
+}
+
+function emptyScan(): Scan {
+  return {
+    candidates: new Map(),
+    advisorTypes: new Map(),
+    excluded: new Map(),
+    skipped: new Set(),
+  };
 }
 
 /** An advisor the weaver matches, with the text that names it. */
@@ -120,6 +140,9 @@ const NEST_CORE_MODULE = "InternalCoreModule";
 
 const REPORT_LEVELS: readonly unknown[] = ["verbose", "debug", "log"];
 
+const IMPORT_HINT =
+  "Import AspectModule.forRoot() or forRootAsync() once, in the root module; the module is global.";
+
 const SCOPE_HINT =
   "Aspects and advisors are singletons: per-request state belongs to the join point. Resolve request-scoped providers inside the advice with ModuleRef.resolve() and ContextIdFactory, or read them from a CLS store.";
 
@@ -144,6 +167,12 @@ function isWeavable(type: unknown): type is Class {
     !isNative(type as Class) &&
     !isNestClass(type as Class)
   );
+}
+
+function classNameOf(instance: object): string {
+  const prototype: unknown = Object.getPrototypeOf(instance);
+  const type = isObject(prototype) ? prototype.constructor : undefined;
+  return typeof type === "function" && type.name ? type.name : "an object";
 }
 
 function isSingleton(wrapper: InstanceWrapper): boolean {
@@ -225,11 +254,13 @@ export class AspectWeaver {
 
   private readonly reportLevel: AspectReportLevel | false;
 
-  private scan: Scan = {
-    candidates: new Map(),
-    advisorTypes: new Map(),
-    skipped: new Set(),
-  };
+  private scan: Scan = emptyScan();
+
+  /**
+   * Aspect and `@Advisor` classes that stage 2 finds as the instance of a
+   * factory, value or alias provider; they have no compiled advisors.
+   */
+  private unwovenAdvisorTypes: Class[] = [];
 
   private readonly advisors: MatchedAdvisor[] = [];
 
@@ -279,12 +310,40 @@ export class AspectWeaver {
   ): AspectWeaver {
     const weaver = new AspectWeaver(container, moduleType, options);
     try {
+      const existing = claimContainer(container, weaver.context);
+      if (existing) {
+        existing.close();
+        throw new AspectConfigurationError(
+          `Two copies of ${moduleType.name} are registered in one application, such as the CommonJS and the ES module build of the package. ${IMPORT_HINT}`,
+        );
+      }
       weaver.weaveClasses();
     } catch (error) {
       weaver.close();
       throw error;
     }
     return weaver;
+  }
+
+  /**
+   * Fails when the weaver of a module of type `moduleType` is not a
+   * singleton: options that depend on a request-scoped or transient provider
+   * make Nest skip the weaver factory and the lifecycle hooks of the module.
+   * The dependency tree of a provider is known once the container has
+   * instantiated its providers, so this runs in a lifecycle hook.
+   */
+  static assertSingleton(container: ModulesContainer, moduleType: Class): void {
+    for (const module of container.values()) {
+      const wrapper =
+        module.metatype === moduleType
+          ? module.providers.get(ASPECT_WEAVER)
+          : undefined;
+      if (wrapper && !isSingleton(wrapper)) {
+        throw new AspectConfigurationError(
+          `The options of ${moduleType.name}.forRootAsync depend on a request-scoped or transient provider, so the weaver does not run and nothing is woven. Supply the options from singleton providers.`,
+        );
+      }
+    }
   }
 
   /**
@@ -298,6 +357,7 @@ export class AspectWeaver {
       this.weaveLateClasses();
       const problems = [
         ...this.scopeProblems(),
+        ...this.unwovenAdvisorProblems(),
         ...this.misplacedAdviceProblems(),
         ...this.requiredAdviceProblems(),
       ];
@@ -305,6 +365,7 @@ export class AspectWeaver {
         ...this.duplicateRegistrationWarnings(),
         ...this.unmatchedPointcutWarnings(),
         ...this.orderTieWarnings(),
+        ...this.shutdownOrderWarnings(),
       ];
       if (this.strict && problems.length > 0) {
         throw new AspectConfigurationError(problems.join("\n"));
@@ -338,17 +399,13 @@ export class AspectWeaver {
    * value provider contributes the class of its singleton instance.
    */
   private scanContainer(withInstances: boolean): Scan {
-    const scan: Scan = {
-      candidates: new Map(),
-      advisorTypes: new Map(),
-      skipped: new Set(),
-    };
+    const scan = emptyScan();
     const owners = [...this.container.values()].filter(
       (module) => module.metatype === this.moduleType,
     );
     if (owners.length > 1) {
       throw new AspectConfigurationError(
-        `${this.moduleType.name} is imported ${owners.length} times with different options; import it once`,
+        `${this.moduleType.name} is registered ${owners.length} times. ${IMPORT_HINT}`,
       );
     }
     for (const module of this.container.values()) {
@@ -384,6 +441,7 @@ export class AspectWeaver {
     for (const [type, candidate] of scan.candidates) {
       if (this.isExcluded(this.classRefOf(candidate))) {
         scan.candidates.delete(type);
+        scan.excluded.set(type, candidate);
         scan.skipped.add(type);
       }
     }
@@ -461,8 +519,9 @@ export class AspectWeaver {
   }
 
   private *containerInstances(type: Class): Generator<unknown> {
-    for (const registration of this.scan.candidates.get(type)?.registrations ??
-      []) {
+    const { candidates, excluded } = this.scan;
+    const known = candidates.get(type) ?? excluded.get(type);
+    for (const registration of known?.registrations ?? []) {
       const wrapper = this.wrapperOf(registration);
       if (!wrapper) {
         continue;
@@ -491,9 +550,7 @@ export class AspectWeaver {
       );
       registration++;
     }
-    for (const type of this.scan.skipped) {
-      this.context.examine(type);
-    }
+    this.examineSkipped(this.scan);
     // Superclasses first: a subclass then captures the accessor stubs of its
     // superclass like it inherits its method stubs.
     const candidates = [...this.scan.candidates.values()].sort(
@@ -501,6 +558,17 @@ export class AspectWeaver {
     );
     for (const candidate of candidates) {
       this.weaveType(candidate);
+    }
+  }
+
+  /** Makes the context a candidate for the instances of unwoven classes. */
+  private examineSkipped(scan: Scan): void {
+    for (const type of scan.skipped) {
+      if (scan.excluded.has(type)) {
+        this.context.exclude(type);
+      } else {
+        this.context.examine(type);
+      }
     }
   }
 
@@ -615,11 +683,15 @@ export class AspectWeaver {
     // The aspects and advisors are those of stage 1: a class first seen now
     // has no compiled advisors.
     this.scan = { ...scan, advisorTypes: previous.advisorTypes };
-    for (const type of scan.skipped) {
-      if (!previous.skipped.has(type)) {
-        this.context.examine(type);
-      }
-    }
+    this.unwovenAdvisorTypes = [...scan.advisorTypes.keys()].filter(
+      (type) => !previous.advisorTypes.has(type),
+    );
+    this.examineSkipped({
+      ...scan,
+      skipped: new Set(
+        [...scan.skipped].filter((type) => !previous.skipped.has(type)),
+      ),
+    });
     const changed = [...scan.candidates.values()]
       .filter(
         (candidate) =>
@@ -658,34 +730,72 @@ export class AspectWeaver {
       );
   }
 
-  /** Members that carry a `requiresAdvice` annotation and have no advisor. */
+  /**
+   * An aspect or advisor class that reaches the container only as the
+   * instance of a factory, value or alias provider.
+   */
+  private unwovenAdvisorProblems(): string[] {
+    return this.unwovenAdvisorTypes.map((type) => {
+      const role = isAspect(type) ? "aspect" : "advisor";
+      return `The ${role} ${type.name} is the instance of a factory, value or alias provider, so its advice does not run. Register the class as a provider, by itself or with useClass.`;
+    });
+  }
+
+  /**
+   * Members that carry a `requiresAdvice` annotation which none of their
+   * advisors handles, and such members of aspects and advisors, which are
+   * never advised. An advisor handles an annotation when its pointcut refers
+   * to it, or when the pointcut has a caller-supplied matcher.
+   */
   private requiredAdviceProblems(): string[] {
     const unadvised: string[] = [];
+    const describe = (method: MethodRef, required: readonly string[]) =>
+      `${describeMember(method)} (${required.map((annotation) => `@${annotation}`).join(", ")})`;
     for (const candidate of this.scan.candidates.values()) {
-      const advised = new Set(
-        [...this.context.membersOf(candidate.type)].map(({ method }) =>
-          describeMember(method),
-        ),
+      const advisors = new Map(
+        [...this.context.membersOf(candidate.type)].map((member) => [
+          describeMember(member.method),
+          member.advisors,
+        ]),
       );
       const classRef = this.classRefOf(candidate);
       for (const [name, kind] of membersOf(candidate.type)) {
         const method = createMethodRef(classRef, name, kind);
-        if (advised.has(describeMember(method))) {
-          continue;
-        }
-        const required = this.requiredAnnotations(method);
+        const references = (advisors.get(describeMember(method)) ?? []).map(
+          (advisor) => referencedAnnotations(advisor.pointcut),
+        );
+        const required = this.requiredAnnotations(method).filter(
+          (annotation) =>
+            !references.some((names) => !names || names.has(annotation)),
+        );
         if (required.length > 0) {
-          unadvised.push(
-            `${describeMember(method)} (${required.map((annotation) => `@${annotation}`).join(", ")})`,
-          );
+          unadvised.push(describe(method, required));
         }
       }
     }
-    return unadvised.length === 0
-      ? []
-      : [
-          `No advisor matches these members, whose annotations require advice: ${unadvised.join(", ")}. Register the aspect that handles the annotation as a provider.`,
-        ];
+    const neverAdvised: string[] = [];
+    for (const type of this.scan.advisorTypes.keys()) {
+      const classRef = createClassRef(type);
+      for (const [name, kind] of membersOf(type)) {
+        const method = createMethodRef(classRef, name, kind);
+        const required = this.requiredAnnotations(method);
+        if (required.length > 0) {
+          neverAdvised.push(describe(method, required));
+        }
+      }
+    }
+    return [
+      ...(unadvised.length === 0
+        ? []
+        : [
+            `No advisor handles the annotations that require advice on these members: ${unadvised.join(", ")}. Register the aspect that handles the annotation as a provider; its pointcut refers to the annotation with P.annotated, P.withinAnnotated or P.targetAnnotated.`,
+          ]),
+      ...(neverAdvised.length === 0
+        ? []
+        : [
+            `These members of aspects or advisors carry annotations that require advice, and aspects and advisors are never advised: ${neverAdvised.join(", ")}.`,
+          ]),
+    ];
   }
 
   /**
@@ -780,6 +890,44 @@ export class AspectWeaver {
       }
     }
     return [...warnings.values()];
+  }
+
+  /**
+   * Global modules registered before the module of the weaver whose
+   * instances have an `onApplicationShutdown` hook. Nest runs the shutdown
+   * hooks of global modules in reverse registration order, so those hooks
+   * run after the weaver has closed the context.
+   */
+  private shutdownOrderWarnings(): string[] {
+    const warnings: string[] = [];
+    for (const module of this.container.values()) {
+      if (module.metatype === this.moduleType) {
+        break;
+      }
+      if (!module.isGlobal || module.metatype.name === NEST_CORE_MODULE) {
+        continue;
+      }
+      const hooked = new Set<string>();
+      for (const collection of COLLECTIONS) {
+        for (const wrapper of module[collection].values()) {
+          const instance: unknown = isSingleton(wrapper)
+            ? wrapper.instance
+            : undefined;
+          if (
+            isObject(instance) &&
+            typeof instance.onApplicationShutdown === "function"
+          ) {
+            hooked.add(classNameOf(instance));
+          }
+        }
+      }
+      if (hooked.size > 0) {
+        warnings.push(
+          `The global module ${module.metatype.name} is imported before ${this.moduleType.name}, so the onApplicationShutdown hook of ${[...hooked].join(", ")} runs after ${this.moduleType.name} has shut down and the calls it makes are not advised. Import ${this.moduleType.name} first.`,
+        );
+      }
+    }
+    return warnings;
   }
 
   private logReport(): void {

@@ -46,7 +46,7 @@ export class RecordingLogger implements LoggerService {
   }
 }
 
-const opened: TestingModule[] = [];
+const opened: { close(): Promise<void> }[] = [];
 
 /**
  * Compiles a testing module that imports `AspectModule.forRoot(options)`
@@ -83,7 +83,19 @@ export async function initWoven(
   return woven;
 }
 
-/** Closes the modules the fixture compiled; for `afterEach`. */
+/**
+ * Starts an HTTP application of a module the fixture compiled, on a free
+ * port, and returns its base URL. `closeWoven` closes the application.
+ */
+export async function listenWoven(moduleRef: TestingModule): Promise<string> {
+  const app = moduleRef.createNestApplication();
+  // Closing the application closes the module and its HTTP server.
+  opened.splice(opened.indexOf(moduleRef), 1, app);
+  await app.listen(0);
+  return (await app.getUrl()).replace("[::1]", "localhost");
+}
+
+/** Closes the modules and applications of the fixture; for `afterEach`. */
 export async function closeWoven(): Promise<void> {
-  await Promise.all(opened.splice(0).map((moduleRef) => moduleRef.close()));
+  await Promise.all(opened.splice(0).map((closable) => closable.close()));
 }

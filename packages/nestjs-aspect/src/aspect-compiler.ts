@@ -2,7 +2,11 @@
 // `AdvisorDescriptor`s and orders them.
 
 import { ADVICE_KINDS } from "./advice";
-import { getAdviceMetadata, getAspectMetadata } from "./aspect-decorators";
+import {
+  getAdviceMetadata,
+  getAspectMetadata,
+  isAspect,
+} from "./aspect-decorators";
 import { AspectConfigurationError } from "./errors";
 import { isPointcutLike } from "./pointcut";
 import type {
@@ -12,7 +16,7 @@ import type {
   Class,
   PointcutAdvisor,
 } from "./types";
-import { isObject, isOrder } from "./util";
+import { constructorChain, isObject, isOrder } from "./util";
 
 export interface AspectCompilerOptions {
   /** Supplies aspect instances lazily, at call time. */
@@ -57,9 +61,10 @@ function compareOrder(a: number | undefined, b: number | undefined): number {
  * Each advisor carries an `AspectAdvice` bound to `options.resolveAspect`,
  * the aspect's `order` and `source: { type, methodName, kind }`.
  *
- * Throws `AspectConfigurationError` when the class is not an `@Aspect`, when an
- * advice method is not a function on its prototype chain, or when the aspect
- * declares an instantiation model other than `"singleton"`.
+ * Throws `AspectConfigurationError` when the class is not an `@Aspect`, when it
+ * extends another `@Aspect` class, whose advice it would run a second time,
+ * when an advice method is not a function on its prototype chain, or when the
+ * aspect declares an instantiation model other than `"singleton"`.
  */
 export function compileAspect(
   aspectType: Class,
@@ -69,6 +74,13 @@ export function compileAspect(
   if (!metadata) {
     throw new AspectConfigurationError(
       `${aspectType.name} is not decorated with @Aspect`,
+    );
+  }
+  const [, ...superclasses] = constructorChain(aspectType);
+  const parent = superclasses.find(isAspect);
+  if (parent) {
+    throw new AspectConfigurationError(
+      `The aspect ${aspectType.name} extends the aspect ${parent.name}, whose advice would run once for each of them. An aspect inherits advice only from a class without @Aspect.`,
     );
   }
   if (metadata.instantiation !== "singleton") {

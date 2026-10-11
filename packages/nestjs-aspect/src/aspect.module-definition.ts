@@ -39,3 +39,6 @@ export const {
 
 /** Token of the application's `AspectWeaver`. */
 export const ASPECT_WEAVER: unique symbol = Symbol("ASPECT_WEAVER");
+
+/** Token of the provider that validates the scope of the weaver. */
+export const ASPECT_WEAVER_GUARD: unique symbol = Symbol("ASPECT_WEAVER_GUARD");

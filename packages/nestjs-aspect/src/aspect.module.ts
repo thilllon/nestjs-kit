@@ -9,6 +9,7 @@ import {
 import { ModulesContainer } from "@nestjs/core";
 import {
   ASPECT_WEAVER,
+  ASPECT_WEAVER_GUARD,
   type ASYNC_OPTIONS_TYPE,
   type AspectModuleOptions,
   ConfigurableModuleClass,
@@ -41,6 +42,16 @@ import { AspectWeaver } from "./weaver";
         container: ModulesContainer,
         options: AspectModuleOptions = {},
       ) => AspectWeaver.weave(container, AspectModule, options),
+    },
+    {
+      // A provider without dependencies of its own: Nest runs its hook even
+      // when the options make the weaver and the module class non-singletons.
+      provide: ASPECT_WEAVER_GUARD,
+      inject: [ModulesContainer],
+      useFactory: (container: ModulesContainer): OnModuleInit => ({
+        onModuleInit: () =>
+          AspectWeaver.assertSingleton(container, AspectModule),
+      }),
     },
   ],
 })

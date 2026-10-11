@@ -12,9 +12,26 @@ const DESCRIPTOR_FIELD = {
   setter: "set",
 } as const;
 
+/** Own property of a dispatcher stub that holds the class it is installed on. */
+const OWNER: unique symbol = Symbol.for("nestjs-aspect:stub-owner");
+
+/** Join point kind of each accessor field of a property descriptor. */
+const ACCESSOR_KIND = { get: "getter", set: "setter" } as const;
+
 /** True for a dispatcher stub of any copy of the package. */
-export function isStub(value: unknown): boolean {
+export function isStub(value: unknown): value is Fn {
   return typeof value === "function" && Object.hasOwn(value, ORIGINAL);
+}
+
+function isStubOf(value: unknown, owner: Class): boolean {
+  return (
+    isStub(value) &&
+    (value as unknown as Record<symbol, unknown>)[OWNER] === owner
+  );
+}
+
+function originalOf(stub: Fn): Fn {
+  return (stub as unknown as Record<symbol, Fn>)[ORIGINAL];
 }
 
 /** The nearest descriptor of `name` along the prototype chain. */
@@ -65,19 +82,23 @@ function createStub(
   });
   Object.setPrototypeOf(stub, original);
   Object.defineProperty(stub, ORIGINAL, { value: original });
+  Object.defineProperty(stub, OWNER, { value: owner });
   return stub;
 }
 
 /**
  * Installs the stub of `method` as an own property of the prototype of
- * `method.targetType`, unless that prototype already holds one. A class has
- * one stub per member and kind, whatever the number of advisors and
- * applications.
+ * `method.targetType`, unless that prototype already holds the stub of that
+ * class. A class has one stub per member and kind, whatever the number of
+ * advisors and applications.
  *
  * - An inherited member gets its stub on the concrete class; the stub calls
  *   `method.original`, the inherited function, not a stub of the superclass.
- * - A getter and a setter of one property are replaced independently; the
- *   other accessor keeps the function it resolves to at installation time.
+ * - A getter and a setter of one property are replaced independently. An
+ *   accessor that is not matched keeps its function, except for the stub of a
+ *   superclass: the property becomes an own property of the class, so the
+ *   other accessor gets a stub of the class too, which runs the original
+ *   function until an application weaves that accessor.
  *
  * Throws `AspectConfigurationError` when the property cannot be redefined.
  */
@@ -86,13 +107,28 @@ export function installStub(method: MethodRef): void {
   const prototype: object = targetType.prototype;
   const field = DESCRIPTOR_FIELD[kind];
   const own = Object.getOwnPropertyDescriptor(prototype, name);
-  if (own && isStub(own[field])) {
+  if (own && isStubOf(own[field], targetType)) {
     return;
   }
-  const current = own ?? findDescriptor(prototype, name);
+  const descriptor = { ...(own ?? findDescriptor(prototype, name)) };
+  for (const other of ["get", "set"] as const) {
+    const inherited: unknown = descriptor[other];
+    if (
+      other !== field &&
+      isStub(inherited) &&
+      !isStubOf(inherited, targetType)
+    ) {
+      descriptor[other] = createStub(
+        targetType,
+        name,
+        ACCESSOR_KIND[other],
+        originalOf(inherited),
+      );
+    }
+  }
   try {
     Object.defineProperty(prototype, name, {
-      ...current,
+      ...descriptor,
       [field]: createStub(targetType, name, kind, original),
     });
   } catch (error) {

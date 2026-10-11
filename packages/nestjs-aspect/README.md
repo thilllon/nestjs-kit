@@ -20,7 +20,7 @@ Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript 
 
 ## Setup
 
-Import `AspectModule.forRoot()` once, in the root module, and register aspects as providers of any module.
+Import `AspectModule.forRoot()` once, as the first import of the root module, and register aspects as providers of any module.
 
 ```ts
 import { Module } from "@nestjs/common";
@@ -33,7 +33,9 @@ import { AspectModule } from "nestjs-aspect";
 export class AppModule {}
 ```
 
-The module is global. It weaves every class the Nest container manages: providers, controllers, guards, interceptors, pipes, filters and middleware, of every scope. Weaving replaces a matched method on the class prototype with a dispatcher that runs the advice of the application the object belongs to. It happens while Nest instantiates providers, so advice is in place before the router binds route handlers and before the first lifecycle hook, and after `Test.createTestingModule(...).compile()` without `init()`.
+The module is global. It weaves the classes the Nest container registers: providers, controllers, guards, interceptors, pipes, filters and middleware, of every scope. Weaving replaces a matched method on the class prototype with a dispatcher that runs the advice of the application the object belongs to. It happens while Nest instantiates providers, so advice is in place before the router binds route handlers and before the first lifecycle hook, and after `Test.createTestingModule(...).compile()` without `init()`. A middleware class that is only passed to `consumer.apply()` and the instance of a singleton factory or value provider are woven when the application initializes ([Limits](#limits)).
+
+Nest runs the `onModuleInit` hooks of global modules in import order and their `onApplicationShutdown` hooks in reverse order. With `AspectModule` imported first, its weaving is complete before the hooks of every other module, and it shuts down after them.
 
 | Option                | Default   | Purpose                                                                                                                                     |
 | --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -42,7 +44,7 @@ The module is global. It weaves every class the Nest container manages: provider
 | `strict`              | `true`    | The [bootstrap validations](#bootstrap-validation) fail `init()` with `AspectConfigurationError`. With `false` they are logged as warnings. |
 | `exclude`             | `[]`      | Classes that are never woven: a class excludes itself and its subclasses, a `ClassFilter` the classes it matches.                           |
 
-`AspectModule.forRootAsync({ useFactory, inject, imports })` resolves the options from providers. The weaver waits for them inside the instantiation phase, so the weaving time is the same as with `forRoot()`.
+`AspectModule.forRootAsync({ useFactory, inject, imports })` resolves the options from singleton providers. The weaver waits for them inside the instantiation phase; a provider factory that runs before the options are resolved calls its dependencies without advice.
 
 ## Annotations
 
@@ -79,7 +81,7 @@ export class UserService {
 
 - The annotation name is its identity: annotations created with the same name read and write the same metadata.
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses.
-- `requiresAdvice` marks an annotation whose methods must be matched by an advisor.
+- `requiresAdvice` marks an annotation whose members must be matched by an advisor that handles it: one whose pointcut refers to the annotation with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written.
 - `isAnnotation(value)` tells an annotation from other functions.
 - Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `jp.findAnnotation`.
 
@@ -115,7 +117,7 @@ export const accountOps = P.within(AccountService).and(P.args(Account, P.REST));
 
 Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors; a getter and a setter of one property are woven independently. A constructor is never a join point.
 
-- `P.bean` sees the token of every registration of a class, including `useClass` and `useExisting` tokens. The instance of a singleton `useFactory` or `useValue` provider is matched by its token when the application initializes.
+- `P.bean` sees the token of every registration of a class, including `useClass` tokens. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched by their token when the application initializes.
 - `P.inModule(Module, { transitive: true })` follows the imports of the module. A global module counts only when the `@Module()` decorator of the importing module lists it, because Nest adds every global module to the imports of every module.
 - Static designators are evaluated once per class member at weaving time. `P.args` is evaluated on every call; combine it with a static designator.
 
@@ -177,6 +179,7 @@ export class ResilienceAspect {
 - `jp.args` is frozen. `jp.proceedWith(...args)` runs the rest of the chain with other arguments.
 - `jp.proceed()` and `jp.proceedWith(...args)` can be called more than once; each call starts from the arguments the advice received or passes.
 - Aspects and advisors are never advised.
+- An aspect inherits the advice of a superclass without `@Aspect`, such as an abstract base class. An aspect that extends another `@Aspect` class is rejected.
 - A call from a method to another method of the same object (`this.other()`) is advised, unlike in Spring: the dispatcher lives on the class prototype, not on a proxy.
 - On a controller method, advice runs inside Nest interceptors and after pipes. An error thrown by advice reaches the exception filters like an error of the handler.
 
@@ -234,14 +237,19 @@ The entry point also exports the extension interfaces `AdviceAdapter` and `Retur
 | Finding                                                                  | Result                          |
 | ------------------------------------------------------------------------ | ------------------------------- |
 | An aspect or advisor that is not a singleton                             | Error                           |
+| An aspect or advisor supplied by a factory, value or alias provider      | Error                           |
 | Advice decorators on a class without `@Aspect`                           | Error                           |
-| A `requiresAdvice` annotation on a member that no advisor matches        | Error that lists the members    |
+| A `requiresAdvice` annotation on a member that no advisor handles        | Error that lists the members    |
+| A `requiresAdvice` annotation on a member of an aspect or advisor        | Error that lists the members    |
+| `forRootAsync` options that depend on a request-scoped provider          | Error                           |
 | A pointcut that matches no member of the application                     | Warning                         |
 | Different aspects with the same order, or without one, on one join point | Warning                         |
 | An aspect or advisor class registered in several modules                 | Warning                         |
-| `AspectModule` imported more than once with different options            | Error while the module compiles |
+| A global module with a shutdown hook imported before `AspectModule`      | Warning                         |
+| `AspectModule` registered more than once, whatever the options           | Error while the module compiles |
+| An aspect that extends another `@Aspect` class                           | Error while the module compiles |
 
-An error fails `init()` with one `AspectConfigurationError`; with `strict: false` it is logged as a warning. The weaving report follows, one line per join point and advisor in chain order:
+An error fails `init()` with one `AspectConfigurationError`; with `strict: false` it is logged as a warning. The errors raised while the module compiles do not depend on `strict`. The weaving report follows, one line per join point and advisor in chain order:
 
 ```
 UserService.findById <- ResilienceAspect.retry (around, order 10)
@@ -251,15 +259,19 @@ UserService.findById <- AuditAspect.audit (before, no order)
 ## Testing
 
 - `Test.createTestingModule({ imports: [AppModule] }).compile()` weaves the module: advice runs without `init()`. The bootstrap validation and the weaving report run in `init()`.
-- An object created with `new`, outside a container, runs its original methods when no live application weaves its class. While exactly one live application weaves the class, the object is advised by that application.
-- Close each application or testing module: `close()` detaches it from the woven classes. Applications that weave the same class in one process stay apart, each advising the instances its own container holds.
+- An object created with `new`, outside a container, runs its original methods when no live application weaves its class. While a live application weaves the class, the object is advised by that application.
+- Close each application or testing module: `close()` detaches it from the woven classes. An application that is never closed, such as one whose `compile()` or `init()` failed, stays attached until it is garbage collected.
+- Applications that weave the same class in one process stay apart: an instance is advised by the application whose container holds it, also when that application excludes the class or matches nothing in it. An instance of a closed application is not advised by a later one, unless the container of the later one holds the same object, such as a shared `useValue` instance.
 - An aspect replaced with `overrideProvider(...).useValue(...)` is no aspect any more: its advice does not run.
 
 ## Limits
 
-- A call that reaches a woven method before the instance of an aspect or advisor that advises it exists raises `AspectNotReadyError` instead of running without advice. This happens only for calls made in a constructor: a call made in a constructor before the weaver has run is not advised.
+- A call made while Nest instantiates providers, in a constructor or a provider factory, is not guaranteed to be advised. Before the weaver has run it runs without advice. After that, a call that reaches a woven method before the instance of an aspect or advisor that advises it exists raises `AspectNotReadyError`: Nest cannot create that instance on demand.
 - When several live applications weave the same class, a request-scoped or transient instance is advised by the most recently created application, which logs a warning once per class.
-- A subclass that is not woven itself inherits the dispatcher of a woven superclass method and is advised by it only when the container does not manage the subclass; a `super` call from an override is advised when the superclass is woven.
+- An application without `AspectModule` is invisible to the others: while another live application weaves a class, the instances of that class in the application without the module are advised by it.
+- A subclass that is not woven itself inherits the dispatcher of a woven superclass method and is advised by it only when the container does not manage the subclass; a `super` call from an override is advised when the superclass is woven, except in a class of the `exclude` option.
+- With a global module imported before `AspectModule`, the `onApplicationShutdown` hooks of that module run after `AspectModule` has shut down, without advice, and its `onModuleInit` hooks run before the classes of factory and value providers are woven.
+- An aspect or advisor is registered as a class, by itself or with `useClass`. One that a `useFactory`, `useValue` or `useExisting` provider supplies is rejected when the application initializes.
 - A middleware class that is only passed to `consumer.apply()` becomes known when the application initializes, after the router has bound its `use` method: `use` itself is not advised, the methods it calls are. Register the middleware as a provider as well to have `use` advised.
 - A factory or value provider is woven by the class of its instance when the application initializes, and only when it is a singleton. Modules loaded with `LazyModuleLoader` are not woven.
 - Arrow-function class fields and `#private` methods cannot be advised: they are not members of the prototype.
