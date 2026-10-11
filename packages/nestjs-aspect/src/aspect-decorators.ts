@@ -3,6 +3,7 @@
 import "reflect-metadata";
 import { Injectable } from "@nestjs/common";
 import { AopConfigurationError } from "./errors";
+import { isPointcutLike } from "./pointcut";
 import type {
   AdviceKind,
   AdviceMetadata,
@@ -13,10 +14,10 @@ import type {
   Fn,
   JoinPoint,
   Pointcut,
-  PointcutLike,
   ProceedingJoinPoint,
   Shape,
 } from "./types";
+import { constructorChain, isOrder } from "./util";
 
 /**
  * Own Reflect metadata of an aspect class constructor: `AspectMetadata`.
@@ -55,8 +56,11 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
   ? void | PromiseLike<void>
   : unknown extends S["returns"]
     ? void | PromiseLike<void>
-    : // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
-      void;
+    : // A union with a promise member, as `or()` of a synchronous and an asynchronous method produces.
+      [Extract<S["returns"], PromiseLike<any>>] extends [never]
+      ? // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
+        void
+      : void | PromiseLike<void>;
 
 /**
  * `() => Promise<void>` is assignable to `() => void`, so a function type
@@ -86,20 +90,6 @@ const INSTANTIATION_MODELS: readonly unknown[] = [
   "perTarget",
   "perClass",
 ];
-
-function isPointcutLike(value: unknown): value is PointcutLike {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null
-  ) {
-    return false;
-  }
-  const { classFilter, methodMatcher } = value as Partial<PointcutLike>;
-  return (
-    typeof classFilter?.matches === "function" &&
-    typeof methodMatcher?.matches === "function"
-  );
-}
 
 function ownAdviceMetadata(type: object): readonly AdviceMetadata[] {
   return Reflect.getOwnMetadata(ADVICE_METADATA, type) ?? [];
@@ -146,10 +136,7 @@ function adviceDecorator(
  */
 export function Aspect(options: AspectOptions = {}): ClassDecorator {
   const { order, instantiation = "singleton" } = options;
-  if (
-    order !== undefined &&
-    (typeof order !== "number" || Number.isNaN(order))
-  ) {
+  if (order !== undefined && !isOrder(order)) {
     throw new AopConfigurationError("@Aspect requires a number as its order");
   }
   if (!INSTANTIATION_MODELS.includes(instantiation)) {
@@ -237,11 +224,7 @@ export function getAspectMetadata(type: Class): AspectMetadata | undefined {
 export function getAdviceMetadata(type: Class): readonly AdviceMetadata[] {
   const perClass: (readonly AdviceMetadata[])[] = [];
   const redeclared = new Set<string | symbol>();
-  for (
-    let current: unknown = type;
-    typeof current === "function" && current !== Function.prototype;
-    current = Object.getPrototypeOf(current)
-  ) {
+  for (const current of constructorChain(type)) {
     const own = ownAdviceMetadata(current);
     perClass.unshift(own.filter((entry) => !redeclared.has(entry.methodName)));
     for (const entry of own) {

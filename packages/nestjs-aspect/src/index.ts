@@ -34,6 +34,7 @@ export {
   type PointcutFactory,
 } from "./pointcut-designators";
 export type {
+  AccessorGuard,
   Advice,
   AdviceAdapter,
   AdviceKind,

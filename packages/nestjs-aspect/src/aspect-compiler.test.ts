@@ -237,6 +237,27 @@ describe("describeAdvisor", () => {
       ),
     ).toThrow(/Incomplete has no advice/);
   });
+
+  it("rejects a pointcut whose class filter or method matcher cannot match", () => {
+    class Malformed {}
+    const pointcut = { classFilter: {}, methodMatcher: {} };
+
+    expect(() =>
+      describeAdvisor(
+        { pointcut, advice } as unknown as PointcutAdvisor,
+        Malformed,
+        0,
+      ),
+    ).toThrow(AopConfigurationError);
+  });
+
+  it("rejects an order that cannot be compared", () => {
+    class Unordered {}
+
+    expect(() =>
+      describeAdvisor({ pointcut: anything, advice, order: NaN }, Unordered, 0),
+    ).toThrow(/Unordered has an order that is not a number/);
+  });
 });
 
 describe("sortAdvisors", () => {

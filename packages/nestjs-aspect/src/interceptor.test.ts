@@ -593,6 +593,116 @@ describe("asynchronous join points", () => {
   });
 });
 
+describe("a lazy thenable returned by a synchronous method", () => {
+  let executed: number;
+
+  class Query {
+    where(): this {
+      return this;
+    }
+
+    // biome-ignore lint/suspicious/noThenProperty: the fixture is a lazy query builder
+    then(resolve: (rows: string[]) => unknown): unknown {
+      executed++;
+      return Promise.resolve(["row"]).then(resolve);
+    }
+  }
+
+  class Repository {
+    build(): Query {
+      return new Query();
+    }
+  }
+
+  const build = named("build");
+
+  it.each([
+    ["after", After(build)],
+    ["afterReturning", AfterReturning(build)],
+    ["afterThrowing", AfterThrowing(build)],
+  ] as const)("passes through %s advice untouched", (_kind, decorator) => {
+    executed = 0;
+    @Aspect()
+    class Trace {
+      @(decorator as AdviceDecorator<AnyShape, () => void>)
+      advice(): void {
+        log.push("advice");
+      }
+    }
+    const repository = weave(new Repository(), [new Trace()]);
+
+    const query = repository.build();
+
+    expect(query).toBeInstanceOf(Query);
+    expect(query.where()).toBe(query);
+    expect(executed).toBe(0);
+  });
+
+  it("is followed when the method is declared to return a Promise", async () => {
+    function Typed(): MethodDecorator {
+      return () => undefined;
+    }
+    class Declared {
+      @Typed()
+      find(): Promise<string[]> {
+        return new Query() as unknown as Promise<string[]>;
+      }
+    }
+    const received: unknown[] = [];
+    @Aspect()
+    class Trace {
+      @AfterReturning(named("find"))
+      returned(_jp: JoinPoint<AnyShape>, rows: unknown): void {
+        received.push(rows);
+      }
+    }
+    const declared = weave(new Declared(), [new Trace()]);
+
+    const result = declared.find();
+
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toEqual(["row"]);
+    expect(received).toEqual([["row"]]);
+  });
+});
+
+describe("a method declared to return a Promise that returns a plain value", () => {
+  function Typed(): MethodDecorator {
+    return () => undefined;
+  }
+
+  class Cache {
+    @Typed()
+    read(): Promise<number> {
+      return 5 as unknown as Promise<number>;
+    }
+  }
+
+  const read = named("read");
+
+  it.each([
+    ["before", Before(read)],
+    ["after", After(read)],
+    ["afterReturning", AfterReturning(read)],
+  ] as const)("waits for asynchronous %s advice", async (kind, decorator) => {
+    @Aspect()
+    class Slow {
+      @(decorator as AdviceDecorator<AnyShape, () => Promise<void>>)
+      async advice(): Promise<void> {
+        await tick();
+        log.push(kind);
+      }
+    }
+    const cache = weave(new Cache(), [new Slow()]);
+
+    const result = cache.read();
+
+    expect(result).toBeInstanceOf(Promise);
+    expect(await result).toBe(5);
+    expect(log).toEqual([kind]);
+  });
+});
+
 describe("a promise-returning method that throws synchronously", () => {
   function Typed(): MethodDecorator {
     return () => undefined;

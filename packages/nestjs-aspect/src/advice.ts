@@ -20,6 +20,7 @@ import type {
   ReturnValueAdapter,
   ReturnValueAdapterRegistry,
 } from "./types";
+import { isObject } from "./util";
 
 /**
  * Advice kinds in their order within one aspect. The index of a kind is its
@@ -44,12 +45,6 @@ const INTERCEPTOR_FACTORIES: Record<
   afterThrowing: afterThrowingInterceptor,
 };
 
-function isObject(value: unknown): value is Record<PropertyKey, unknown> {
-  return (
-    (typeof value === "object" && value !== null) || typeof value === "function"
-  );
-}
-
 /** True for an object with an `invoke` function. */
 export function isMethodInterceptor(
   advice: unknown,
@@ -70,13 +65,17 @@ export function isAspectAdvice(advice: unknown): advice is AspectAdvice {
 }
 
 /**
- * Follows thenables with `then`: `onSuccess` and `finally` wait for the
- * callback and keep the resolved value or the rejection; `onError` rejects
- * with whatever the callback throws.
+ * Follows promises: `onSuccess` and `finally` wait for the callback and keep
+ * the resolved value or the rejection; `onError` rejects with whatever the
+ * callback throws.
+ *
+ * It supports instances of `Promise` only. Another thenable, such as a lazy
+ * query builder, is a plain value: following it would run it and replace it
+ * with a promise.
  */
-export const promiseAdapter: ReturnValueAdapter<PromiseLike<unknown>> = {
-  supports(value: unknown): value is PromiseLike<unknown> {
-    return isObject(value) && typeof value.then === "function";
+export const promiseAdapter: ReturnValueAdapter<Promise<unknown>> = {
+  supports(value: unknown): value is Promise<unknown> {
+    return value instanceof Promise;
   },
   onSuccess(value, cb) {
     return value.then(async (resolved) => {

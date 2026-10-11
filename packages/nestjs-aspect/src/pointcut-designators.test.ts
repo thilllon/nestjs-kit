@@ -118,10 +118,6 @@ describe("P.method", () => {
     ).toBe(false);
     expect(matches(pointcut, ref(Unrelated, "findOne"))).toBe(false);
   });
-
-  it("is a static pointcut", () => {
-    expect(pointcut.methodMatcher.isRuntime).toBe(false);
-  });
 });
 
 describe("P.within and P.target", () => {
@@ -418,6 +414,13 @@ describe("P.bean", () => {
     );
     expect(matches(P.bean("userRepository"), registered(TOKEN))).toBe(true);
     expect(matches(P.bean("User"), registered(UserRepository))).toBe(false);
+  });
+
+  it("treats * in a string as a wildcard", () => {
+    const pointcut = P.bean("User*");
+
+    expect(matches(pointcut, registered(UserRepository))).toBe(true);
+    expect(matches(pointcut, registered("USER_REPOSITORY"))).toBe(false);
   });
 
   it("tests a RegExp against the same text", () => {

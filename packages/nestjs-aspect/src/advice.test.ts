@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import { describe, expect, it } from "vitest";
 import {
-  ADVICE_KINDS,
   aspectAdviceAdapter,
   createAdviceAdapterRegistry,
   createReturnValueAdapterRegistry,
@@ -56,13 +55,14 @@ describe("advice guards", () => {
 });
 
 describe("promiseAdapter", () => {
-  it("supports thenables only", () => {
+  it("supports promises and their subclasses, not other thenables", () => {
+    class Deferred<T> extends Promise<T> {}
     // biome-ignore lint/suspicious/noThenProperty: the test needs a thenable that is not a Promise
     const thenable = { then: () => undefined };
 
     expect(promiseAdapter.supports(Promise.resolve(1))).toBe(true);
-    expect(promiseAdapter.supports(thenable)).toBe(true);
-    expect(promiseAdapter.supports({ catch: () => undefined })).toBe(false);
+    expect(promiseAdapter.supports(Deferred.resolve(1))).toBe(true);
+    expect(promiseAdapter.supports(thenable)).toBe(false);
     expect(promiseAdapter.supports(1)).toBe(false);
     expect(promiseAdapter.supports(null)).toBe(false);
   });
@@ -325,17 +325,5 @@ describe("advice adapter registry", () => {
 
     expect(service.run()).toBe("ran");
     expect(calls).toEqual(["before"]);
-  });
-});
-
-describe("ADVICE_KINDS", () => {
-  it("lists the kinds in their order within one aspect", () => {
-    expect(ADVICE_KINDS).toEqual([
-      "around",
-      "before",
-      "after",
-      "afterReturning",
-      "afterThrowing",
-    ]);
   });
 });

@@ -12,7 +12,7 @@ Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript 
 
 ## Annotations
 
-`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes. Its type parameters are the name literal, the value type and the method contract the annotation accepts.
+`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes; an annotation without a method contract also applies to accessors. Its type parameters are the name literal, the value type and the method contract the annotation accepts.
 
 ```ts
 import { createAnnotation } from "nestjs-aspect";
@@ -47,7 +47,7 @@ export class UserService {
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses.
 - `requiresAdvice` marks an annotation whose methods must be matched by an advisor.
 - `isAnnotation(value)` tells an annotation from other functions.
-- Decorators created with Nest's `Reflector.createDecorator()` are accepted wherever an annotation is read.
+- Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `jp.findAnnotation`.
 
 ## Pointcuts
 
@@ -64,7 +64,7 @@ export class UserService {
 | `P.withinAnnotated(A)`                       | Members declared on a class that carries `A`.                                           |
 | `P.targetAnnotated(A)`                       | Members of a class that carries `A`.                                                    |
 | `P.args(Account, P.ANY, P.REST)`             | Calls by argument, checked on every call; types `jp.args`.                              |
-| `P.bean("token" \| /Service$/ \| Type)`      | Classes registered under a matching provider token.                                     |
+| `P.bean("token" \| /Service$/ \| Type)`      | Classes registered under a matching provider token; `*` in a string is a wildcard.      |
 | `P.inModule(Module, { transitive })`         | Classes a Nest module declares, with `transitive` also those of the modules it imports. |
 | `P.metadata(key, predicate?)`                | Members with Reflect metadata `key`, such as metadata stored by `SetMetadata`.          |
 | `P.matching({ classFilter, methodMatcher })` | Members a custom class filter and method matcher accept.                                |
@@ -134,10 +134,12 @@ export class ResilienceAspect {
 | `@Around(pc)`                       | `(jp: PJP<typeof pc>)` returning the result type | Surrounds the join point; its return value becomes the result.                 |
 
 - Within one aspect the advice order is around, before, after, after returning, after throwing; advice of the same kind runs in declaration order.
-- Advice follows the settlement of a Promise result, not the synchronous return.
-- Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous. On a join point known to be synchronous, `async` advice is a compile error.
-- `jp.annotation(A)` is callable only when the pointcut guarantees `A`; `jp.findAnnotation(A)` returns `undefined` when `A` is absent. Both look at the method, then the declaring class, then the target class.
-- `jp.proceed()` and `jp.proceedWith(...args)` can be called more than once.
+- Advice follows the settlement of a `Promise` result, not the synchronous return. Another thenable, such as a lazy query builder, is followed only when the method is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise`. Returned from any other method it reaches the caller untouched and is not run.
+- Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AopUsageError` when called.
+- `async` before advice needs a method that is declared asynchronous. A method that returns a promise without being `async` and without a decorated `Promise` return type counts as synchronous for before advice.
+- `jp.annotation(A)` is callable only when the pointcut guarantees `A`; `jp.findAnnotation(A)` returns `undefined` when `A` is absent. Both look at the method, then the declaring class, then the target class. Each class step includes inherited class annotations, so for an inherited method an annotation on a superclass of the declaring class wins over one on the target class.
+- `jp.args` is frozen. `jp.proceedWith(...args)` runs the rest of the chain with other arguments.
+- `jp.proceed()` and `jp.proceedWith(...args)` can be called more than once; each call starts from the arguments the advice received or passes.
 
 The compiler rejects an annotation on a method outside its contract, a missing or mistyped annotation value, around advice with the wrong return type, `proceedWith` arguments that do not fit the method, an after-returning result or after-throwing error parameter of the wrong type, and `P.method` with a name that is not a method of the class. Structurally identical classes are interchangeable to TypeScript, and broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
 
@@ -176,6 +178,8 @@ The entry point also exports the extension interfaces `AdviceAdapter` and `Retur
 | `AopConfigurationError` | Aspects, pointcuts or advice are misconfigured, such as an advice decorator without a pointcut. |
 | `AopUsageError`         | Advice is misused at run time, such as asynchronous advice on a synchronous join point.         |
 | `AopNotReadyError`      | A woven method is invoked before the instance of an aspect that advises it exists.              |
+
+`instanceof` recognizes these errors across the CommonJS and ES module builds of the package.
 
 ## Design
 

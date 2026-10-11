@@ -1,24 +1,31 @@
 // One interceptor factory per advice kind. Rules shared by all of them:
 // - The advice method is `aspect[advice.methodName]`, called with the aspect
 //   instance as `this`. The instance comes from
-//   `advice.resolveAspect(invocation.method, invocation.target)` on every
-//   call; `undefined` raises `AopNotReadyError` naming the aspect and the
-//   join point.
+//   `advice.resolveAspect(invocation.method, invocation.target)` when the
+//   chain reaches the advice; `undefined` raises `AopNotReadyError` naming
+//   the aspect and the join point. The error is thrown before the advice and
+//   everything inside it run; advice outside it has already started, and
+//   after asynchronous before advice outside it the error is a rejection.
 // - "Asynchronous result" means a value for which
-//   `context.returnValues.find(value)` returns an adapter `A`.
+//   `context.returnValues.find(value)` returns an adapter `A`, or a thenable
+//   returned by a join point with `invocation.method.isAsync`, which is
+//   followed as `Promise.resolve(value)`. Any other thenable, such as a lazy
+//   query builder returned by a synchronous method, is a plain value: it is
+//   returned untouched and never run.
+// - The join point is asynchronous when `invocation.method.isAsync` or its
+//   result is asynchronous. Before advice runs ahead of the result and has
+//   `invocation.method.isAsync` only.
 // - A before, after, afterReturning or afterThrowing advice that returns a
-//   thenable is awaited when the join point result is asynchronous or (for
-//   before) the join point is asynchronous. Otherwise the interceptor raises
-//   `AopUsageError`: on a synchronous join point the advice must be
+//   thenable is awaited on an asynchronous join point. On a synchronous join
+//   point the interceptor raises `AopUsageError`: the advice must be
 //   synchronous. The thenable it returned is still observed, so that its
 //   rejection is not reported as unhandled.
 // - A join point that throws synchronously has no result to follow. Advice
 //   that returns a thenable for it is awaited when `invocation.method.isAsync`
 //   and the error is delivered as a rejection; otherwise `AopUsageError`.
-// - On an asynchronous join point, an error that before advice throws
-//   synchronously is delivered as a rejection, as the join point itself would
-//   deliver it. `AopNotReadyError` is always thrown synchronously, before the
-//   join point runs.
+// - On a join point with `invocation.method.isAsync`, an error that before
+//   advice throws synchronously is delivered as a rejection, as the join
+//   point itself would deliver it.
 
 import { AopNotReadyError, AopUsageError } from "./errors";
 import { createProceedingJoinPoint } from "./join-point";
@@ -27,14 +34,31 @@ import type {
   InterceptorContext,
   MethodInterceptor,
   MethodInvocation,
+  ReturnValueAdapter,
 } from "./types";
+import { isThenable } from "./util";
 
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return (
-    ((typeof value === "object" && value !== null) ||
-      typeof value === "function") &&
-    typeof (value as { then?: unknown }).then === "function"
-  );
+/** An asynchronous result and the adapter that follows it. */
+interface Followed {
+  readonly adapter: ReturnValueAdapter;
+  readonly result: unknown;
+}
+
+function follow(
+  result: unknown,
+  invocation: MethodInvocation,
+  context: InterceptorContext,
+): Followed | undefined {
+  const adapter = context.returnValues.find(result);
+  if (adapter) {
+    return { adapter, result };
+  }
+  if (invocation.method.isAsync && isThenable(result)) {
+    const promise = Promise.resolve(result);
+    const promiseAdapter = context.returnValues.find(promise);
+    return promiseAdapter && { adapter: promiseAdapter, result: promise };
+  }
+  return undefined;
 }
 
 function describeAdvice(advice: AspectAdvice): string {
@@ -107,6 +131,23 @@ function rethrowAfterAdvice(
 }
 
 /**
+ * Returns the synchronous `result` of a join point, after advice that
+ * returned `returned`.
+ */
+function returnAfterAdvice(
+  returned: unknown,
+  result: unknown,
+  advice: AspectAdvice,
+  invocation: MethodInvocation,
+): unknown {
+  if (isThenable(returned) && invocation.method.isAsync) {
+    return Promise.resolve(returned).then(() => result);
+  }
+  requireSynchronous(returned, advice, invocation);
+  return result;
+}
+
+/**
  * `advice(pjp)`; its return value is the result. `pjp.proceed()` runs
  * `invocation.cloneFromHere().proceed()` and `pjp.proceedWith(...args)` runs
  * `invocation.cloneFromHere(args).proceed()`.
@@ -157,8 +198,9 @@ export function beforeInterceptor(
 /**
  * Finally semantics. A synchronous throw runs the advice and rethrows. An
  * asynchronous result yields `A.finally(result, () => advice(jp))`. A
- * synchronous result runs the advice and is returned. An error from the
- * advice replaces the outcome.
+ * synchronous result runs the advice and is returned; when the advice
+ * returns a thenable and `invocation.method.isAsync`, as a promise that
+ * waits for it. An error from the advice replaces the outcome.
  */
 export function afterInterceptor(
   advice: AspectAdvice,
@@ -174,12 +216,11 @@ export function afterInterceptor(
       } catch (error) {
         return rethrowAfterAdvice(run(joinPoint), error, advice, invocation);
       }
-      const adapter = context.returnValues.find(result);
-      if (adapter) {
-        return adapter.finally(result, () => run(joinPoint));
+      const followed = follow(result, invocation, context);
+      if (followed) {
+        return followed.adapter.finally(followed.result, () => run(joinPoint));
       }
-      requireSynchronous(run(joinPoint), advice, invocation);
-      return result;
+      return returnAfterAdvice(run(joinPoint), result, advice, invocation);
     },
   };
 }
@@ -187,8 +228,9 @@ export function afterInterceptor(
 /**
  * Runs `advice(jp, value)` after a normal completion and keeps the result:
  * `A.onSuccess(result, (value) => advice(jp, value))` for an asynchronous
- * result, `advice(jp, result)` otherwise. An error from the advice
- * propagates instead of the result.
+ * result, `advice(jp, result)` otherwise; when that advice returns a thenable
+ * and `invocation.method.isAsync`, the result is a promise that waits for
+ * it. An error from the advice propagates instead of the result.
  */
 export function afterReturningInterceptor(
   advice: AspectAdvice,
@@ -199,12 +241,18 @@ export function afterReturningInterceptor(
       const run = resolveAdvice(advice, invocation);
       const joinPoint = invocation.joinPoint;
       const result = invocation.proceed();
-      const adapter = context.returnValues.find(result);
-      if (adapter) {
-        return adapter.onSuccess(result, (value) => run(joinPoint, value));
+      const followed = follow(result, invocation, context);
+      if (followed) {
+        return followed.adapter.onSuccess(followed.result, (value) =>
+          run(joinPoint, value),
+        );
       }
-      requireSynchronous(run(joinPoint, result), advice, invocation);
-      return result;
+      return returnAfterAdvice(
+        run(joinPoint, result),
+        result,
+        advice,
+        invocation,
+      );
     },
   };
 }
@@ -240,11 +288,11 @@ export function afterThrowingInterceptor(
           invocation,
         );
       }
-      const adapter = context.returnValues.find(result);
-      if (!adapter) {
+      const followed = follow(result, invocation, context);
+      if (!followed) {
         return result;
       }
-      return adapter.onError(result, (error) => {
+      return followed.adapter.onError(followed.result, (error) => {
         if (!handles(error)) {
           throw error;
         }

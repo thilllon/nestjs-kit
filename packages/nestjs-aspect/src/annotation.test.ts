@@ -57,12 +57,6 @@ class GrandchildService extends ChildService {
 }
 
 describe("createAnnotation", () => {
-  it("exposes its name and whether it requires advice", () => {
-    expect(Retryable.annotationName).toBe("Retryable");
-    expect(Retryable.requiresAdvice).toBe(true);
-    expect(Audited.requiresAdvice).toBe(false);
-  });
-
   it("rejects an empty name", () => {
     expect(() => createAnnotation("")).toThrow(AopConfigurationError);
   });

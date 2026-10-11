@@ -9,6 +9,7 @@ import type {
   PointcutLike,
   Shape,
 } from "./types";
+import { isObject } from "./util";
 
 /**
  * Members that broad pointcuts never match. A Nest lifecycle hook is a join
@@ -29,6 +30,18 @@ const EVERY_CLASS: ClassFilter = { matches: () => true };
 const EVERY_METHOD: MethodMatcher = { isRuntime: false, matches: () => true };
 
 const NO_ANNOTATIONS: ReadonlySet<string> = new Set();
+
+/** True for a value with a class filter and a method matcher that can match. */
+export function isPointcutLike(value: unknown): value is PointcutLike {
+  if (!isObject(value)) {
+    return false;
+  }
+  const { classFilter, methodMatcher } = value as Partial<PointcutLike>;
+  return (
+    typeof classFilter?.matches === "function" &&
+    typeof methodMatcher?.matches === "function"
+  );
+}
 
 /** Class filter and static method matcher, without the join point exclusions. */
 function matchesRaw(pointcut: PointcutLike, method: MethodRef): boolean {

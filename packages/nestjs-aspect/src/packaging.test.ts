@@ -178,6 +178,40 @@ describe("built nestjs-aspect package", () => {
     },
   );
 
+  it("recognizes the errors of one format as instances of the other format's classes", () => {
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { createRequire } from "node:module";
+import * as esm from "${packageName}";
+const cjs = createRequire(import.meta.url)("${packageName}");
+class Custom extends esm.AopUsageError {}
+console.log(JSON.stringify([
+  cjs.AopUsageError !== esm.AopUsageError,
+  new cjs.AopUsageError("x") instanceof esm.AopUsageError,
+  new esm.AopNotReadyError("x") instanceof cjs.AopNotReadyError,
+  new cjs.AopUsageError("x") instanceof esm.AopConfigurationError,
+  new cjs.AopUsageError("x") instanceof Custom,
+  new Custom("x") instanceof cjs.AopUsageError,
+  new Error("x") instanceof esm.AopUsageError,
+]));`,
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    expect(JSON.parse(output)).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
+  });
+
   it.each(["cts", "mts"] as const)(
     "type-checks a NodeNext .%s consumer against the built declarations",
     async (extension) => {

@@ -11,6 +11,7 @@ import type {
   JoinPoint,
   MethodInvocation,
   MethodRef,
+  RuntimeMethodMatcher,
 } from "./types";
 
 /**
@@ -42,7 +43,11 @@ export function buildChain(
         `The method matcher of an advisor of ${advisor.source.type.name} has isRuntime but no matchesRuntime()`,
       );
     }
-    return { interceptor, runtimeMatcher: matcher, advisor };
+    return {
+      interceptor,
+      runtimeMatcher: matcher as RuntimeMethodMatcher,
+      advisor,
+    };
   });
   return { method, links };
 }
@@ -53,17 +58,25 @@ export function buildChain(
  * `proceed()` takes the next link; a link whose `runtimeMatcher` rejects
  * `(method, args)` is skipped. Past the last link it calls
  * `chain.method.original` with `target` as `this` and `args`.
+ *
+ * `args` is a frozen copy of the given array, shared with the clones that do
+ * not replace it: advice cannot change the arguments of the join point, of
+ * other advice or of a later `proceed()` except through `proceedWith`.
  */
 export class Invocation implements MethodInvocation {
+  readonly args: readonly unknown[];
+
+  private cachedJoinPoint: JoinPoint<AnyShape> | undefined;
+
   constructor(
     readonly chain: InterceptorChain,
     readonly target: object,
-    readonly args: readonly unknown[],
+    args: readonly unknown[],
     /** Index of the next link. */
     protected index = 0,
-  ) {}
-
-  private cachedJoinPoint: JoinPoint<AnyShape> | undefined;
+  ) {
+    this.args = Object.isFrozen(args) ? args : Object.freeze([...args]);
+  }
 
   get method(): MethodRef {
     return this.chain.method;
@@ -79,7 +92,10 @@ export class Invocation implements MethodInvocation {
     const { links, method } = this.chain;
     while (this.index < links.length) {
       const link = links[this.index++];
-      if (link.runtimeMatcher?.matchesRuntime?.(method, this.args) === false) {
+      if (
+        link.runtimeMatcher &&
+        !link.runtimeMatcher.matchesRuntime(method, this.args)
+      ) {
         continue;
       }
       return link.interceptor.invoke(this);

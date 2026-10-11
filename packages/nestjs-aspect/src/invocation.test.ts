@@ -20,6 +20,7 @@ import { createClassRef, createMethodRef } from "./method-ref";
 import type {
   AnyShape,
   ChainOptions,
+  JoinPoint,
   MethodInterceptor,
   MethodInvocation,
   PointcutAdvisor,
@@ -288,6 +289,29 @@ describe("runtime matchers", () => {
     ]);
   });
 
+  it.each([false, undefined, 0, null, ""])(
+    "skip the advice when the matcher returns %j",
+    (answer) => {
+      @Aspect()
+      class Trace {
+        @Before(
+          matching(
+            () => true,
+            () => answer as boolean,
+          ),
+        )
+        before(): void {
+          log.push("before");
+        }
+      }
+      const service = weave(new Service(), [new Trace()]);
+
+      service.run("ab");
+
+      expect(log).toEqual(["run ab"]);
+    },
+  );
+
   it("see the arguments that around advice replaced", () => {
     const longValues = matching(
       (method) => method.name === "run",
@@ -309,6 +333,44 @@ describe("runtime matchers", () => {
 
     expect(service.run("ab")).toBe("replaced");
     expect(log).toEqual(["before", "run replaced"]);
+  });
+});
+
+describe("arguments", () => {
+  it("are read-only, so every proceed starts from the arguments it was given", () => {
+    const seen: unknown[] = [];
+    @Aspect()
+    class Retry {
+      @Around(targets)
+      around(jp: ProceedingJoinPoint<AnyShape>): unknown {
+        const results = [jp.proceed(), jp.proceed()];
+        seen.push(jp.args[0]);
+        return results;
+      }
+
+      @Before(targets)
+      before(jp: JoinPoint<AnyShape>): void {
+        expect(() => {
+          (jp.args as unknown[])[0] = "mutated";
+        }).toThrow(TypeError);
+      }
+    }
+    const service = weave(new Service(), [new Retry()]);
+
+    expect(service.run("ab")).toEqual(["ab", "ab"]);
+    expect(seen).toEqual(["ab"]);
+  });
+
+  it("are a copy of the array the caller passed", () => {
+    const passed = ["ab"];
+    const invocation = new Invocation(
+      { method: createMethodRef(createClassRef(Service), "run"), links: [] },
+      new Service(),
+      passed,
+    );
+    passed[0] = "changed";
+
+    expect(invocation.proceed()).toBe("ab");
   });
 });
 

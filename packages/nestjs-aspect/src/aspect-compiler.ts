@@ -4,6 +4,7 @@
 import { ADVICE_KINDS } from "./advice";
 import { getAdviceMetadata, getAspectMetadata } from "./aspect-decorators";
 import { AopConfigurationError } from "./errors";
+import { isPointcutLike } from "./pointcut";
 import type {
   AdvisorDescriptor,
   AspectAdvice,
@@ -11,18 +12,13 @@ import type {
   Class,
   PointcutAdvisor,
 } from "./types";
+import { isObject, isOrder } from "./util";
 
 export interface AspectCompilerOptions {
   /** Supplies aspect instances lazily, at call time. */
   resolveAspect: AspectInstanceResolver;
   /** Position of the aspect among the aspects and advisors of the application. */
   registration: number;
-}
-
-function isObject(value: unknown): value is object {
-  return (
-    (typeof value === "object" && value !== null) || typeof value === "function"
-  );
 }
 
 /** True when the prototype chain defines `name` as a method. */
@@ -114,7 +110,8 @@ export function compileAspect(
 /**
  * Describes an `@AopAdvisor` instance: its `pointcut`, `advice` and `order`
  * as they are at the time of the call, with `kindRank` 0 and `declaration` 0.
- * Throws `AopConfigurationError` when `pointcut` or `advice` is missing.
+ * Throws `AopConfigurationError` when `pointcut` or `advice` is missing or
+ * `order` is not a number.
  */
 export function describeAdvisor(
   advisor: PointcutAdvisor,
@@ -122,11 +119,7 @@ export function describeAdvisor(
   registration: number,
 ): AdvisorDescriptor {
   const { pointcut, advice, order } = advisor;
-  if (
-    !isObject(pointcut) ||
-    !isObject(pointcut.classFilter) ||
-    !isObject(pointcut.methodMatcher)
-  ) {
+  if (!isPointcutLike(pointcut)) {
     throw new AopConfigurationError(
       `The advisor ${type.name} has no pointcut with a classFilter and a methodMatcher`,
     );
@@ -134,7 +127,7 @@ export function describeAdvisor(
   if (!isObject(advice)) {
     throw new AopConfigurationError(`The advisor ${type.name} has no advice`);
   }
-  if (order !== undefined && typeof order !== "number") {
+  if (order !== undefined && !isOrder(order)) {
     throw new AopConfigurationError(
       `The advisor ${type.name} has an order that is not a number`,
     );

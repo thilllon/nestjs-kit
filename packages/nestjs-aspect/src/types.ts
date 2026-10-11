@@ -1,5 +1,5 @@
-// Every type that crosses a file boundary is declared here; the other source
-// files hold run-time code.
+// The contracts the source files share: shapes, annotations, matching input,
+// pointcuts, join points, the advisor API and the interceptor chain.
 
 import type { InjectionToken } from "@nestjs/common";
 import type { ReflectableDecorator } from "@nestjs/core";
@@ -49,11 +49,28 @@ export type OrShape<A extends Shape, B extends Shape> = {
 // Annotations
 // ---------------------------------------------------------------------------
 
+/**
+ * `unknown` for the descriptor of an accessor when `F` is no method contract
+ * (exactly `Fn`), `never` otherwise. A method contract cannot hold for an
+ * accessor, and a member whose type is a function goes through the method
+ * overload.
+ */
+export type AccessorGuard<F extends Fn, T> = [T] extends [Fn]
+  ? never
+  : (<G>() => G extends F ? 1 : 2) extends <G>() => G extends Fn ? 1 : 2
+    ? unknown
+    : never;
+
 export type MethodOrClassDecorator<F extends Fn> = {
   <T extends F>(
     target: object,
     key: string | symbol,
     desc: TypedPropertyDescriptor<T>,
+  ): void;
+  <T>(
+    target: object,
+    key: string | symbol,
+    desc: TypedPropertyDescriptor<T> & AccessorGuard<F, T>,
   ): void;
   (target: Class): void;
 };
@@ -230,6 +247,7 @@ export interface JoinPointSignature {
 export interface JoinPoint<S extends Shape> {
   readonly kind: JoinPointKind;
   readonly target: S["target"];
+  /** Frozen. `proceedWith` is the way to run the join point with other arguments. */
   readonly args: Readonly<S["args"]>;
   readonly signature: JoinPointSignature;
   readonly isAsync: boolean;
@@ -267,6 +285,7 @@ export type PJP<PC> = ProceedingJoinPoint<ShapeOf<PC>>;
 export interface MethodInvocation {
   readonly method: MethodRef;
   readonly target: object;
+  /** Frozen copy of the arguments of the call or of `cloneFromHere(args)`. */
   readonly args: readonly unknown[];
   readonly joinPoint: JoinPoint<AnyShape>;
   /**
@@ -423,13 +442,17 @@ export interface AdvisorDescriptor {
 // Interceptor chain
 // ---------------------------------------------------------------------------
 
+/** A method matcher with `isRuntime` and the `matchesRuntime` it requires. */
+export type RuntimeMethodMatcher = MethodMatcher &
+  Required<Pick<MethodMatcher, "matchesRuntime">>;
+
 export interface ChainLink {
   readonly interceptor: MethodInterceptor;
   /**
    * Present when the advisor's method matcher is a runtime matcher; the link
-   * is skipped on a call for which `matchesRuntime` returns false.
+   * is skipped on a call for which `matchesRuntime` returns a falsy value.
    */
-  readonly runtimeMatcher?: MethodMatcher;
+  readonly runtimeMatcher?: RuntimeMethodMatcher;
   readonly advisor: AdvisorDescriptor;
 }
 

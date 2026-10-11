@@ -85,8 +85,9 @@ function isAsyncMember(
 /**
  * Describes the member `name` of `classRef.type`, looked up along the
  * prototype chain. The declaring type is the class furthest up the chain
- * whose prototype defines the same function, so an inherited member that a
- * dispatcher stub shadows on the concrete prototype keeps its declaring type.
+ * whose prototype defines the same function, directly or under a dispatcher
+ * stub. Prototypes that do not define the member are skipped, so an inherited
+ * member keeps its declaring type wherever stubs shadow it below.
  *
  * Throws `AopConfigurationError` when the class has no such member of that
  * kind.
@@ -113,10 +114,15 @@ export function createMethodRef(
         break;
       }
       original = found;
-    } else if (found !== original) {
+    } else if (
+      found !== original &&
+      Object.getOwnPropertyDescriptor(prototype, name) !== undefined
+    ) {
+      // Another function or a member of another kind: the member is not
+      // declared any further up.
       break;
     }
-    if (original) {
+    if (original && found === original) {
       declaringType = prototype.constructor as Class;
     }
   }

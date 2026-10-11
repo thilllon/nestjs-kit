@@ -114,6 +114,48 @@ describe("createMethodRef", () => {
     expect(ref.original).toBe(original);
     expect(ref.declaringType).toBe(Parent);
   });
+
+  it("keeps the declaring type when the stub is not directly below it", () => {
+    class Parent {
+      run(): string {
+        return "parent";
+      }
+    }
+    class Middle extends Parent {}
+    class Child extends Middle {}
+    class Leaf extends Child {}
+    Object.defineProperty(Child.prototype, "run", {
+      value: Object.assign(() => "stub", { [ORIGINAL]: Parent.prototype.run }),
+      writable: true,
+      configurable: true,
+    });
+
+    for (const type of [Child, Leaf]) {
+      const ref = createMethodRef(createClassRef(type), "run");
+
+      expect(ref.original).toBe(Parent.prototype.run);
+      expect(ref.declaringType).toBe(Parent);
+    }
+  });
+
+  it("stops at a prototype that defines another function", () => {
+    class Parent {
+      run(): string {
+        return "parent";
+      }
+    }
+    class Middle extends Parent {
+      override run(): string {
+        return "middle";
+      }
+    }
+    class Child extends Middle {}
+    class Leaf extends Child {}
+
+    expect(createMethodRef(createClassRef(Leaf), "run").declaringType).toBe(
+      Middle,
+    );
+  });
 });
 
 describe("createClassRef", () => {

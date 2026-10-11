@@ -195,9 +195,10 @@ export interface PointcutFactory {
 
   /**
    * `bean(name)`: one registration of the class has a matching provider
-   * token. A string matches a string token exactly or, for a class or symbol
-   * token, its name or description; a `RegExp` tests the same text; a class
-   * matches the identical token.
+   * token. A string is tested against a string token or, for a class or
+   * symbol token, its name or description; `*` in it matches any run of
+   * characters and the pattern covers the whole text. A `RegExp` tests the
+   * same text; a class matches the identical token.
    */
   bean(token: string | RegExp | Class): Pointcut<AnyShape>;
 
@@ -434,10 +435,7 @@ export const P: PointcutFactory = {
     if (typeof token === "function") {
       matchesToken = (candidate) => candidate === token;
     } else {
-      const test =
-        typeof token === "string"
-          ? (text: string) => text === token
-          : textTest(token);
+      const test = textTest(token);
       matchesToken = (candidate) => {
         const text = tokenText(candidate);
         return text !== undefined && test(text);

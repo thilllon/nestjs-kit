@@ -25,6 +25,8 @@ import {
   type ProceedingJoinPoint,
   type ShapeOf,
 } from "./index";
+import { createClassRef, createMethodRef } from "./method-ref";
+import { matchesStatically } from "./pointcut";
 
 interface RetryOptions {
   attempts: number;
@@ -184,6 +186,36 @@ function declareUsage() {
     static readonly bad = P.method(UserService, "nope");
   }
 
+  // A union of a synchronous and an asynchronous method may be asynchronous.
+  const renameOrFind = renamePc.or(findById);
+  const anyOfBoth = P.any(renamePc, findById);
+
+  @Aspect()
+  class MixedAspect {
+    @Before(renameOrFind)
+    async before(jp: JP<typeof renameOrFind>): Promise<void> {}
+
+    @AfterThrowing(anyOfBoth)
+    async failed(jp: JP<typeof anyOfBoth>, error: unknown): Promise<void> {}
+  }
+
+  // Accessors accept an annotation that has no method contract.
+  class Settings {
+    @Audited()
+    get theme(): string {
+      return "dark";
+    }
+
+    @Audited()
+    set size(value: number) {}
+
+    // @ts-expect-error Retryable requires a method that returns a Promise
+    @Retryable({ attempts: 3 })
+    get retries(): number {
+      return 3;
+    }
+  }
+
   // or(): an annotation is guaranteed only when both sides guarantee it
   const either = P.annotated(Audited).or(P.withinAnnotated(Audited));
   const auditedOrRetry = P.annotated(Audited).or(P.annotated(Retryable));
@@ -243,6 +275,7 @@ function declareUsage() {
   return {
     Audited,
     Retryable,
+    Settings,
     UserService,
     accountOps,
     allOf,
@@ -307,6 +340,20 @@ describe("public types", () => {
     expect(names(usage.auditedOrRetry)).toEqual([]);
     expect(names(usage.findById)).toEqual([]);
     expect(names(usage.broad)).toEqual([]);
+  });
+
+  it("select an annotated accessor with P.kind", () => {
+    const { Audited, Settings } = declareUsage();
+    const getter = createMethodRef(createClassRef(Settings), "theme", "getter");
+    const setter = createMethodRef(createClassRef(Settings), "size", "setter");
+
+    expect(
+      matchesStatically(P.annotated(Audited).and(P.kind("getter")), getter),
+    ).toBe(true);
+    expect(
+      matchesStatically(P.annotated(Audited).and(P.kind("setter")), setter),
+    ).toBe(true);
+    expect(matchesStatically(P.annotated(Audited), getter)).toBe(false);
   });
 
   it("leave broad pointcuts and negations without guarantees", () => {

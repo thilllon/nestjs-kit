@@ -10,6 +10,7 @@ import type {
   Fn,
   MethodRef,
 } from "./types";
+import { constructorChain } from "./util";
 
 /**
  * Reflect metadata key of the annotations applied to one target. The value is
@@ -58,17 +59,6 @@ function ownRecords(
 
 function memberRecords(method: MethodRef): AnnotationRecords | undefined {
   return ownRecords(method.declaringType.prototype, method.name);
-}
-
-/** The class and its superclasses, nearest first. */
-function* constructorChain(type: Class): Generator<Class> {
-  for (
-    let current: unknown = type;
-    typeof current === "function" && current !== Function.prototype;
-    current = Object.getPrototypeOf(current)
-  ) {
-    yield current as Class;
-  }
 }
 
 function nestKey(annotation: AnnotationLike<any>): unknown {
@@ -120,7 +110,8 @@ function findOnClass(
 }
 
 /**
- * Creates a typed annotation usable on methods, accessors and classes.
+ * Creates a typed annotation usable on methods and classes, and on accessors
+ * when it declares no method contract.
  * Throws `AopConfigurationError` for an empty name.
  */
 export function createAnnotation<N extends string, V = void, F extends Fn = Fn>(
@@ -167,7 +158,10 @@ export function isAnnotation(
 
 /**
  * Looks an annotation up for a join point: the method, then the declaring
- * class, then the target class; the first one found wins.
+ * class, then the target class; the first one found wins. Each class step
+ * includes the annotations the class inherits, so for an inherited method an
+ * annotation on a superclass of the declaring class wins over one on the
+ * target class.
  *
  * A Nest `Reflector.createDecorator` decorator is read from its `KEY`
  * metadata: on `method.original` for the method, on the class constructors
