@@ -6,7 +6,7 @@
 [![npm monthly downloads](https://img.shields.io/npm/dm/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect)
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 
-This package is being prepared for its first npm release and is not yet published on npm. The entry point exports only the error classes listed below; the aspect API is planned and not implemented.
+This package is being prepared for its first npm release and is not yet published on npm. The entry point exports the error classes listed below and the declarations of the aspect API; the aspect API functions are not implemented and throw when called.
 
 Requires **Node.js 24+** and **NestJS 12**. Ships ESM, CommonJS, and TypeScript declarations.
 

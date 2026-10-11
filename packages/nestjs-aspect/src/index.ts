@@ -1,5 +1,70 @@
+// Shared: owned by the architect and frozen. The public entry point.
+
+export {
+  type AnnotationOptions,
+  createAnnotation,
+  isAnnotation,
+} from "./annotation";
+export { promiseAdapter } from "./advice";
+export {
+  type AdviceDecorator,
+  type AdviceResult,
+  After,
+  AfterReturning,
+  AfterThrowing,
+  AopAdvisor,
+  Around,
+  Aspect,
+  type AsyncGuard,
+  Before,
+} from "./aspect-decorators";
 export {
   AopConfigurationError,
   AopNotReadyError,
   AopUsageError,
 } from "./errors";
+export {
+  type ArgMatcher,
+  type ArgsOf,
+  type MethodKeys,
+  P,
+  type PointcutFactory,
+} from "./pointcut-designators";
+export type {
+  Advice,
+  AdviceAdapter,
+  AdviceKind,
+  AndShape,
+  Annotation,
+  AnnotationLike,
+  AnyShape,
+  AspectAdvice,
+  AspectInstantiation,
+  AspectOptions,
+  BeanRef,
+  Class,
+  ClassFilter,
+  ClassRef,
+  Fn,
+  InterceptorContext,
+  JoinPoint,
+  JoinPointKind,
+  JoinPointSignature,
+  JP,
+  MethodInterceptor,
+  MethodInvocation,
+  MethodMatcher,
+  MethodOrClassDecorator,
+  MethodRef,
+  NestAnnotation,
+  OrShape,
+  PJP,
+  Pointcut,
+  PointcutAdvisor,
+  PointcutLike,
+  ProceedingJoinPoint,
+  ReturnValueAdapter,
+  ReturnValueAdapterRegistry,
+  Shape,
+  ShapeOf,
+} from "./types";
