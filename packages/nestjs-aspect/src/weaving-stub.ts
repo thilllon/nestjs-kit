@@ -205,7 +205,8 @@ export function installIntroductionStub(
   if (record?.owner === type) {
     return record.original;
   }
-  const current: unknown = (own ?? findDescriptor(prototype, name))?.[field];
+  const descriptor = own ?? findDescriptor(prototype, name);
+  const current: unknown = descriptor?.[field];
   const existing =
     typeof current === "function"
       ? (stubRecord(current)?.original ?? (current as Fn))
@@ -219,6 +220,23 @@ export function installIntroductionStub(
     };
   const introduced = existing === undefined || stubRecord(current)?.introduced;
   const stub = createStub(type, name, kind, original, introduced);
+  // The property becomes an own property of the class, so the accessor the
+  // introduction does not add keeps the function the class has or inherits.
+  const accessors: Pick<PropertyDescriptor, "get" | "set"> = {};
+  for (const other of ["get", "set"] as const) {
+    const inherited: unknown = descriptor?.[other];
+    if (other !== field && typeof inherited === "function") {
+      accessors[other] =
+        isStub(inherited) && !isStubOf(inherited, type)
+          ? createStub(
+              type,
+              name,
+              ACCESSOR_KIND[other],
+              stubRecord(inherited)?.original ?? inherited,
+            )
+          : (inherited as Fn);
+    }
+  }
   try {
     Object.defineProperty(
       prototype,
@@ -226,8 +244,7 @@ export function installIntroductionStub(
       kind === "method"
         ? { value: stub, writable: true, enumerable: false, configurable: true }
         : {
-            get: own?.get,
-            set: own?.set,
+            ...accessors,
             [field]: stub,
             enumerable: false,
             configurable: true,

@@ -251,6 +251,27 @@ describe("per-class aspects", () => {
     expect(created).toHaveLength(3);
   });
 
+  it("advises a method that is called without its instance", async () => {
+    @Injectable()
+    class Stateless {
+      double(value: number) {
+        return value * 2;
+      }
+    }
+    const { Counting, seen } = counting("perClass", [Stateless]);
+    const { moduleRef } = await initWoven({
+      providers: [Clock, Stateless, Counting],
+    });
+    const { double } = moduleRef.get(Stateless);
+
+    expect(double(2)).toBe(4);
+    expect(double(3)).toBe(6);
+    expect(seen).toEqual([
+      [1, 1, 1],
+      [1, 2, 2],
+    ]);
+  });
+
   it("keys the aspect instance by the class of the object for an inherited member", async () => {
     class Base {
       touch() {}

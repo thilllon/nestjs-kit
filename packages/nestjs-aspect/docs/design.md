@@ -735,7 +735,7 @@ Beyond the Spring feature list, 0.0.1 contains: annotations with a method contra
 **Weaving time**
 
 - A call made while the container instantiates providers, in a constructor or a provider factory, is not guaranteed to be advised. Before the weaver factory has run, it runs without advice; `forRootAsync` delays the weaver by the time its options take to resolve. After that, a call that reaches a stub before the instance of its aspect or advisor exists raises `AspectNotReadyError`.
-- An application that is compiled and never initialized skips stage 2: the validation does not run, and the classes of factory and value provider instances are not woven.
+- An application that is compiled and never initialized skips stage 2: the validation does not run, and the classes of factory and value provider instances and of lazy-loaded modules are not woven.
 - A middleware class that is not also a provider is woven after the router has bound its `use` method: `use` itself is not advised, the methods it calls are.
 - The instance of a singleton factory or value provider is woven by its class in stage 2, so its advice is active from `AspectModule.onModuleInit` on.
 - A global module imported before `AspectModule` runs its `onModuleInit` hooks before stage 2 and its `onApplicationShutdown` hooks after the context is closed: the calls those hooks make run without advice, and a member that requires advice rejects the call.

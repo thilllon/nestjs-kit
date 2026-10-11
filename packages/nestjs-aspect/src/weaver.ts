@@ -336,6 +336,9 @@ export class AspectWeaver {
    */
   private readonly scopedRegistrations = new Map<Class, Registration[]>();
 
+  /** The `LazyModuleLoader` instances whose `load` the weaver wraps. */
+  private readonly lazyLoaders = new WeakSet<object>();
+
   /** True once stage 2 has completed without a failure. */
   private completed = false;
 
@@ -599,9 +602,14 @@ export class AspectWeaver {
       const loader: unknown = this.isNestCoreModule(module)
         ? module.providers.get(LazyModuleLoader)?.instance
         : undefined;
-      if (!isObject(loader) || typeof loader.load !== "function") {
+      if (
+        !isObject(loader) ||
+        typeof loader.load !== "function" ||
+        this.lazyLoaders.has(loader)
+      ) {
         continue;
       }
+      this.lazyLoaders.add(loader);
       const load = loader.load as LazyModuleLoader["load"];
       const container = this.container;
       const complete = (modulesBefore: number) =>
@@ -1034,7 +1042,7 @@ export class AspectWeaver {
     if (model === "singleton") {
       return this.instanceOf(type);
     }
-    if (!isObject(target)) {
+    if (model === "perTarget" && !isObject(target)) {
       throw new AspectUsageError(
         `${describeMember(method)} was called without its instance, which the ${model} aspect ${type.name} needs`,
       );
@@ -1165,6 +1173,9 @@ export class AspectWeaver {
     const previous = this.scan;
     const scan = this.scanContainer(true);
     this.observeInstances();
+    // Nest creates the loader in a factory provider, which can run after
+    // the factory of the weaver.
+    this.observeLazyModules();
     // The aspects and advisors are those of stage 1: a class first seen now
     // has no compiled advisors.
     this.scan = { ...scan, advisorTypes: previous.advisorTypes };

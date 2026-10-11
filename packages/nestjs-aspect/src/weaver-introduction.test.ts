@@ -245,26 +245,38 @@ describe("introductions", () => {
       }
     }
 
+    class Document {
+      get label(): string {
+        return "own getter";
+      }
+    }
+
     @Injectable()
     class Report {
       get label(): string {
         return "own getter";
       }
     }
-    const reports = P.within(Report);
+
+    /** Inherits the getter. */
+    @Injectable()
+    class Invoice extends Document {}
+    const documents = P.within(Report, Invoice);
 
     @Aspect()
     class Labelling {
-      @DeclareParents(reports, { use: DefaultLabelled, override: true })
+      @DeclareParents(documents, { use: DefaultLabelled, override: true })
       static readonly mixin: Labelled;
     }
     const { moduleRef } = await compileWoven({
-      providers: [Report, Labelling],
+      providers: [Report, Invoice, Labelling],
     });
-    const report = moduleRef.get(Report) as Report & Labelled;
-    (report as { label: string }).label = "introduced";
-    expect(report.current).toBe("introduced");
-    expect(moduleRef.get(Report).label).toBe("own getter");
+    for (const type of [Report, Invoice]) {
+      const document = moduleRef.get<{ label: string } & Labelled>(type);
+      document.label = "introduced";
+      expect(document.current).toBe("introduced");
+      expect(document.label).toBe("own getter");
+    }
   });
 
   it("rejects an introduced member that the class already has, unless the introduction overrides it", async () => {

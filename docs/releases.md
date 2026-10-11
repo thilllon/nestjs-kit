@@ -41,7 +41,7 @@ For a future package that does not yet exist, an initial owner-authenticated pub
 
 For that local first publication only, use `--provenance=false` to override the package's CI-oriented `publishConfig.provenance`; subsequent CI publications retain provenance. Configure its trusted publisher and verify the registry identity before enabling automated publication. Existing packages must continue through the release workflow instead of repeating this bootstrap.
 
-### Packages awaiting first publication
+### Packages held from automated publication
 
 A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication and the verification of its trusted publisher, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
