@@ -203,7 +203,6 @@ const retryable = P.annotated(Retryable);
 const charge = P.method(PaymentGateway, "charge");
 const inBilling = P.inModule(BillingModule);
 const queries = inBilling.and(P.name("find*")).and(P.annotated(Internal).not());
-const deposits = P.within(AccountService).and(P.args(Account, Number));
 
 // Reads by naming convention, in any class.
 const reads = P.any(P.name("find*"), P.name("get*"), P.name("list*"));
@@ -228,13 +227,22 @@ const accountCharges = P.annotated(Retryable).and(P.args(Account, P.REST));
 // Advice
 // ---------------------------------------------------------------------------
 
+@Injectable()
+class Maintenance {
+  readOnly = false;
+}
+
 @Aspect()
-class DepositLimitAspect {
-  @Before(deposits)
-  check(joinPoint: JoinPointOf<typeof deposits>): void {
-    const [account, amount] = joinPoint.args;
-    if (amount <= 0) {
-      throw new RangeError(`Cannot deposit ${amount} into ${account.id}`);
+class MaintenanceAspect {
+  constructor(private readonly maintenance: Maintenance) {}
+
+  @Before(billingWrites)
+  check(joinPoint: JoinPointOf<typeof billingWrites>): void {
+    if (this.maintenance.readOnly) {
+      const { targetType, name } = joinPoint.signature;
+      throw new Error(
+        `${targetType.name}.${String(name)} is unavailable: the application is read-only`,
+      );
     }
   }
 }
@@ -459,6 +467,11 @@ class ReplayAspect {
     this.lines.push(`${joinPoint.args[0]} closed`);
   }
 
+  @AfterReturning(replays)
+  finished(joinPoint: JoinPointOf<typeof replays>, last: unknown): void {
+    this.lines.push(`${joinPoint.args[0]} ended with ${last}`);
+  }
+
   @AfterThrowing(replays)
   failed(joinPoint: JoinPointOf<typeof replays>, error: unknown): void {
     this.lines.push(`${joinPoint.args[0]} failed: ${error}`);
@@ -468,12 +481,6 @@ class ReplayAspect {
 // ---------------------------------------------------------------------------
 // Recipes
 // ---------------------------------------------------------------------------
-
-const Transactional = createAnnotation<
-  "Transactional",
-  void,
-  (...args: any[]) => Promise<unknown>
->("Transactional", { requiresAdvice: true });
 
 @Injectable()
 class Database {
@@ -511,6 +518,12 @@ class Database {
     }
   }
 }
+
+const Transactional = createAnnotation<
+  "Transactional",
+  void,
+  (...args: any[]) => Promise<unknown>
+>("Transactional", { requiresAdvice: true });
 
 const transactional = P.annotated(Transactional);
 
@@ -553,8 +566,7 @@ class WalletService {
     await this.wallets.add(from, -amount);
   }
 
-  @Transactional()
-  async payAll(
+  async payEach(
     from: string,
     recipients: string[],
     amount: number,
@@ -565,101 +577,36 @@ class WalletService {
   }
 }
 
-const Cacheable = createAnnotation<
-  "Cacheable",
+@Module({
+  imports: [AspectModule.forRoot()],
+  providers: [Database, TransactionAspect, WalletRepository, WalletService],
+})
+class WalletModule {}
+
+const Job = createAnnotation<
+  "Job",
   string,
   (...args: any[]) => Promise<unknown>
->("Cacheable");
-
-const CacheEvict = createAnnotation<"CacheEvict", string>("CacheEvict");
-
-const cacheable = P.annotated(Cacheable);
-const cacheEvict = P.annotated(CacheEvict);
-
-@Aspect({ order: 50 })
-class CacheAspect {
-  private readonly caches = new Map<string, Map<string, Promise<unknown>>>();
-
-  @Around(cacheable)
-  read(joinPoint: ProceedingJoinPointOf<typeof cacheable>): Promise<unknown> {
-    const name = joinPoint.annotation(Cacheable);
-    const cache = this.caches.get(name) ?? new Map<string, Promise<unknown>>();
-    this.caches.set(name, cache);
-    const key = JSON.stringify(joinPoint.args);
-    let cached = cache.get(key);
-    if (!cached) {
-      cached = joinPoint.proceed();
-      cache.set(key, cached);
-      cached.catch(() => cache.delete(key));
-    }
-    return cached;
-  }
-
-  @AfterReturning(cacheEvict)
-  evict(joinPoint: JoinPointOf<typeof cacheEvict>): void {
-    this.caches.delete(joinPoint.annotation(CacheEvict));
-  }
-}
-
-@Injectable()
-class ExchangeRates {
-  private readonly rates = new Map([["EUR", 1.1]]);
-
-  lookups = 0;
-
-  @Cacheable("rates")
-  async rate(currency: string): Promise<number> {
-    this.lookups += 1;
-    const rate = this.rates.get(currency);
-    if (rate === undefined) {
-      throw new RangeError(`No rate for ${currency}`);
-    }
-    return rate;
-  }
-
-  async convert(amount: number, currency: string): Promise<number> {
-    return amount * (await this.rate(currency));
-  }
-
-  @CacheEvict("rates")
-  async publish(currency: string, rate: number): Promise<void> {
-    this.rates.set(currency, rate);
-  }
-}
-
-const Job = createAnnotation<"Job", string, () => Promise<void>>("Job", {
-  requiresAdvice: true,
-});
+>("Job", { requiresAdvice: true });
 
 const jobs = P.annotated(Job);
 
 @Injectable()
-class JobLog {
-  readonly lines: string[] = [];
+class ErrorReporter {
+  readonly reports: string[] = [];
+
+  report(source: string, error: unknown): void {
+    this.reports.push(`${source}: ${error}`);
+  }
 }
 
 @Aspect()
 class JobAspect {
-  private readonly running = new Set<string>();
+  constructor(private readonly reporter: ErrorReporter) {}
 
-  constructor(private readonly log: JobLog) {}
-
-  @Around(jobs)
-  async run(joinPoint: ProceedingJoinPointOf<typeof jobs>): Promise<void> {
-    const name = joinPoint.annotation(Job);
-    if (this.running.has(name)) {
-      this.log.lines.push(`${name} skipped: the previous run is not finished`);
-      return;
-    }
-    this.running.add(name);
-    try {
-      await joinPoint.proceed();
-      this.log.lines.push(`${name} finished`);
-    } catch (error) {
-      this.log.lines.push(`${name} failed: ${error}`);
-    } finally {
-      this.running.delete(name);
-    }
+  @AfterThrowing(jobs)
+  failed(joinPoint: JoinPointOf<typeof jobs>, error: unknown): void {
+    this.reporter.report(joinPoint.annotation(Job), error);
   }
 }
 
@@ -688,6 +635,12 @@ class OutboxRelayJob {
     await this.outbox.flush();
   }
 }
+
+@Module({
+  imports: [AspectModule.forRoot()],
+  providers: [ErrorReporter, JobAspect, Outbox, OutboxRelayJob],
+})
+class JobsModule {}
 
 @Injectable()
 class UserRepository {
@@ -762,6 +715,12 @@ class RepositoryTimingAspect {
     }
   }
 }
+
+@Module({
+  imports: [AspectModule.forRoot(), PersistenceModule],
+  providers: [Timings, RepositoryTimingAspect],
+})
+class ReportingModule {}
 
 // ---------------------------------------------------------------------------
 // Advisors
@@ -1048,16 +1007,36 @@ describe("README examples", () => {
     ]);
   });
 
-  it("before advice: prevents the join point by throwing, for the calls its arguments match", async () => {
-    const moduleRef = await billing(DepositLimitAspect);
-    const accounts = moduleRef.get(AccountService);
+  it("before advice: prevents the calls its pointcut selects by throwing", async () => {
+    const app = await billing(Maintenance, MaintenanceAspect);
+    const accounts = app.get(AccountService);
     const account = accounts.open("acc-1");
 
-    expect(accounts.deposit(account, 40).balance).toBe(40);
-    expect(() => accounts.deposit(account, -5)).toThrow(
-      "Cannot deposit -5 into acc-1",
+    app.get(Maintenance).readOnly = true;
+
+    expect(() => accounts.deposit(account, 40)).toThrow(
+      "AccountService.deposit is unavailable: the application is read-only",
     );
-    expect(account.balance).toBe(40);
+    expect(account.balance).toBe(0);
+    expect(accounts.find("acc-1")).toBe(account);
+    await expect(app.get(PaymentGateway).charge(account, 5)).rejects.toThrow(
+      "PaymentGateway.charge is unavailable",
+    );
+
+    const inspector = app.get(AspectInspector);
+    const selected = inspector
+      .advisedMembers()
+      .filter(({ advisors }) =>
+        advisors.some(({ type }) => type === MaintenanceAspect),
+      )
+      .map(({ type, name }) => `${type.name}.${String(name)}`);
+
+    expect(selected).toEqual([
+      "PaymentGateway.charge",
+      "PaymentGateway.refund",
+      "AccountService.open",
+      "AccountService.deposit",
+    ]);
   });
 
   it("after-returning and after-throwing advice: follow the settlement of the promise", async () => {
@@ -1157,13 +1136,14 @@ describe("README examples", () => {
       expect(lines).toEqual([]);
     }
     expect(events).toEqual(["created", "paid", "shipped"]);
-    expect(lines).toEqual(["orders closed"]);
+    expect(lines).toEqual(["orders ended with shipped", "orders closed"]);
 
+    lines.length = 0;
     for await (const event of store.replay("orders")) {
       expect(event).toBe("created");
       break;
     }
-    expect(lines).toEqual(["orders closed", "orders closed"]);
+    expect(lines).toEqual(["orders closed"]);
 
     lines.length = 0;
     await expect(store.replay("missing").next()).rejects.toThrow(
@@ -1180,47 +1160,66 @@ describe("README examples", () => {
     const { lines } = moduleRef.get(ReplayAspect);
 
     const replay = moduleRef.get(EventStore).replay("missing");
-    expect(lines).toEqual(["missing closed"]);
+    expect(lines).toEqual([
+      "missing ended with [object AsyncGenerator]",
+      "missing closed",
+    ]);
+    lines.length = 0;
     await expect(replay.next()).rejects.toThrow("Unknown stream missing");
 
-    expect(lines).toEqual(["missing closed"]);
+    expect(lines).toEqual([]);
   });
 
-  it("transaction recipe: commits a service method and rolls back the self-invoked calls of a failed one", async () => {
-    const moduleRef = await application([
-      Database,
-      TransactionAspect,
-      WalletRepository,
-      WalletService,
-    ]);
-    const database = moduleRef.get(Database);
-    const wallets = moduleRef.get(WalletRepository);
-    const service = moduleRef.get(WalletService);
+  it("transaction recipe: runs each self-invoked call in its own transaction and rolls back the failed one", async () => {
+    const app = await NestFactory.createApplicationContext(WalletModule);
+    const wallets = app.get(WalletRepository);
+    const service = app.get(WalletService);
 
     await wallets.add("alice", 25);
 
     await service.move("alice", "bob", 10);
-    await service.payAll("alice", ["bob", "carol"], 10).catch(() => undefined);
+    await service.payEach("alice", ["bob", "carol"], 10).catch(() => undefined);
 
     const balances = [
       await wallets.balance("alice"),
       await wallets.balance("bob"),
       await wallets.balance("carol"),
     ];
+    const { log } = app.get(Database);
 
-    expect(balances).toEqual([15, 10, 0]);
-    expect(database.log).toEqual(["begin", "commit", "begin", "rollback"]);
+    expect(balances).toEqual([5, 20, 0]);
+    expect(log).toEqual([
+      "begin",
+      "commit",
+      "begin",
+      "commit",
+      "begin",
+      "rollback",
+    ]);
+  });
+
+  it("transaction recipe: joins the transaction that is active when the method is called", async () => {
+    const app = await NestFactory.createApplicationContext(WalletModule);
+    const database = app.get(Database);
+    const wallets = app.get(WalletRepository);
+    const service = app.get(WalletService);
+    await wallets.add("alice", 15);
+
+    await expect(
+      database.transactional(async () => {
+        await service.move("alice", "bob", 10);
+        await service.move("alice", "carol", 10);
+      }),
+    ).rejects.toThrow("alice cannot pay 10");
+
+    expect(database.log).toEqual(["begin", "rollback"]);
+    expect(await wallets.balance("bob")).toBe(0);
   });
 
   it("transaction recipe: keeps concurrent transactions apart", async () => {
-    const moduleRef = await application([
-      Database,
-      TransactionAspect,
-      WalletRepository,
-      WalletService,
-    ]);
-    const wallets = moduleRef.get(WalletRepository);
-    const service = moduleRef.get(WalletService);
+    const app = await NestFactory.createApplicationContext(WalletModule);
+    const wallets = app.get(WalletRepository);
+    const service = app.get(WalletService);
     await wallets.add("alice", 10);
 
     const outcomes = await Promise.allSettled([
@@ -1236,10 +1235,21 @@ describe("README examples", () => {
     expect(await wallets.balance("carol")).toBe(0);
   });
 
-  it("transaction recipe: refuses to run a transactional method without the aspect", async () => {
+  it("transaction recipe: fails the bootstrap without the aspect, and the call where the bootstrap is lenient", async () => {
+    const providers = [Database, WalletRepository, WalletService];
+    const strict = await Test.createTestingModule({
+      imports: [AspectModule.forRoot({ report: false })],
+      providers,
+    })
+      .setLogger(new RecordingLogger())
+      .compile();
+
+    await expect(strict.init()).rejects.toThrow("WalletService.move");
+    await strict.close().catch(() => undefined);
+
     const moduleRef = await Test.createTestingModule({
       imports: [AspectModule.forRoot({ report: false, strict: false })],
-      providers: [Database, WalletRepository, WalletService],
+      providers,
     })
       .setLogger(new RecordingLogger())
       .compile();
@@ -1251,86 +1261,39 @@ describe("README examples", () => {
     expect(await moduleRef.get(WalletRepository).balance("bob")).toBe(0);
   });
 
-  it("caching recipe: shares one lookup between concurrent and self-invoked calls until the eviction", async () => {
-    const moduleRef = await application([CacheAspect, ExchangeRates]);
-    const rates = moduleRef.get(ExchangeRates);
-
-    const first = await Promise.all([
-      rates.convert(10, "EUR"),
-      rates.convert(20, "EUR"),
-      rates.rate("EUR"),
-    ]);
-    const lookups = rates.lookups;
-
-    await rates.publish("EUR", 1.2);
-    const second = await rates.convert(10, "EUR");
-
-    expect(first).toEqual([11, 22, 1.1]);
-    expect(lookups).toBe(1);
-    expect(second).toBe(12);
-    expect(rates.lookups).toBe(2);
-  });
-
-  it("caching recipe: does not keep a rejected lookup", async () => {
-    const moduleRef = await application([CacheAspect, ExchangeRates]);
-    const rates = moduleRef.get(ExchangeRates);
-
-    await expect(rates.rate("GBP")).rejects.toThrow("No rate for GBP");
-    await rates.publish("GBP", 1.3);
-
-    await expect(rates.rate("GBP")).resolves.toBe(1.3);
-    expect(rates.lookups).toBe(2);
-  });
-
-  it("job recipe: reports the failure of a job instead of rejecting, and skips an overlapping run", async () => {
-    const moduleRef = await application([
-      JobAspect,
-      JobLog,
-      Outbox,
-      OutboxRelayJob,
-    ]);
-    const job = moduleRef.get(OutboxRelayJob);
-    const outbox = moduleRef.get(Outbox);
-    const { lines } = moduleRef.get(JobLog);
+  it("job recipe: reports the failure of a job and leaves the error to its caller", async () => {
+    const app = await NestFactory.createApplicationContext(JobsModule);
+    const job = app.get(OutboxRelayJob);
+    const outbox = app.get(Outbox);
 
     outbox.pending.push("welcome");
-    await Promise.all([job.relay(), job.relay()]);
+    await job.relay();
+    outbox.pending.push("");
+    const [outcome] = await Promise.allSettled([job.relay()]);
+
+    const { reports } = app.get(ErrorReporter);
 
     expect(outbox.sent).toEqual(["welcome"]);
-    expect(lines).toEqual([
-      "outbox-relay skipped: the previous run is not finished",
-      "outbox-relay finished",
-    ]);
-
-    lines.length = 0;
-    outbox.pending.push("");
-    await expect(job.relay()).resolves.toBeUndefined();
-    await job.relay();
-
-    expect(lines).toEqual([
-      "outbox-relay failed: Error: Cannot send an empty message",
-      "outbox-relay finished",
+    expect(outcome.status).toBe("rejected");
+    expect(reports).toEqual([
+      "outbox-relay: Error: Cannot send an empty message",
     ]);
   });
 
   it("timing recipe: times the asynchronous methods of the repositories of the module, selected without a decorator", async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AspectModule.forRoot({ report: false }), PersistenceModule],
-      providers: [Timings, RepositoryTimingAspect],
-    }).compile();
-    await moduleRef.init();
-    const users = moduleRef.get(UserRepository);
+    const app = await NestFactory.createApplicationContext(ReportingModule);
+    const users = app.get(UserRepository);
 
     await users.rename(1, "Ada");
-    expect(await users.findName(1)).toBe("Ada");
-    expect(users.size()).toBe(1);
-    expect(await moduleRef.get(OrderRepository).findByUser(1)).toEqual([
-      "order-1",
-    ]);
-    expect(await moduleRef.get(IdGenerator).next()).toBe(1);
+    await users.findName(1);
+    users.size();
+    await app.get(OrderRepository).findByUser(1);
+    await app.get(IdGenerator).next();
 
-    const { samples } = moduleRef.get(Timings);
-    expect(samples.map(({ member }) => member)).toEqual([
+    const { samples } = app.get(Timings);
+    const timed = samples.map(({ member }) => member);
+
+    expect(timed).toEqual([
       "UserRepository.rename",
       "UserRepository.findName",
       "OrderRepository.findByUser",

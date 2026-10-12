@@ -2,6 +2,6 @@ export interface Order {
   id: number;
   sku: string;
   quantity: number;
-  /** Set once the inventory service has reserved the stock. */
+  /** The reservation of the stock, stored with the second write. */
   reservation?: string;
 }

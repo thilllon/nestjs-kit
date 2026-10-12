@@ -2,7 +2,7 @@
   "name": "nestjs-aspect-basic-example",
   "version": "0.0.0",
   "private": true,
-  "description": "A NestJS application with transaction, retry and audit aspects woven around the calls between its providers by nestjs-aspect",
+  "description": "A NestJS application with transaction, retry and call trace aspects woven around the calls between its providers by nestjs-aspect",
   "license": "ISC",
   "type": "module",
   "engines": {

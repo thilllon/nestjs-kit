@@ -7,10 +7,11 @@ Nest guards, interceptors, pipes and exception filters surround route handlers. 
 The example shows:
 
 - `TransactionAspect`, whose `@Around` advice runs a method annotated with `@Transactional()` in a transaction. An `AsyncLocalStorage` in `Database` carries the transaction to the repository calls of the method, and a failed method discards its writes;
-- `RetryAspect`, whose `@Around` advice reads the value of `@Retryable({ attempts })` from the join point and repeats one call of the inventory client after a transient error, inside the transaction of the calling service method;
-- `AuditAspect`, whose `@Before`, `@AfterReturning` and `@AfterThrowing` advice records the calls between the providers of `OrdersModule`. Its pointcut, `P.inModule(OrdersModule).and(P.within(OrdersController, Database).not())`, selects them without a decorator on any of them and leaves the route handlers to Nest;
+- `RetryAspect`, whose `@Around` advice reads the value of `@Retryable({ attempts })` from the join point and repeats one call of the inventory client after a transient error;
+- `CallTraceAspect`, whose `@Before`, `@AfterReturning` and `@AfterThrowing` advice records the calls between the providers of `OrdersModule`. Its pointcut, `P.inModule(OrdersModule).and(P.within(OrdersController, Database).not())`, selects them without a decorator on any of them and leaves the route handlers to Nest;
+- self-invocation: `OrdersService.place` reserves the stock and then calls `this.store()`, which carries `@Transactional()`. The call is advised, so the remote call and its retries stay outside the transaction and the two writes share it;
 - annotations that accept only methods returning a promise and fail the bootstrap when no advisor handles them;
-- aspect order: `AuditAspect` (`order: 10`) runs outside `TransactionAspect` (`order: 15`) and `RetryAspect` (`order: 20`), so the outcome of a method is audited after its commit or rollback and a retried call is audited once;
+- aspect order: `CallTraceAspect` (`order: 10`) runs outside `TransactionAspect` (`order: 15`) and `RetryAspect` (`order: 20`), so the outcome of a method is traced after its commit or rollback and a retried call is traced once;
 - `AspectInspector`, which lists the advice of a method.
 
 ## Run
@@ -34,17 +35,17 @@ curl --header "content-type: application/json" \
   --data '{"sku":"flaky","quantity":2}' \
   http://localhost:3000/orders
 curl http://localhost:3000/orders
-curl http://localhost:3000/audit
+curl http://localhost:3000/trace
 ```
 
-The order succeeds on the third call of `InventoryClient.reserve`, and the audit trail holds one `call` and one `return` entry for that method. An order for `offline` answers `503` after three attempts: `OrdersService.place` has stored the order before the reservation fails, the transaction rolls back, and `GET /orders` does not list it. `GET /audit` is declared outside `OrdersModule`, so it adds no entry.
+The order succeeds on the third call of `InventoryClient.reserve`, and the trace holds one `call` and one `return` entry for that method, followed by the entries of `OrdersService.store` and the two repository calls inside its transaction. An order for `offline` answers `503` after three attempts, before a transaction begins, and `GET /orders` does not list it. `GET /trace` is declared outside `OrdersModule`, so it adds no entry.
 
 ## Files
 
 - `src/transactional.ts` declares the `Transactional` annotation; `src/retryable.ts` declares the `Retryable` annotation and `TransientError`.
-- `src/transaction.aspect.ts`, `src/retry.aspect.ts` and `src/audit.aspect.ts` are the aspects; `src/audit-log.ts` is the provider `AuditAspect` injects.
+- `src/transaction.aspect.ts`, `src/retry.aspect.ts` and `src/call-trace.aspect.ts` are the aspects; `src/call-trace.ts` is the provider `CallTraceAspect` injects.
 - `src/database.ts` is the in-memory database with transactions.
 - `src/orders.module.ts` declares the controller and the advised service, repository and inventory client.
 - `src/app.module.ts` imports `AspectModule.forRoot()` first and registers the aspects as providers.
 - `src/create-app.ts` creates the Nest application on the Express adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks the transactions, the retries and the audit trail. Run it from the repository root with `pnpm --filter nestjs-aspect-basic-example test`.
+- `src/create-app.test.ts` boots the application and checks the transactions, the retries and the call trace. Run it from the repository root with `pnpm --filter nestjs-aspect-basic-example test`.

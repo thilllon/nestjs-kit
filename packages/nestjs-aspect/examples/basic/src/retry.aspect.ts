@@ -7,8 +7,8 @@ const retryable = P.annotated(Retryable);
  * Retries one call of an outbound client. A Nest interceptor surrounds the
  * route handler as a whole and does not reach a call between providers.
  *
- * Runs inside `AuditAspect`, which has the lower order: the audit trail
- * holds one call and one outcome for a method, however often it is retried.
+ * Runs inside `CallTraceAspect`, which has the lower order: the trace holds
+ * one call and one outcome for a method, however often it is retried.
  */
 @Aspect({ order: 20 })
 export class RetryAspect {
