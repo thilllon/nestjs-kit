@@ -12,12 +12,12 @@ const transactional = P.annotated(Transactional);
 /**
  * Delimits a transaction at an annotated provider method. An interceptor
  * surrounds a route handler as a whole and does not reach a method that
- * another provider calls. Calling `Database.transactional()` inside the
- * method is equivalent for one method; the annotation states the boundary
- * once for every method that carries it, and `requiresAdvice` keeps such a
- * method from running without this aspect.
+ * another provider or a worker calls.
+ *
+ * It has the highest order of the three aspects and is the innermost one:
+ * `RetryAspect` repeats the whole transaction.
  */
-@Aspect({ order: 15 })
+@Aspect({ order: 100 })
 export class TransactionAspect {
   constructor(private readonly database: Database) {}
 

@@ -11,18 +11,26 @@ import {
   it,
   vi,
 } from "vitest";
-import { CallTrace } from "./call-trace.js";
+import { CallStatistics, type CallTotals } from "./call-statistics.js";
+import { CheckoutService } from "./checkout.service.js";
 import { createApp } from "./create-app.js";
-import { Database } from "./database.js";
+import { ConflictError, Database } from "./database.js";
 import { InventoryClient } from "./inventory.client.js";
-import type { Order } from "./order.js";
+import {
+  InMemoryInventory,
+  InventoryTransport,
+} from "./inventory.transport.js";
+import type { Order, OrderEvent } from "./order.js";
 import { OrdersRepository } from "./orders.repository.js";
 import { OrdersService } from "./orders.service.js";
+import { TransientError } from "./retryable.js";
 
-let app: INestApplication | undefined;
+let app: INestApplication;
 let url: string;
+let database: Database;
+let inventory: InMemoryInventory;
 
-async function placeOrder(sku: string) {
+async function placeOrder(sku: string): Promise<{ status: number; body: any }> {
   const response = await fetch(`${url}/orders`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -31,20 +39,26 @@ async function placeOrder(sku: string) {
   return { status: response.status, body: await response.json() };
 }
 
-async function storedOrders(): Promise<Order[]> {
-  const response = await fetch(`${url}/orders`);
-  return (await response.json()) as Order[];
+async function read<T>(path: string): Promise<T> {
+  const response = await fetch(`${url}/${path}`);
+  return (await response.json()) as T;
 }
 
-async function callTrace(): Promise<string[]> {
-  const response = await fetch(`${url}/trace`);
-  const entries = (await response.json()) as {
-    event: string;
-    member: string;
-    error?: string;
-  }[];
-  return entries.map(({ event, member, error }) =>
-    [event, member, error].filter(Boolean).join(" "),
+async function storedOrder(id: number): Promise<Order | undefined> {
+  return (await read<Order[]>("orders")).find((order) => order.id === id);
+}
+
+async function eventsOf(orderId: number): Promise<string[]> {
+  return (await read<OrderEvent[]>("orders/events"))
+    .filter((event) => event.orderId === orderId)
+    .map(({ type }) => type);
+}
+
+/** `"member: calls/errors"` for every member the statistics hold. */
+async function statistics(): Promise<string[]> {
+  const summary = await read<Record<string, CallTotals>>("statistics");
+  return Object.entries(summary).map(
+    ([member, { calls, errors }]) => `${member}: ${calls}/${errors}`,
   );
 }
 
@@ -53,150 +67,232 @@ describe("basic example", () => {
     app = await createApp({ logger: false });
     await app.listen(0, "127.0.0.1");
     url = await app.getUrl();
+    database = app.get(Database);
+    inventory = app.get(InventoryTransport);
   });
 
   beforeEach(() => {
-    app?.get(CallTrace).entries.splice(0);
-    app?.get(Database).log.splice(0);
+    // Removes the backoff of RetryAspect.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    app.get(CallStatistics).reset();
+    database.log.splice(0);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
-    await app?.close();
+    await app.close();
   });
 
-  it("traces the calls between the providers of the orders module and leaves the route handlers out", async () => {
-    const order = await placeOrder("widget");
+  it("stores the order and its event together, and confirms it with the reservation", async () => {
+    const { status, body } = await placeOrder("widget");
 
-    expect(order).toEqual({
-      status: 201,
-      body: {
-        id: expect.any(Number),
-        sku: "widget",
-        quantity: 2,
-        reservation: "reservation-widget-2",
-      },
+    expect(status).toBe(201);
+    expect(body).toEqual({
+      id: expect.any(Number),
+      sku: "widget",
+      quantity: 2,
+      createdAt: expect.any(Number),
+      status: "confirmed",
+      reservation: inventory.reservations.get(`order-${body.id}`),
     });
-    const trace = await callTrace();
-    expect(trace).toEqual([
-      "call OrdersService.place",
-      "call InventoryClient.reserve",
-      "return InventoryClient.reserve",
-      "call OrdersService.store",
-      "call OrdersRepository.insert",
-      "return OrdersRepository.insert",
-      "call OrdersRepository.confirm",
-      "return OrdersRepository.confirm",
-      "return OrdersService.store",
-      "return OrdersService.place",
+    expect(await storedOrder(body.id)).toEqual(body);
+    expect(await eventsOf(body.id)).toEqual([
+      "order.created",
+      "order.confirmed",
     ]);
-    expect(await callTrace()).toEqual(trace);
   });
 
-  it("runs the self-invoked transactional method in one transaction that begins after the reservation", async () => {
-    const database = app?.get(Database);
-    const inventory = app?.get(InventoryClient) as InventoryClient;
+  it("records the calls of the repositories and the client, selected without a decorator, and no other call", async () => {
+    await placeOrder("widget");
+
+    expect(await statistics()).toEqual([
+      "OrdersRepository.insert: 1/0",
+      "OutboxRepository.append: 2/0",
+      "InventoryClient.reserve: 1/0",
+      "OrdersRepository.find: 1/0",
+      "OrdersRepository.save: 1/0",
+    ]);
+  });
+
+  it("holds no transaction open during the call of the inventory service", async () => {
     const reserve = vi
       .spyOn(inventory, "reserve")
-      .mockImplementation(async (sku, quantity) => {
-        expect(database?.log).toEqual([]);
-        return `reservation-${sku}-${quantity}`;
+      .mockImplementation(async () => {
+        expect(database.log).toEqual(["begin", "commit"]);
+        return "reservation-during-no-transaction";
       });
 
     const { body } = await placeOrder("widget");
 
     expect(reserve).toHaveBeenCalledOnce();
-    expect(database?.log).toEqual(["begin", "commit"]);
-    expect(await storedOrders()).toContainEqual(body);
+    expect(body.reservation).toBe("reservation-during-no-transaction");
+    expect(database.log).toEqual(["begin", "commit", "begin", "commit"]);
   });
 
-  it("retries a transient inventory failure inside one traced call, outside the transaction", async () => {
-    const order = await placeOrder("flaky");
+  it("repeats a reservation whose answer is lost, with the same idempotency key, as one recorded call", async () => {
+    const { status, body } = await placeOrder("flaky");
 
-    expect(order.status).toBe(201);
-    expect(app?.get(InventoryClient).attempts.get("flaky")).toBe(3);
-    expect(app?.get(Database).log).toEqual(["begin", "commit"]);
+    const key = `order-${body.id}`;
+    expect(status).toBe(201);
+    expect(body.status).toBe("confirmed");
+    expect(inventory.requests.get(key)).toBe(3);
+    expect(body.reservation).toBe(inventory.reservations.get(key));
     expect(
-      (await callTrace()).filter((entry) => entry.includes("reserve")),
-    ).toEqual([
-      "call InventoryClient.reserve",
-      "return InventoryClient.reserve",
-    ]);
+      [...inventory.reservations.keys()].filter((entry) => entry === key),
+    ).toHaveLength(1);
+    expect(await statistics()).toContain("InventoryClient.reserve: 1/0");
   });
 
-  it("begins no transaction when the reservation fails after the annotated number of attempts", async () => {
-    const order = await placeOrder("offline");
+  it("waits between the attempts, up to a limit that doubles", async () => {
+    vi.mocked(Math.random).mockReturnValue(1);
+    const timeouts = vi.spyOn(globalThis, "setTimeout");
 
-    expect(order.status).toBe(503);
-    expect(app?.get(InventoryClient).attempts.get("offline")).toBe(3);
-    expect(app?.get(Database).log).toEqual([]);
-    expect(await callTrace()).toEqual([
-      "call OrdersService.place",
-      "call InventoryClient.reserve",
-      "error InventoryClient.reserve TransientError",
-      "error OrdersService.place ServiceUnavailableException",
-    ]);
-    expect(
-      (await storedOrders()).filter(({ sku }) => sku === "offline"),
-    ).toEqual([]);
+    await app.get(InventoryClient).reserve("backoff", "flaky", 1);
+
+    const waits = timeouts.mock.calls
+      .map(([, milliseconds]) => milliseconds)
+      .filter((milliseconds) => milliseconds === 100 || milliseconds === 200);
+    expect(waits).toEqual([100, 200]);
   });
 
-  it("rolls back the stored order when the second write of the transaction fails", async () => {
-    const repository = app?.get(OrdersRepository) as OrdersRepository;
-    vi.spyOn(repository, "confirm").mockRejectedValue(
+  it("cancels the order when the inventory service refuses the reservation, without a second attempt", async () => {
+    const { status, body } = await placeOrder("sold-out");
+
+    const [order] = (await read<Order[]>("orders")).slice(-1);
+    expect(status).toBe(409);
+    expect(body.message).toBe("No stock for 2 of sold-out");
+    expect(order).toMatchObject({ sku: "sold-out", status: "cancelled" });
+    expect(inventory.requests.get(`order-${order.id}`)).toBe(1);
+    expect(await eventsOf(order.id)).toEqual([
+      "order.created",
+      "order.cancelled",
+    ]);
+    expect(await statistics()).toContain("InventoryClient.reserve: 1/1");
+  });
+
+  it("discards the event of a change whose second write fails", async () => {
+    const orders = app.get(OrdersService);
+    const order = await orders.create("gadget", 1);
+    database.log.splice(0);
+    vi.spyOn(app.get(OrdersRepository), "save").mockRejectedValue(
       new Error("The connection is closed"),
     );
 
-    const order = await placeOrder("gadget");
+    await expect(orders.confirm(order.id, "reservation-9")).rejects.toThrow(
+      "The connection is closed",
+    );
 
-    expect(order.status).toBe(500);
-    expect(app?.get(Database).log).toEqual(["begin", "rollback"]);
-    expect((await callTrace()).slice(-2)).toEqual([
-      "error OrdersService.store Error",
-      "error OrdersService.place Error",
+    expect(database.log).toEqual(["begin", "rollback"]);
+    expect(await storedOrder(order.id)).toMatchObject({ status: "pending" });
+    expect(await eventsOf(order.id)).toEqual(["order.created"]);
+  });
+
+  it("repeats the change that loses a conflict in a new transaction, which sees the other change", async () => {
+    const orders = app.get(OrdersService);
+    const order = await orders.create("gadget", 1);
+    database.log.splice(0);
+
+    const [confirmed, cancelled] = await Promise.all([
+      orders.confirm(order.id, "reservation-9"),
+      orders.cancel(order.id),
     ]);
-    expect(
-      (await storedOrders()).filter(({ sku }) => sku === "gadget"),
-    ).toEqual([]);
+
+    expect(database.log).toEqual([
+      "begin",
+      "begin",
+      "commit",
+      "rollback",
+      "begin",
+      "commit",
+    ]);
+    expect(confirmed.status).toBe("confirmed");
+    expect(cancelled).toEqual(confirmed);
+    expect(await eventsOf(order.id)).toEqual([
+      "order.created",
+      "order.confirmed",
+    ]);
   });
 
-  it("advises a provider method that is called without a request", async () => {
-    const order = await app?.get(OrdersService).place("widget", 1);
+  it("gives up a transaction that keeps losing conflicts after the attempts of the annotation", async () => {
+    const orders = app.get(OrdersService);
+    const order = await orders.create("gadget", 1);
+    const transactional = vi
+      .spyOn(database, "transactional")
+      .mockRejectedValue(new ConflictError("Another transaction won"));
 
-    expect(order?.reservation).toBe("reservation-widget-1");
-    expect(app?.get(Database).log).toEqual(["begin", "commit"]);
-    expect(app?.get(CallTrace).entries.at(0)).toEqual({
-      event: "call",
-      member: "OrdersService.place",
-    });
+    await expect(orders.cancel(order.id)).rejects.toThrow(
+      "Another transaction won",
+    );
+
+    expect(transactional).toHaveBeenCalledTimes(3);
   });
 
-  it("reports the advice of the transactional and the retried method in the order it runs", () => {
-    const inspector = app?.get(AspectInspector);
-    const advisors = (
-      type: typeof OrdersService | typeof InventoryClient,
-      name: string,
-    ) =>
+  it("completes a pending order from the worker timer, without a request, under the same aspects", async () => {
+    vi.stubEnv("RECONCILE_INTERVAL_MILLISECONDS", "20");
+    const worker = await createApp({ logger: false });
+    await worker.init();
+    try {
+      const transport: InMemoryInventory = worker.get(InventoryTransport);
+      const reserve = vi
+        .spyOn(transport, "reserve")
+        .mockRejectedValue(new TransientError("The service is unreachable"));
+
+      const placed = await worker.get(CheckoutService).place("widget", 2);
+
+      expect(placed.status).toBe("pending");
+      expect(reserve.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      reserve.mockRestore();
+      const orders = worker.get(OrdersService);
+      await vi.waitFor(async () => {
+        expect(await orders.list()).toEqual([
+          {
+            ...placed,
+            status: "confirmed",
+            reservation: transport.reservations.get(`order-${placed.id}`),
+          },
+        ]);
+      });
+
+      expect(worker.get(Database).log).toEqual([
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+      ]);
+      expect(worker.get(CallStatistics).summary()).toMatchObject({
+        "OrdersRepository.find": { calls: 1, errors: 0 },
+        "OrdersRepository.save": { calls: 1, errors: 0 },
+      });
+      expect((await orders.events()).map(({ type }) => type)).toEqual([
+        "order.created",
+        "order.confirmed",
+      ]);
+    } finally {
+      await worker.close();
+    }
+  });
+
+  it("reports the advice of each method in the order it runs", () => {
+    const inspector = app.get(AspectInspector);
+    const advisors = (type: new (...args: any[]) => unknown, name: string) =>
       inspector
-        ?.advisorsOf(type, name)
-        .map(({ type, kind }) => `${type.name} ${kind}`);
-    const traced = [
-      "CallTraceAspect before",
-      "CallTraceAspect afterReturning",
-      "CallTraceAspect afterThrowing",
-    ];
+        .advisorsOf(type, name)
+        .map(({ type, order }) => `${order} ${type.name}`);
 
-    expect(advisors(OrdersService, "place")).toEqual(traced);
-    expect(advisors(OrdersService, "store")).toEqual([
-      ...traced,
-      "TransactionAspect around",
+    expect(advisors(OrdersService, "confirm")).toEqual([
+      "20 RetryAspect",
+      "100 TransactionAspect",
     ]);
     expect(advisors(InventoryClient, "reserve")).toEqual([
-      ...traced,
-      "RetryAspect around",
+      "10 StatisticsAspect",
+      "20 RetryAspect",
     ]);
+    expect(advisors(OrdersRepository, "save")).toEqual(["10 StatisticsAspect"]);
+    expect(advisors(OrdersService, "list")).toEqual([]);
   });
 });
