@@ -65,7 +65,7 @@ The package ships ES module and CommonJS builds with TypeScript declarations. It
 
 ## Quick start
 
-An annotation marks the methods, an aspect holds the behavior, and `AspectModule.forRoot()` weaves the aspect into the application.
+An annotation marks the methods, an aspect holds the behavior, and `AspectModule.forRoot()` weaves the aspect into the application. `Pointcut` is the namespace of the pointcut designators, the functions that build pointcuts; the examples import it as `P` for brevity.
 
 ```ts
 import { Injectable, Module } from "@nestjs/common";
@@ -77,7 +77,7 @@ import {
   Before,
   createAnnotation,
   type JoinPointOf,
-  P,
+  Pointcut as P,
 } from "nestjs-aspect";
 
 export const Audited = createAnnotation<"Audited", string>("Audited");
@@ -255,7 +255,7 @@ export class BillingModule {}
 
 ## Pointcuts
 
-`P` builds typed pointcuts. A pointcut is a value: export it as a constant and share it between aspects.
+The designators of `Pointcut`, imported as `P`, build typed pointcuts. `Pointcut<Shape>` is also the type of a pointcut, so the same import names both. A pointcut is a value: export it as a constant and share it between aspects.
 
 | Selects by | Designator                                   | Matches                                                                                                         |
 | ---------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -276,7 +276,7 @@ export class BillingModule {}
 Compose pointcuts with `.and()`, `.or()` and `.not()`, or fold a list with `P.all(...)` and `P.any(...)`.
 
 ```ts
-import { P } from "nestjs-aspect";
+import { Pointcut as P } from "nestjs-aspect";
 
 export const retryable = P.annotated(Retryable);
 export const charge = P.method(PaymentGateway, "charge");
@@ -302,7 +302,7 @@ export const queries = inBilling
 A composed pointcut states a selection that would otherwise need a decorator on every method. These build on the pointcuts above:
 
 ```ts
-import { P } from "nestjs-aspect";
+import { Pointcut as P } from "nestjs-aspect";
 
 // Reads by naming convention, in any class.
 export const reads = P.any(P.name("find*"), P.name("get*"), P.name("list*"));
@@ -523,7 +523,7 @@ import {
   Around,
   Aspect,
   createAnnotation,
-  P,
+  Pointcut as P,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -682,7 +682,7 @@ import {
   AspectModule,
   createAnnotation,
   type JoinPointOf,
-  P,
+  Pointcut as P,
 } from "nestjs-aspect";
 
 export const Job = createAnnotation<
@@ -774,7 +774,7 @@ import {
   Around,
   Aspect,
   AspectModule,
-  P,
+  Pointcut as P,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -1014,7 +1014,7 @@ import {
   Aspect,
   AspectModule,
   type JoinPointOf,
-  P,
+  Pointcut as P,
 } from "nestjs-aspect";
 import { observableAdapter } from "nestjs-aspect/rxjs";
 import { type Observable, of } from "rxjs";
@@ -1065,7 +1065,7 @@ import {
   AfterThrowing,
   Aspect,
   type JoinPointOf,
-  P,
+  Pointcut as P,
   type ReturnValueAdapter,
 } from "nestjs-aspect";
 
@@ -1161,7 +1161,7 @@ Register it with `AspectModule.forRoot({ returnValueAdapters: [asyncGeneratorAda
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { Advisor, type MethodInterceptor, P } from "nestjs-aspect";
+import { Advisor, type MethodInterceptor, Pointcut as P } from "nestjs-aspect";
 
 @Advisor()
 export class TransactionAdvisor {
@@ -1213,7 +1213,7 @@ export class InvoiceService {
 
 ```ts
 import { Injectable, Scope } from "@nestjs/common";
-import { Aspect, Before, P } from "nestjs-aspect";
+import { Aspect, Before, Pointcut as P } from "nestjs-aspect";
 
 @Injectable({ scope: Scope.TRANSIENT })
 export class Session {
@@ -1398,8 +1398,8 @@ Independent of `strict`, `compile()` fails when `AspectModule` is registered mor
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `@EnableAspectJAutoProxy`                                           | `AspectModule.forRoot()` / `forRootAsync()`                              |
 | `@Aspect` with `@Component`                                         | `@Aspect()` in the `providers` of a module                               |
-| `@Pointcut` method                                                  | An exported constant built with `P`                                      |
-| AspectJ pointcut expression, `&&`, `\|\|`, `!`                      | `P` designators, `.and()`, `.or()`, `.not()`                             |
+| `@Pointcut` method                                                  | An exported constant built with `Pointcut`                               |
+| AspectJ pointcut expression, `&&`, `\|\|`, `!`                      | `Pointcut` designators, `.and()`, `.or()`, `.not()`                      |
 | `execution(* Type+.name(..))`, a name pattern of `execution`        | `P.method(Type, "name")`, `P.name()`                                     |
 | `within(Type)`, `target(Type)`, `this(Type)`                        | `P.within(Type)`, `P.target(Type)`                                       |
 | `@annotation(A)`, `@within(A)`, `@target(A)`                        | `P.annotated(A)`, `P.withinAnnotated(A)`, `P.targetAnnotated(A)`         |

@@ -13,8 +13,8 @@ import { isObject } from "./util";
 
 /**
  * Members that broad pointcuts never match. A Nest lifecycle hook is a join
- * point only for a pointcut that names it with `P.method`. `constructor` is
- * never a join point.
+ * point only for a pointcut that names it with `Pointcut.method`.
+ * `constructor` is never a join point.
  */
 export const RESERVED_MEMBERS: ReadonlySet<string | symbol> = new Set([
   "constructor",
@@ -188,13 +188,13 @@ export interface PointcutParts {
    * the guaranteed ones are always referenced.
    */
   references?: Iterable<string>;
-  /** True when a part is a caller-supplied matcher, as in `P.matching`. */
+  /** True when a part is a caller-supplied matcher, as in `Pointcut.matching`. */
   custom?: boolean;
 }
 
 /**
- * Builds a composable pointcut from its parts. Every designator of `P` goes
- * through this function.
+ * Builds a composable pointcut from its parts. Every designator of `Pointcut`
+ * goes through this function.
  *
  * `parts.includesExplicitly` is consulted only for members the pointcut
  * matches statically.
@@ -270,7 +270,7 @@ export function guaranteedAnnotations(
 /**
  * Names of the annotations the designators of the pointcut refer to, in any
  * position of a composition. `undefined` for a pointcut whose annotations
- * cannot be told: a hand-written one, or one composed with `P.matching`.
+ * cannot be told: a hand-written one, or one composed with `Pointcut.matching`.
  */
 export function referencedAnnotations(
   pointcut: PointcutLike,

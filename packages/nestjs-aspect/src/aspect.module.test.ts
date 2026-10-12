@@ -20,7 +20,7 @@ import {
   Before,
   type JoinPoint,
   type AnyShape,
-  P,
+  Pointcut as P,
 } from "./index";
 
 const TAG = "aspect-module-test:tag";

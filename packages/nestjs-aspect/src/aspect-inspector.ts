@@ -32,7 +32,7 @@ export interface AdvisedMember {
  *
  * `AspectModule` exports it globally. It reports the static matches of the
  * weaver: an advisor whose pointcut also has a runtime condition, such as
- * `P.args`, is listed for every member it may advise. Classes that become
+ * `Pointcut.args`, is listed for every member it may advise. Classes that become
  * known when the application initializes, such as the instance of a factory
  * provider, are listed from `onModuleInit` of `AspectModule` on. An
  * `@Advisor` class is listed once its instance exists. After the application

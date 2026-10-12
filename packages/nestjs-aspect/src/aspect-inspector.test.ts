@@ -12,7 +12,7 @@ import {
 } from "./aspect-decorators";
 import { AspectInspector } from "./aspect-inspector";
 import { DeclareParents } from "./introduction";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type {
   JoinPointOf,
   MethodInterceptor,

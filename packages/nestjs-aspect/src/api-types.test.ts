@@ -19,7 +19,7 @@ import {
   createAnnotation,
   type JoinPoint,
   type JoinPointOf,
-  P,
+  Pointcut as P,
   type ProceedingJoinPointOf,
   type Pointcut,
   type ProceedingJoinPoint,
@@ -379,6 +379,21 @@ describe("public types", () => {
       matchesStatically(P.annotated(Audited).and(P.kind("setter")), setter),
     ).toBe(true);
     expect(matchesStatically(P.annotated(Audited), getter)).toBe(false);
+  });
+
+  it("name the designators and the pointcut type through one import alias", () => {
+    const byName: P = P.name("find*");
+    const guaranteed: P<ShapeOf<Usage["retryable"]>> = declareUsage().retryable;
+    // @ts-expect-error A broad pointcut does not guarantee the annotation.
+    const unguaranteed: P<ShapeOf<Usage["retryable"]>> = byName;
+
+    expectTypeOf(byName).toEqualTypeOf<Pointcut<AnyShape>>();
+    expectTypeOf<P<ShapeOf<Usage["retryable"]>>>().toEqualTypeOf<
+      Usage["retryable"]
+    >();
+    expectTypeOf<ReturnType<typeof P.name>>().toEqualTypeOf<P>();
+    expect([...guaranteed.guarantees]).toEqual(["Retryable"]);
+    expect([...unguaranteed.guarantees]).toEqual([]);
   });
 
   it("leave broad pointcuts and negations without guarantees", () => {

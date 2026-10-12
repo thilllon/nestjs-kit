@@ -3,7 +3,7 @@ import { Inject, Injectable, Optional, Scope } from "@nestjs/common";
 import { afterEach, describe, expect, it } from "vitest";
 import { Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 

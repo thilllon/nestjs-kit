@@ -12,7 +12,7 @@ import {
   AspectModule,
   createAnnotation,
   type JoinPointOf,
-  P,
+  Pointcut as P,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { observableAdapter } from "nestjs-aspect/rxjs";

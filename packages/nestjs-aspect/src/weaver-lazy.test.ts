@@ -6,7 +6,7 @@ import { createAnnotation } from "./annotation";
 import { Aspect, Before } from "./aspect-decorators";
 import { AspectInspector } from "./aspect-inspector";
 import { AspectConfigurationError } from "./errors";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AnyShape, JoinPoint } from "./types";
 import { closeWoven, initWoven } from "./weaving-fixture";
 

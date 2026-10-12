@@ -3,7 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { afterEach, describe, expect, it } from "vitest";
 import { Advisor } from "./aspect-decorators";
 import { AspectConfigurationError } from "./errors";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AdviceAdapter } from "./types";
 import { closeWoven, initWoven } from "./weaving-fixture";
 

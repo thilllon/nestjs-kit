@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectUsageError } from "./errors";
 import { DeclareParents, introduced, isIntroduced } from "./introduction";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AnyShape, ClassFilter, JoinPoint } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 

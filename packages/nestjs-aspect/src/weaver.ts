@@ -1304,7 +1304,7 @@ export class AspectWeaver {
       ...(unadvised.length === 0
         ? []
         : [
-            `No advisor handles the annotations that require advice on these members: ${unadvised.join(", ")}. Register the aspect that handles the annotation as a provider; its pointcut refers to the annotation with P.annotated, P.withinAnnotated or P.targetAnnotated.`,
+            `No advisor handles the annotations that require advice on these members: ${unadvised.join(", ")}. Register the aspect that handles the annotation as a provider; its pointcut refers to the annotation with Pointcut.annotated, Pointcut.withinAnnotated or Pointcut.targetAnnotated.`,
           ]),
       ...(neverAdvised.length === 0
         ? []

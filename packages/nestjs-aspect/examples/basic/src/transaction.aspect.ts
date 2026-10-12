@@ -1,4 +1,9 @@
-import { Around, Aspect, P, type ProceedingJoinPointOf } from "nestjs-aspect";
+import {
+  Around,
+  Aspect,
+  Pointcut as P,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
 import { Database } from "./database.js";
 import { Transactional } from "./transactional.js";
 
