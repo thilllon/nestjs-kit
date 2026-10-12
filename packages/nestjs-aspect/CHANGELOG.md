@@ -1,5 +1,11 @@
 # nestjs-aspect
 
+## 0.0.4
+
+### Patch Changes
+
+- dc69ca2: Publish the README with the provider-level examples and recipes: an audit trail with an actor, permission checks, cache eviction after a commit, upstream error translation, retries with backoff, a transaction recipe, a job recipe and repository timing.
+
 ## 0.0.3
 
 ### Patch Changes
