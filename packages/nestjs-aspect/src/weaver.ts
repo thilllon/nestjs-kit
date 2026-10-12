@@ -42,6 +42,7 @@ import {
   isAspect,
 } from "./aspect-decorators";
 import {
+  type AspectHost,
   aspectDependencyProblems,
   createAspectInstance,
 } from "./aspect-instantiation";
@@ -1055,22 +1056,27 @@ export class AspectWeaver {
     }
     let instance = instances.get(key);
     if (!instance) {
-      const moduleRef = this.moduleRefOf(type);
-      if (!this.instanceOf(type) || !moduleRef) {
+      const host = this.hostOf(type);
+      if (!this.instanceOf(type) || !host) {
         return undefined;
       }
-      instance = createAspectInstance(type, model, moduleRef);
+      instance = createAspectInstance(type, model, host);
       instances.set(key, instance);
     }
     return instance;
   }
 
-  /** The `ModuleRef` of the module that registers an aspect class first. */
-  private moduleRefOf(type: Class): ModuleRef | undefined {
+  /** The module that registers an aspect class first. */
+  private hostOf(type: Class): AspectHost | undefined {
     const [registration] = this.scan.advisorTypes.get(type) ?? [];
-    const instance: unknown =
-      registration?.module.providers.get(ModuleRef)?.instance;
-    return instance instanceof ModuleRef ? instance : undefined;
+    if (!registration) {
+      return undefined;
+    }
+    const { providers } = registration.module;
+    const moduleRef: unknown = providers.get(ModuleRef)?.instance;
+    return moduleRef instanceof ModuleRef
+      ? { moduleRef, ownProvider: (token) => providers.get(token) }
+      : undefined;
   }
 
   /**
@@ -1243,9 +1249,9 @@ export class AspectWeaver {
     const problems: string[] = [];
     for (const type of this.scan.advisorTypes.keys()) {
       const model = getAspectMetadata(type)?.instantiation ?? "singleton";
-      const moduleRef = this.moduleRefOf(type);
-      if (model !== "singleton" && moduleRef) {
-        problems.push(...aspectDependencyProblems(type, model, moduleRef));
+      const host = this.hostOf(type);
+      if (model !== "singleton" && host) {
+        problems.push(...aspectDependencyProblems(type, model, host));
       }
     }
     return problems;

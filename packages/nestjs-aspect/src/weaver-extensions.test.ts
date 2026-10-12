@@ -111,6 +111,71 @@ describe("keyed aspect instances", () => {
     expect(constructed).toEqual(["aspect module", "aspect module"]);
   });
 
+  it.each([
+    {
+      own: "a request-scoped provider",
+      other: "a singleton",
+      ownScope: Scope.REQUEST,
+      otherScope: Scope.DEFAULT,
+    },
+    {
+      own: "a singleton",
+      other: "a request-scoped provider",
+      ownScope: Scope.DEFAULT,
+      otherScope: Scope.REQUEST,
+    },
+  ])(
+    "validates the scope of $own that the module of a per-class aspect registers under a token another module registers as $other",
+    async ({ ownScope, otherScope }) => {
+      const seen: string[] = [];
+
+      @Injectable()
+      class Service {
+        run() {}
+      }
+      const pointcut = P.within(Service);
+
+      @Aspect({ instantiation: "perClass" })
+      class Labelling {
+        constructor(@Inject("CONFIG") private readonly config: string) {}
+
+        @Before(pointcut)
+        record(_joinPoint: JoinPoint<AnyShape>) {
+          seen.push(this.config);
+        }
+      }
+
+      @Module({
+        providers: [
+          { provide: "CONFIG", scope: ownScope, useFactory: () => "own" },
+          Service,
+          Labelling,
+        ],
+      })
+      class AspectFeatureModule {}
+
+      @Module({
+        providers: [
+          { provide: "CONFIG", scope: otherScope, useFactory: () => "other" },
+        ],
+      })
+      class OtherModule {}
+      const compilation = initWoven({
+        imports: [AspectFeatureModule, OtherModule],
+      });
+
+      if (ownScope === Scope.REQUEST) {
+        await expect(compilation).rejects.toThrow(
+          "The perClass aspect Labelling depends on CONFIG, which is request-scoped or transient",
+        );
+      } else {
+        const { moduleRef } = await compilation;
+        moduleRef.get(Service, { strict: false }).run();
+        expect(seen).toEqual(["own"]);
+      }
+    },
+  );
+
   it("gives a per-class aspect instance a provider that the module of the aspect imports", async () => {
     const seen: string[] = [];
 
