@@ -728,11 +728,11 @@ export class Outbox {
   readonly sent: string[] = [];
 
   async flush(): Promise<void> {
-    for (const message of this.pending.splice(0)) {
-      if (message === "") {
+    while (this.pending.length > 0) {
+      if (this.pending[0] === "") {
         throw new Error("Cannot send an empty message");
       }
-      this.sent.push(message);
+      this.sent.push(...this.pending.splice(0, 1));
     }
   }
 }
@@ -754,7 +754,7 @@ export class OutboxRelayJob {
 export class JobsModule {}
 ```
 
-`ErrorReporter` stands in for the client of an error tracker. `@Job` goes on the provider method that the scheduler, listener or consumer decorator of the application marks. After-throwing advice reports the error and does not swallow it: the caller still receives the rejection, so a queue worker still retries the job or moves it to its dead-letter queue.
+`ErrorReporter` stands in for the client of an error tracker. `@Job` goes on the provider method that the scheduler, listener or consumer decorator of the application marks. After-throwing advice reports the error and does not swallow it: the caller still receives the rejection, so a queue worker still retries the job or moves it to its dead-letter queue. `flush` removes a message only after it is sent, so the retry finds the message that failed.
 
 ```ts
 const app = await NestFactory.createApplicationContext(JobsModule);

@@ -617,11 +617,11 @@ class Outbox {
   readonly sent: string[] = [];
 
   async flush(): Promise<void> {
-    for (const message of this.pending.splice(0)) {
-      if (message === "") {
+    while (this.pending.length > 0) {
+      if (this.pending[0] === "") {
         throw new Error("Cannot send an empty message");
       }
-      this.sent.push(message);
+      this.sent.push(...this.pending.splice(0, 1));
     }
   }
 }
@@ -1275,6 +1275,7 @@ describe("README examples", () => {
 
     expect(outbox.sent).toEqual(["welcome"]);
     expect(outcome.status).toBe("rejected");
+    expect(outbox.pending).toEqual([""]);
     expect(reports).toEqual([
       "outbox-relay: Error: Cannot send an empty message",
     ]);
