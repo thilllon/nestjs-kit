@@ -128,9 +128,23 @@ export function aspectDependencyProblems(
 }
 
 /**
+ * The provider of the module of `moduleRef` for `token`, as the container
+ * injects it into the provider instance of the aspect, or the provider of
+ * another module when that module registers none.
+ */
+function singletonOf(token: string, moduleRef: ModuleRef): unknown {
+  try {
+    return moduleRef.get(token, { strict: true });
+  } catch {
+    return moduleRef.get(token, { strict: false });
+  }
+}
+
+/**
  * Creates an instance of a `perTarget` or `perClass` aspect synchronously.
- * Its constructor and property dependencies are the singleton providers that
- * `moduleRef.get(token, { strict: false })` returns; an optional dependency
+ * Its constructor and property dependencies are singleton providers: the one
+ * the module of `moduleRef` registers under the token, otherwise the one
+ * `moduleRef.get(token, { strict: false })` returns. An optional dependency
  * that no provider supplies is `undefined`.
  *
  * Throws `AspectConfigurationError` for a dependency that is request-scoped,
@@ -149,7 +163,7 @@ export function createAspectInstance(
       );
     }
     try {
-      return moduleRef.get(dependency.token as string, { strict: false });
+      return singletonOf(dependency.token as string, moduleRef);
     } catch (error) {
       if (dependency.optional) {
         return undefined;

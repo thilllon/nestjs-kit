@@ -54,11 +54,6 @@ interface MemberState extends WovenMember {
   denied?: string;
   /** The introduction whose delegate runs the member instead of a chain. */
   introduction?: Introduction;
-  /**
-   * Per prototype of a subclass instance: true when the instance inherits
-   * the stub from the owner although its own class matched no advisor.
-   */
-  readonly unadvised: WeakMap<object, boolean>;
 }
 
 type MemberKinds = Partial<Record<JoinPointKind, MemberState>>;
@@ -113,6 +108,14 @@ export class WeavingContext implements DispatchContext {
   /** The introductions into each examined class. */
   private readonly introductions = new Map<Class, Introduction[]>();
 
+  /**
+   * Per member and prototype of a subclass instance: true when the instance
+   * inherits the stub from the owner although its own class matched no
+   * advisor. The decisions depend on the examined and excluded classes, so
+   * a change of either set discards them.
+   */
+  private unadvised = new WeakMap<MemberState, WeakMap<object, boolean>>();
+
   constructor(private readonly options: WeavingContextOptions) {}
 
   get closed(): boolean {
@@ -137,6 +140,7 @@ export class WeavingContext implements DispatchContext {
       return;
     }
     this.examined.add(type);
+    this.unadvised = new WeakMap();
     registerType(type, this);
   }
 
@@ -144,6 +148,7 @@ export class WeavingContext implements DispatchContext {
   exclude(type: Class): void {
     this.examine(type);
     this.excluded.add(type);
+    this.unadvised = new WeakMap();
   }
 
   /** Records a woven member of an examined class. */
@@ -155,7 +160,7 @@ export class WeavingContext implements DispatchContext {
       this.members.set(type, byName);
     }
     const kinds = byName.get(method.name) ?? {};
-    kinds[method.kind] = { method, advisors, unadvised: new WeakMap() };
+    kinds[method.kind] = { method, advisors };
     byName.set(method.name, kinds);
   }
 
@@ -430,7 +435,12 @@ export class WeavingContext implements DispatchContext {
     if (prototype === null || prototype === owner.prototype) {
       return false;
     }
-    let unadvised = member.unadvised.get(prototype);
+    let decisions = this.unadvised.get(member);
+    if (!decisions) {
+      decisions = new WeakMap();
+      this.unadvised.set(member, decisions);
+    }
+    let unadvised = decisions.get(prototype);
     if (unadvised === undefined) {
       const type = nearestClass(prototype);
       unadvised = type !== undefined && type !== owner;
@@ -446,7 +456,7 @@ export class WeavingContext implements DispatchContext {
           }
         }
       }
-      member.unadvised.set(prototype, unadvised);
+      decisions.set(prototype, unadvised);
     }
     return unadvised;
   }

@@ -20,6 +20,7 @@ import type {
   AdvisorDescriptor,
   AnyShape,
   AspectAdvice,
+  JoinPoint,
   MethodInterceptor,
   PointcutAdvisor,
   ProceedingJoinPoint,
@@ -175,6 +176,22 @@ describe("compileAspect", () => {
 
     expect(() => compileAspect(Accessor, unresolved)).toThrow(
       /Accessor\.check/,
+    );
+  });
+
+  it("rejects advice on a class field, which no prototype defines", () => {
+    @Aspect()
+    class Recorder {
+      // @ts-expect-error -- an advice decorator is typed for methods only
+      @Before(anything)
+      record = (_joinPoint: JoinPoint<AnyShape>): void => {};
+    }
+
+    expect(() => compileAspect(Recorder, unresolved)).toThrow(
+      AspectConfigurationError,
+    );
+    expect(() => compileAspect(Recorder, unresolved)).toThrow(
+      "The before advice Recorder.record is not a method",
     );
   });
 });

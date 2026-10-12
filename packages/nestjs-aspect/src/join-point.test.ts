@@ -204,6 +204,18 @@ describe("formatArgument", () => {
     expect(formatArgument(Object.create(null))).toBe("Object");
   });
 
+  it("renders an object that cannot be inspected or has no named class of its own as Object", () => {
+    class Money {}
+    const revocable = Proxy.revocable({}, {});
+    revocable.revoke();
+
+    expect(formatArgument(revocable.proxy)).toBe("Object");
+    expect(formatArgument(new (class {})())).toBe("Object");
+    expect(formatArgument(Object.create(Object.create(null)))).toBe("Object");
+    // The prototype is an instance, which inherits its constructor.
+    expect(formatArgument(Object.create(new Money()))).toBe("Object");
+  });
+
   it("does not call user code", () => {
     const called = vi.fn();
     const value = {

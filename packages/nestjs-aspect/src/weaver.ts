@@ -1193,12 +1193,30 @@ export class AspectWeaver {
         candidate.beans.length !==
         previous.candidates.get(candidate.type)?.beans.length,
     );
+    const failures: unknown[] = [];
+    const candidates = new Map(scan.candidates);
     for (const candidate of changed) {
-      this.weaveType(this.withScoped(candidate));
+      try {
+        this.weaveType(this.withScoped(candidate));
+      } catch (error) {
+        // The class keeps its earlier scan entry, so the next call weaves it
+        // again and reports the failure again; the other classes are woven.
+        const known = previous.candidates.get(candidate.type);
+        if (known) {
+          candidates.set(candidate.type, known);
+        } else {
+          candidates.delete(candidate.type);
+        }
+        failures.push(error);
+      }
     }
+    this.scan = { ...this.scan, candidates };
     this.context.refresh();
     // From here on the instances keep the application live by themselves.
     this.context.adoptInstances();
+    if (failures.length > 0) {
+      throw failures[0];
+    }
     return changed.map((candidate) => candidate.type);
   }
 

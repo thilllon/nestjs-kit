@@ -4,6 +4,7 @@ import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
 import {
   After,
+  AfterThrowing,
   Advisor,
   Around,
   Aspect,
@@ -146,6 +147,22 @@ describe("advice decorators", () => {
 
     expect(() => Before(notYetInitialized)).toThrow(AspectConfigurationError);
     expect(() => Around({} as Pointcut)).toThrow(/pointcut/);
+  });
+
+  it("reject a throwing option of @AfterThrowing that is no class when the decorator is evaluated", () => {
+    function declare(): void {
+      @Aspect()
+      class Recorder {
+        @AfterThrowing(anything, { throwing: "RangeError" as never })
+        record(): void {}
+      }
+      void Recorder;
+    }
+
+    expect(declare).toThrow(AspectConfigurationError);
+    expect(declare).toThrow(
+      "@AfterThrowing requires a class as its throwing option",
+    );
   });
 
   it("reject static members", () => {
