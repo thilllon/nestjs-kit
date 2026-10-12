@@ -9,11 +9,12 @@ import { Retryable, TransientError } from "./retryable.js";
 const retryable = P.annotated(Retryable);
 
 /**
- * Retries one call of an outbound client. A Nest interceptor surrounds the
- * route handler as a whole and does not reach a call between providers.
+ * Repeats a call after a `TransientError` and no other error. Before each
+ * further attempt it waits a random time below a limit that doubles.
  *
- * Runs inside `CallTraceAspect`, which has the lower order: the trace holds
- * one call and one outcome for a method, however often it is retried.
+ * Its order places it inside `StatisticsAspect`, which records a retried
+ * call once, and outside `TransactionAspect`, so each attempt of a
+ * transactional method runs in a new transaction.
  */
 @Aspect({ order: 20 })
 export class RetryAspect {
@@ -21,7 +22,7 @@ export class RetryAspect {
   async retry(
     joinPoint: ProceedingJoinPointOf<typeof retryable>,
   ): Promise<unknown> {
-    const { attempts } = joinPoint.annotation(Retryable);
+    const { attempts, backoffMilliseconds } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await joinPoint.proceed();
@@ -29,6 +30,10 @@ export class RetryAspect {
         if (!(error instanceof TransientError) || attempt >= attempts) {
           throw error;
         }
+        const ceiling = backoffMilliseconds * 2 ** (attempt - 1);
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.random() * ceiling),
+        );
       }
     }
   }
