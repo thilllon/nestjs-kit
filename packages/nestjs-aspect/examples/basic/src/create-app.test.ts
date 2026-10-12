@@ -12,6 +12,7 @@ import {
   vi,
 } from "vitest";
 import { CallStatistics, type CallTotals } from "./call-statistics.js";
+import { CheckoutService } from "./checkout.service.js";
 import { createApp } from "./create-app.js";
 import { ConflictError, Database } from "./database.js";
 import { InventoryClient } from "./inventory.client.js";
@@ -63,7 +64,6 @@ async function statistics(): Promise<string[]> {
 
 describe("basic example", () => {
   beforeAll(async () => {
-    vi.stubEnv("RECONCILE_INTERVAL_MILLISECONDS", "20");
     app = await createApp({ logger: false });
     await app.listen(0, "127.0.0.1");
     url = await app.getUrl();
@@ -78,17 +78,12 @@ describe("basic example", () => {
     database.log.splice(0);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     vi.restoreAllMocks();
-    // Leaves no pending order to the reconciliation worker of a later test.
-    const orders = app.get(OrdersService);
-    for (const order of await orders.list()) {
-      await orders.cancel(order.id);
-    }
+    vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
-    vi.unstubAllEnvs();
     await app.close();
   });
 
@@ -237,37 +232,49 @@ describe("basic example", () => {
   });
 
   it("completes a pending order from the worker timer, without a request, under the same aspects", async () => {
-    const reserve = vi
-      .spyOn(inventory, "reserve")
-      .mockRejectedValue(new TransientError("The service is unreachable"));
+    vi.stubEnv("RECONCILE_INTERVAL_MILLISECONDS", "20");
+    const worker = await createApp({ logger: false });
+    await worker.init();
+    try {
+      const transport: InMemoryInventory = worker.get(InventoryTransport);
+      const reserve = vi
+        .spyOn(transport, "reserve")
+        .mockRejectedValue(new TransientError("The service is unreachable"));
 
-    const { status, body } = await placeOrder("widget");
+      const placed = await worker.get(CheckoutService).place("widget", 2);
 
-    expect(status).toBe(201);
-    expect(body.status).toBe("pending");
-    expect(reserve.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(placed.status).toBe("pending");
+      expect(reserve.mock.calls.length).toBeGreaterThanOrEqual(3);
 
-    reserve.mockRestore();
-    app.get(CallStatistics).reset();
-    database.log.splice(0);
-    await vi.waitFor(async () => {
-      expect(await storedOrder(body.id)).toMatchObject({
-        status: "confirmed",
-        reservation: inventory.reservations.get(`order-${body.id}`),
+      reserve.mockRestore();
+      const orders = worker.get(OrdersService);
+      await vi.waitFor(async () => {
+        expect(await orders.list()).toEqual([
+          {
+            ...placed,
+            status: "confirmed",
+            reservation: transport.reservations.get(`order-${placed.id}`),
+          },
+        ]);
       });
-    });
 
-    expect(database.log).toEqual(["begin", "commit"]);
-    expect(await statistics()).toEqual(
-      expect.arrayContaining([
-        "InventoryClient.reserve: 1/0",
-        "OrdersRepository.save: 1/0",
-      ]),
-    );
-    expect(await eventsOf(body.id)).toEqual([
-      "order.created",
-      "order.confirmed",
-    ]);
+      expect(worker.get(Database).log).toEqual([
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+      ]);
+      expect(worker.get(CallStatistics).summary()).toMatchObject({
+        "OrdersRepository.find": { calls: 1, errors: 0 },
+        "OrdersRepository.save": { calls: 1, errors: 0 },
+      });
+      expect((await orders.events()).map(({ type }) => type)).toEqual([
+        "order.created",
+        "order.confirmed",
+      ]);
+    } finally {
+      await worker.close();
+    }
   });
 
   it("reports the advice of each method in the order it runs", () => {
