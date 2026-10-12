@@ -1,20 +1,22 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { InventoryClient } from "./inventory.client.js";
+import type { Order } from "./order.js";
+import { OrdersRepository } from "./orders.repository.js";
 import { TransientError } from "./retryable.js";
-
-export interface Order {
-  id: number;
-  sku: string;
-  quantity: number;
-  reservation: string;
-}
+import { Transactional } from "./transactional.js";
 
 @Injectable()
 export class OrdersService {
-  private readonly orders: Order[] = [];
+  constructor(
+    private readonly repository: OrdersRepository,
+    private readonly inventory: InventoryClient,
+  ) {}
 
-  constructor(private readonly inventory: InventoryClient) {}
-
+  /**
+   * Reserves the stock, then stores the order. The call of the remote
+   * inventory service and its retries stay outside the transaction, which
+   * covers the two writes only.
+   */
   async place(sku: string, quantity: number): Promise<Order> {
     let reservation: string;
     try {
@@ -25,8 +27,25 @@ export class OrdersService {
       }
       throw error;
     }
-    const order = { id: this.orders.length + 1, sku, quantity, reservation };
-    this.orders.push(order);
-    return order;
+    return this.store(sku, quantity, reservation);
+  }
+
+  /**
+   * Stores the order and its reservation in one transaction: a failure of
+   * the second write discards the first. `place` calls it on `this`, and
+   * the call is advised like a call from another provider.
+   */
+  @Transactional()
+  async store(
+    sku: string,
+    quantity: number,
+    reservation: string,
+  ): Promise<Order> {
+    const order = await this.repository.insert(sku, quantity);
+    return this.repository.confirm(order, reservation);
+  }
+
+  list(): Promise<Order[]> {
+    return this.repository.findAll();
   }
 }

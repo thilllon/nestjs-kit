@@ -1,10 +1,23 @@
 import "reflect-metadata";
 import type { INestApplication } from "@nestjs/common";
 import { AspectInspector } from "nestjs-aspect";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { AuditLog } from "./audit-log.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { CallTrace } from "./call-trace.js";
 import { createApp } from "./create-app.js";
+import { Database } from "./database.js";
 import { InventoryClient } from "./inventory.client.js";
+import type { Order } from "./order.js";
+import { OrdersRepository } from "./orders.repository.js";
+import { OrdersService } from "./orders.service.js";
 
 let app: INestApplication | undefined;
 let url: string;
@@ -18,8 +31,13 @@ async function placeOrder(sku: string) {
   return { status: response.status, body: await response.json() };
 }
 
-async function auditTrail(): Promise<string[]> {
-  const response = await fetch(`${url}/audit`);
+async function storedOrders(): Promise<Order[]> {
+  const response = await fetch(`${url}/orders`);
+  return (await response.json()) as Order[];
+}
+
+async function callTrace(): Promise<string[]> {
+  const response = await fetch(`${url}/trace`);
   const entries = (await response.json()) as {
     event: string;
     member: string;
@@ -38,78 +56,146 @@ describe("basic example", () => {
   });
 
   beforeEach(() => {
-    app?.get(AuditLog).entries.splice(0);
+    app?.get(CallTrace).entries.splice(0);
+    app?.get(Database).log.splice(0);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   afterAll(async () => {
     await app?.close();
   });
 
-  it("audits every call into the orders module, from the route handler to the inventory client", async () => {
-    expect(await placeOrder("widget")).toEqual({
+  it("traces the calls between the providers of the orders module and leaves the route handlers out", async () => {
+    const order = await placeOrder("widget");
+
+    expect(order).toEqual({
       status: 201,
       body: {
-        id: 1,
+        id: expect.any(Number),
         sku: "widget",
         quantity: 2,
         reservation: "reservation-widget-2",
       },
     });
-
-    expect(await auditTrail()).toEqual([
-      "call OrdersController.create",
+    const trace = await callTrace();
+    expect(trace).toEqual([
       "call OrdersService.place",
       "call InventoryClient.reserve",
       "return InventoryClient.reserve",
+      "call OrdersService.store",
+      "call OrdersRepository.insert",
+      "return OrdersRepository.insert",
+      "call OrdersRepository.confirm",
+      "return OrdersRepository.confirm",
+      "return OrdersService.store",
       "return OrdersService.place",
-      "return OrdersController.create",
     ]);
+    expect(await callTrace()).toEqual(trace);
   });
 
-  it("retries a transient inventory failure inside one audited call", async () => {
+  it("runs the self-invoked transactional method in one transaction that begins after the reservation", async () => {
+    const database = app?.get(Database);
+    const inventory = app?.get(InventoryClient) as InventoryClient;
+    const reserve = vi
+      .spyOn(inventory, "reserve")
+      .mockImplementation(async (sku, quantity) => {
+        expect(database?.log).toEqual([]);
+        return `reservation-${sku}-${quantity}`;
+      });
+
+    const { body } = await placeOrder("widget");
+
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(database?.log).toEqual(["begin", "commit"]);
+    expect(await storedOrders()).toContainEqual(body);
+  });
+
+  it("retries a transient inventory failure inside one traced call, outside the transaction", async () => {
     const order = await placeOrder("flaky");
 
     expect(order.status).toBe(201);
     expect(app?.get(InventoryClient).attempts.get("flaky")).toBe(3);
+    expect(app?.get(Database).log).toEqual(["begin", "commit"]);
     expect(
-      (await auditTrail()).filter((entry) => entry.includes("reserve")),
+      (await callTrace()).filter((entry) => entry.includes("reserve")),
     ).toEqual([
       "call InventoryClient.reserve",
       "return InventoryClient.reserve",
     ]);
   });
 
-  it("stops after the annotated number of attempts and audits the error of each layer", async () => {
+  it("begins no transaction when the reservation fails after the annotated number of attempts", async () => {
     const order = await placeOrder("offline");
 
     expect(order.status).toBe(503);
     expect(app?.get(InventoryClient).attempts.get("offline")).toBe(3);
-    expect(await auditTrail()).toEqual([
-      "call OrdersController.create",
+    expect(app?.get(Database).log).toEqual([]);
+    expect(await callTrace()).toEqual([
       "call OrdersService.place",
       "call InventoryClient.reserve",
       "error InventoryClient.reserve TransientError",
       "error OrdersService.place ServiceUnavailableException",
-      "error OrdersController.create ServiceUnavailableException",
     ]);
+    expect(
+      (await storedOrders()).filter(({ sku }) => sku === "offline"),
+    ).toEqual([]);
   });
 
-  it("leaves the audit route outside the orders module unadvised", async () => {
-    await auditTrail();
+  it("rolls back the stored order when the second write of the transaction fails", async () => {
+    const repository = app?.get(OrdersRepository) as OrdersRepository;
+    vi.spyOn(repository, "confirm").mockRejectedValue(
+      new Error("The connection is closed"),
+    );
 
-    expect(await auditTrail()).toEqual([]);
+    const order = await placeOrder("gadget");
+
+    expect(order.status).toBe(500);
+    expect(app?.get(Database).log).toEqual(["begin", "rollback"]);
+    expect((await callTrace()).slice(-2)).toEqual([
+      "error OrdersService.store Error",
+      "error OrdersService.place Error",
+    ]);
+    expect(
+      (await storedOrders()).filter(({ sku }) => sku === "gadget"),
+    ).toEqual([]);
   });
 
-  it("reports the advice of the retried method in the order it runs", () => {
-    const advisors = app
-      ?.get(AspectInspector)
-      .advisorsOf(InventoryClient, "reserve")
-      .map(({ type, kind }) => `${type.name} ${kind}`);
+  it("advises a provider method that is called without a request", async () => {
+    const order = await app?.get(OrdersService).place("widget", 1);
 
-    expect(advisors).toEqual([
-      "AuditAspect before",
-      "AuditAspect afterReturning",
-      "AuditAspect afterThrowing",
+    expect(order?.reservation).toBe("reservation-widget-1");
+    expect(app?.get(Database).log).toEqual(["begin", "commit"]);
+    expect(app?.get(CallTrace).entries.at(0)).toEqual({
+      event: "call",
+      member: "OrdersService.place",
+    });
+  });
+
+  it("reports the advice of the transactional and the retried method in the order it runs", () => {
+    const inspector = app?.get(AspectInspector);
+    const advisors = (
+      type: typeof OrdersService | typeof InventoryClient,
+      name: string,
+    ) =>
+      inspector
+        ?.advisorsOf(type, name)
+        .map(({ type, kind }) => `${type.name} ${kind}`);
+    const traced = [
+      "CallTraceAspect before",
+      "CallTraceAspect afterReturning",
+      "CallTraceAspect afterThrowing",
+    ];
+
+    expect(advisors(OrdersService, "place")).toEqual(traced);
+    expect(advisors(OrdersService, "store")).toEqual([
+      ...traced,
+      "TransactionAspect around",
+    ]);
+    expect(advisors(InventoryClient, "reserve")).toEqual([
+      ...traced,
       "RetryAspect around",
     ]);
   });

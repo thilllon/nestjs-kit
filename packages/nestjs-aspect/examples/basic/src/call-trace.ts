@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
-export interface AuditEntry {
+export interface TraceEntry {
   event: "call" | "return" | "error";
   /** `"OrdersService.place"`. */
   member: string;
@@ -9,10 +9,10 @@ export interface AuditEntry {
 }
 
 @Injectable()
-export class AuditLog {
-  readonly entries: AuditEntry[] = [];
+export class CallTrace {
+  readonly entries: TraceEntry[] = [];
 
-  record(entry: AuditEntry): void {
+  record(entry: TraceEntry): void {
     this.entries.push(entry);
   }
 }
