@@ -1,6 +1,6 @@
 {
   "name": "nestjs-aspect",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Spring-style aspect-oriented programming for NestJS",
   "license": "ISC",
   "author": "thilllon",
