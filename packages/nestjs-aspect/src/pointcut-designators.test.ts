@@ -407,6 +407,16 @@ describe("P.args", () => {
   it("rejects REST anywhere but the last position", () => {
     expect(() => P.args(P.REST, Account)).toThrow(AspectConfigurationError);
   });
+
+  it("rejects a matcher that is no class, ANY or REST when the pointcut is built", () => {
+    const message =
+      "Pointcut.args() accepts classes, Pointcut.ANY and Pointcut.REST";
+
+    // The value of a class that a circular import has not initialized yet.
+    expect(() => P.args(undefined as never)).toThrow(message);
+    expect(() => P.args("string" as never)).toThrow(AspectConfigurationError);
+    expect(() => P.args(String, "number" as never, P.REST)).toThrow(message);
+  });
 });
 
 describe("P.bean", () => {

@@ -299,4 +299,33 @@ describe("advice through the dispatcher stub", () => {
     expect(() => moduleRef.get(Service).run()).toThrow(AspectUsageError);
     expect(log).toEqual([]);
   });
+
+  it("runs an advice method that is named by a symbol", async () => {
+    const RECORD = Symbol("record");
+    const log: string[] = [];
+
+    @Injectable()
+    class Service {
+      run(): string {
+        return "ran";
+      }
+    }
+    const pointcut = P.within(Service);
+
+    @Aspect()
+    class Recorder {
+      @AfterReturning(pointcut)
+      [RECORD](joinPoint: JoinPoint<AnyShape>, value: unknown): void {
+        log.push(
+          `${String(joinPoint.signature.name)} returned ${String(value)}`,
+        );
+      }
+    }
+    const { moduleRef } = await compileWoven({
+      providers: [Service, Recorder],
+    });
+
+    expect(moduleRef.get(Service).run()).toBe("ran");
+    expect(log).toEqual(["run returned ran"]);
+  });
 });

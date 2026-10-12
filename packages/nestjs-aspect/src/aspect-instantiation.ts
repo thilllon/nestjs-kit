@@ -72,6 +72,37 @@ function propertyDependencies(type: Class): PropertyDependency[] {
   }));
 }
 
+/** The facts of a Nest instance wrapper that tell the scope of a provider. */
+interface ProviderWrapper {
+  readonly isTransient: boolean;
+  isDependencyTreeStatic(): boolean;
+}
+
+/** The module that registers an aspect, for the dependencies of its instances. */
+export interface AspectHost {
+  readonly moduleRef: ModuleRef;
+  /** The provider that the module itself registers under `token`. */
+  ownProvider(token: InjectionToken): ProviderWrapper | undefined;
+}
+
+/**
+ * The scope of the provider that supplies `token` to the aspects of `host`:
+ * the provider of the module itself, as the container injects it into the
+ * provider instance of the aspect, otherwise the one that
+ * `ModuleRef.introspect` selects among the other modules. Throws when no
+ * provider of the application supplies the token.
+ */
+function scopeOf(token: InjectionToken, host: AspectHost): Scope {
+  const own = host.ownProvider(token);
+  if (!own) {
+    return host.moduleRef.introspect(token as string).scope;
+  }
+  if (!own.isDependencyTreeStatic()) {
+    return Scope.REQUEST;
+  }
+  return own.isTransient ? Scope.TRANSIENT : Scope.DEFAULT;
+}
+
 function describeToken(dependency: Dependency): string {
   const { token, position } = dependency;
   if (token === undefined) {
@@ -87,15 +118,12 @@ function describeToken(dependency: Dependency): string {
  */
 function dependencyProblem(
   dependency: Dependency,
-  moduleRef: ModuleRef,
+  host: AspectHost,
 ): string | undefined {
   const { token, optional } = dependency;
   let scope: Scope | undefined;
   try {
-    scope =
-      token === undefined
-        ? undefined
-        : moduleRef.introspect(token as string).scope;
+    scope = token === undefined ? undefined : scopeOf(token, host);
   } catch {
     // No provider of the application supplies the token.
   }
@@ -119,18 +147,19 @@ const RULE =
 export function aspectDependencyProblems(
   type: Class,
   model: AspectInstantiation,
-  moduleRef: ModuleRef,
+  host: AspectHost,
 ): string[] {
   return [...parameterDependencies(type), ...propertyDependencies(type)]
-    .map((dependency) => dependencyProblem(dependency, moduleRef))
+    .map((dependency) => dependencyProblem(dependency, host))
     .filter((problem) => problem !== undefined)
     .map((problem) => `The ${model} aspect ${type.name} ${problem}. ${RULE}`);
 }
 
 /**
  * Creates an instance of a `perTarget` or `perClass` aspect synchronously.
- * Its constructor and property dependencies are the singleton providers that
- * `moduleRef.get(token, { strict: false })` returns; an optional dependency
+ * Its constructor and property dependencies are singleton providers: the one
+ * the module of the aspect registers under the token, otherwise the one
+ * `ModuleRef.get(token, { strict: false })` returns. An optional dependency
  * that no provider supplies is `undefined`.
  *
  * Throws `AspectConfigurationError` for a dependency that is request-scoped,
@@ -139,17 +168,20 @@ export function aspectDependencyProblems(
 export function createAspectInstance(
   type: Class,
   model: AspectInstantiation,
-  moduleRef: ModuleRef,
+  host: AspectHost,
 ): object {
   const resolve = (dependency: Dependency): unknown => {
-    const problem = dependencyProblem(dependency, moduleRef);
+    const problem = dependencyProblem(dependency, host);
     if (problem !== undefined) {
       throw new AspectConfigurationError(
         `The ${model} aspect ${type.name} ${problem}. ${RULE}`,
       );
     }
     try {
-      return moduleRef.get(dependency.token as string, { strict: false });
+      const token = dependency.token as string;
+      return host.moduleRef.get(token, {
+        strict: host.ownProvider(token) !== undefined,
+      });
     } catch (error) {
       if (dependency.optional) {
         return undefined;
