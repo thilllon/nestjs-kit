@@ -6,26 +6,17 @@
 
 **Spring-style aspect-oriented programming for NestJS.** An aspect is a Nest provider that holds a crosscutting concern, such as retries, auditing or transactions, together with pointcuts that select the methods it applies to. `AspectModule` weaves the aspects of an application into every class its container manages.
 
-[Concepts](#concepts) · [Aspect or enhancer](#when-to-use-an-aspect) · [Quick start](#quick-start) · [Annotations](#annotations) · [Pointcuts](#pointcuts) · [Advice](#advice) · [Recipes](#recipes) · [Module options](#aspectmodule) · [Ordering](#ordering) · [Asynchronous join points](#asynchronous-join-points) · [Advisors](#advisors) · [Introductions](#introductions) · [Inspection](#inspection) · [Testing](#testing) · [Validation and errors](#bootstrap-validation) · [Limitations](#limitations) · [Spring mapping](#spring-concept-mapping)
+[Aspect or enhancer](#when-to-use-an-aspect) · [Quick start](#quick-start) · [Annotations](#annotations) · [Pointcuts](#pointcuts) · [Advice](#advice) · [Recipes](#recipes) · [Module options](#aspectmodule) · [Ordering](#ordering) · [Asynchronous join points](#asynchronous-join-points) · [Advisors](#advisors) · [Introductions](#introductions) · [Inspection](#inspection) · [Testing](#testing) · [Validation and errors](#bootstrap-validation) · [Limitations](#limitations) · [Spring mapping](#spring-concept-mapping)
 
 ## What it is
 
-- **Aspects are providers.** `@Aspect()` marks a class as an aspect and as an injectable provider with regular dependency injection.
-- **Pointcuts are independent of the class hierarchy.** A pointcut selects methods by class, name, kind, module, provider token, annotation, Reflect metadata or argument. The advised class does not import the aspect and needs no decorator for it.
-- **Five kinds of advice**: `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After` and `@Around`, with the semantics and the ordering rules of Spring AOP.
+- **Aspects are providers.** An aspect is a class that holds one behavior shared by many methods, such as a transaction or a retry, apart from the classes that use it. `@Aspect()` marks a class as an aspect and as an injectable provider with regular dependency injection.
+- **Pointcuts are independent of the class hierarchy.** A join point is one call of a method, or of an accessor, of a class the Nest container manages, and a pointcut is a value that selects join points. A pointcut selects methods by class, name, kind, module, provider token, annotation, Reflect metadata or argument; an annotation is a typed decorator that marks a method or a class for a pointcut and can carry a value. The advised class does not import the aspect and needs no decorator for it.
+- **Five kinds of advice.** Advice is a method of an aspect that runs at the join points a pointcut selects: before the call, after it returns, after it throws, after either outcome, or around it. The decorators are `@Before`, `@AfterReturning`, `@AfterThrowing`, `@After` and `@Around`, with the semantics and the ordering rules of Spring AOP.
 - **Typed from the pointcut to the advice.** A pointcut carries the target, argument and return types and the annotations it guarantees; the advice decorators check the advice method against them.
 - **Correct for asynchronous code.** Advice follows the settlement of a promise, and of an Observable with the adapter of `nestjs-aspect/rxjs`.
 - **Errors instead of silent no-ops.** A misconfiguration fails the bootstrap, and a method whose required advice is missing cannot be called.
-- **Every managed class.** Providers, controllers, gateways, guards, interceptors, pipes, filters and middleware, in the singleton, request and transient scopes.
-
-## Concepts
-
-- **Join point**: one call of a method, or of an accessor, of a class the Nest container manages.
-- **Pointcut**: a value that selects join points, for example every method that carries an annotation or every method of the providers of a module.
-- **Advice**: a method that runs at the join points a pointcut selects: before the call, after it returns, after it throws, after either outcome, or around it.
-- **Aspect**: a provider that holds advice. It has constructor injection like any other provider.
-- **Annotation**: a typed decorator that marks a method or a class for a pointcut and can carry a value for the advice.
-- **Weaving**: `AspectModule` installs the advice on the selected methods while Nest instantiates the classes. A method with advice is an advised method.
+- **Every managed class.** `AspectModule` weaves the aspects: it installs the advice on the selected methods while Nest instantiates the classes, and a method with advice is an advised method. Weaving covers providers, controllers, gateways, guards, interceptors, pipes, filters and middleware, in the singleton, request and transient scopes.
 
 ## When to use an aspect
 
