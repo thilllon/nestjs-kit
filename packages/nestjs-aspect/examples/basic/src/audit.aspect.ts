@@ -7,16 +7,30 @@ import {
   P,
 } from "nestjs-aspect";
 import { AuditLog } from "./audit-log.js";
+import { Database } from "./database.js";
+import { OrdersController } from "./orders.controller.js";
 import { OrdersModule } from "./orders.module.js";
 
-/** Every method of the providers and controllers `OrdersModule` declares. */
-const orders = P.inModule(OrdersModule);
+/**
+ * The calls between the providers of `OrdersModule`: every method of the
+ * service, the repository and the inventory client. The route handlers are
+ * left to Nest interceptors, which see the request, and `Database` is the
+ * infrastructure below the audited calls.
+ */
+const orders = P.inModule(OrdersModule).and(
+  P.within(OrdersController, Database).not(),
+);
 
 function memberOf(joinPoint: JoinPointOf<typeof orders>): string {
   const { targetType, name } = joinPoint.signature;
   return `${targetType.name}.${String(name)}`;
 }
 
+/**
+ * Has the lowest order of the three aspects, so it runs outside
+ * `TransactionAspect`: an entry for the outcome of a transactional method is
+ * recorded after the commit or the rollback.
+ */
 @Aspect({ order: 10 })
 export class AuditAspect {
   constructor(private readonly log: AuditLog) {}

@@ -3,6 +3,7 @@
 // keywords and its comment lines; the first test compares the two.
 
 import "reflect-metadata";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Injectable, Module, Scope } from "@nestjs/common";
@@ -28,7 +29,9 @@ import {
   type JoinPointOf,
   type MethodInterceptor,
   P,
+  type Pointcut,
   type ProceedingJoinPointOf,
+  type ReturnValueAdapter,
 } from "./index";
 import { observableAdapter } from "./rxjs";
 import { RecordingLogger } from "./weaving-fixture";
@@ -154,6 +157,11 @@ class PaymentGateway {
     account.balance -= amount;
     return `receipt-${account.id}-${amount}`;
   }
+
+  @Retryable({ attempts: 2 })
+  async refund(receipt: string): Promise<string> {
+    return `refund-${receipt}`;
+  }
 }
 
 @Injectable()
@@ -196,6 +204,25 @@ const charge = P.method(PaymentGateway, "charge");
 const inBilling = P.inModule(BillingModule);
 const queries = inBilling.and(P.name("find*")).and(P.annotated(Internal).not());
 const deposits = P.within(AccountService).and(P.args(Account, Number));
+
+// Reads by naming convention, in any class.
+const reads = P.any(P.name("find*"), P.name("get*"), P.name("list*"));
+
+// Every other method of a module: PaymentGateway.charge,
+// PaymentGateway.refund, AccountService.open and AccountService.deposit.
+const billingWrites = inBilling.and(reads.not());
+
+// Methods of one class by name: AccountService.open and
+// AccountService.deposit.
+const accountChanges = P.within(AccountService).and(P.name(/^(open|deposit)$/));
+
+// The classes of a module by provider token: PaymentGateway.charge and
+// PaymentGateway.refund.
+const gateways = P.all(inBilling, P.bean("*Gateway"));
+
+// The calls of annotated methods by argument: those of
+// PaymentGateway.charge, not those of PaymentGateway.refund.
+const accountCharges = P.annotated(Retryable).and(P.args(Account, P.REST));
 
 // ---------------------------------------------------------------------------
 // Advice
@@ -285,6 +312,20 @@ class QueryAspect {
   }
 }
 
+/** Records the calls `accountCharges` selects, with what its shape types. */
+@Aspect()
+class AccountChargeAspect {
+  readonly seen: string[] = [];
+
+  @Before(accountCharges)
+  record(joinPoint: JoinPointOf<typeof accountCharges>): void {
+    const { attempts } = joinPoint.annotation(Retryable);
+    this.seen.push(
+      `${String(joinPoint.signature.name)} of ${joinPoint.args[0].id}, ${attempts} attempts`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Ordering
 // ---------------------------------------------------------------------------
@@ -362,19 +403,106 @@ class ClosingPriceAspect {
 class FeedModule {}
 
 // ---------------------------------------------------------------------------
-// Advisors
+// Other result types
 // ---------------------------------------------------------------------------
 
-const Transactional = createAnnotation<"Transactional">("Transactional");
+const asyncGeneratorAdapter: ReturnValueAdapter<AsyncGenerator<unknown>> = {
+  supports(value: unknown): value is AsyncGenerator<unknown> {
+    return Object.prototype.toString.call(value) === "[object AsyncGenerator]";
+  },
+  async *onSuccess(value, callback) {
+    let last: unknown;
+    for await (const item of value) {
+      last = item;
+      yield item;
+    }
+    await callback(last);
+  },
+  async *onError(value, callback) {
+    try {
+      yield* value;
+    } catch (error) {
+      await callback(error);
+      throw error;
+    }
+  },
+  async *finally(value, callback) {
+    try {
+      yield* value;
+    } finally {
+      await callback();
+    }
+  },
+};
 
 @Injectable()
-class TransactionManager {
+class EventStore {
+  readonly events = new Map<string, string[]>();
+
+  async *replay(stream: string): AsyncGenerator<string> {
+    const events = this.events.get(stream);
+    if (!events) {
+      throw new Error(`Unknown stream ${stream}`);
+    }
+    yield* events;
+  }
+}
+
+const replays = P.method(EventStore, "replay");
+
+@Aspect()
+class ReplayAspect {
+  readonly lines: string[] = [];
+
+  @After(replays)
+  closed(joinPoint: JoinPointOf<typeof replays>): void {
+    this.lines.push(`${joinPoint.args[0]} closed`);
+  }
+
+  @AfterThrowing(replays)
+  failed(joinPoint: JoinPointOf<typeof replays>, error: unknown): void {
+    this.lines.push(`${joinPoint.args[0]} failed: ${error}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Recipes
+// ---------------------------------------------------------------------------
+
+const Transactional = createAnnotation<
+  "Transactional",
+  void,
+  (...args: any[]) => Promise<unknown>
+>("Transactional", { requiresAdvice: true });
+
+@Injectable()
+class Database {
+  private readonly committed = new Map<string, number>();
+
+  private readonly transaction = new AsyncLocalStorage<Map<string, number>>();
+
   readonly log: string[] = [];
 
-  async run(work: () => unknown): Promise<unknown> {
+  read(key: string): number {
+    const writes = this.transaction.getStore();
+    return writes?.get(key) ?? this.committed.get(key) ?? 0;
+  }
+
+  write(key: string, value: number): void {
+    (this.transaction.getStore() ?? this.committed).set(key, value);
+  }
+
+  async transactional<T>(work: () => Promise<T>): Promise<T> {
+    if (this.transaction.getStore()) {
+      return work();
+    }
+    const writes = new Map<string, number>();
     this.log.push("begin");
     try {
-      const result = await work();
+      const result = await this.transaction.run(writes, work);
+      for (const [key, value] of writes) {
+        this.committed.set(key, value);
+      }
       this.log.push("commit");
       return result;
     } catch (error) {
@@ -383,6 +511,261 @@ class TransactionManager {
     }
   }
 }
+
+const transactional = P.annotated(Transactional);
+
+@Aspect({ order: 100 })
+class TransactionAspect {
+  constructor(private readonly database: Database) {}
+
+  @Around(transactional)
+  run(
+    joinPoint: ProceedingJoinPointOf<typeof transactional>,
+  ): Promise<unknown> {
+    return this.database.transactional(() => joinPoint.proceed());
+  }
+}
+
+@Injectable()
+class WalletRepository {
+  constructor(private readonly database: Database) {}
+
+  async balance(owner: string): Promise<number> {
+    return this.database.read(owner);
+  }
+
+  async add(owner: string, amount: number): Promise<void> {
+    const balance = this.database.read(owner) + amount;
+    if (balance < 0) {
+      throw new RangeError(`${owner} cannot pay ${-amount}`);
+    }
+    this.database.write(owner, balance);
+  }
+}
+
+@Injectable()
+class WalletService {
+  constructor(private readonly wallets: WalletRepository) {}
+
+  @Transactional()
+  async move(from: string, to: string, amount: number): Promise<void> {
+    await this.wallets.add(to, amount);
+    await this.wallets.add(from, -amount);
+  }
+
+  @Transactional()
+  async payAll(
+    from: string,
+    recipients: string[],
+    amount: number,
+  ): Promise<void> {
+    for (const to of recipients) {
+      await this.move(from, to, amount);
+    }
+  }
+}
+
+const Cacheable = createAnnotation<
+  "Cacheable",
+  string,
+  (...args: any[]) => Promise<unknown>
+>("Cacheable");
+
+const CacheEvict = createAnnotation<"CacheEvict", string>("CacheEvict");
+
+const cacheable = P.annotated(Cacheable);
+const cacheEvict = P.annotated(CacheEvict);
+
+@Aspect({ order: 50 })
+class CacheAspect {
+  private readonly caches = new Map<string, Map<string, Promise<unknown>>>();
+
+  @Around(cacheable)
+  read(joinPoint: ProceedingJoinPointOf<typeof cacheable>): Promise<unknown> {
+    const name = joinPoint.annotation(Cacheable);
+    const cache = this.caches.get(name) ?? new Map<string, Promise<unknown>>();
+    this.caches.set(name, cache);
+    const key = JSON.stringify(joinPoint.args);
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = joinPoint.proceed();
+      cache.set(key, cached);
+      cached.catch(() => cache.delete(key));
+    }
+    return cached;
+  }
+
+  @AfterReturning(cacheEvict)
+  evict(joinPoint: JoinPointOf<typeof cacheEvict>): void {
+    this.caches.delete(joinPoint.annotation(CacheEvict));
+  }
+}
+
+@Injectable()
+class ExchangeRates {
+  private readonly rates = new Map([["EUR", 1.1]]);
+
+  lookups = 0;
+
+  @Cacheable("rates")
+  async rate(currency: string): Promise<number> {
+    this.lookups += 1;
+    const rate = this.rates.get(currency);
+    if (rate === undefined) {
+      throw new RangeError(`No rate for ${currency}`);
+    }
+    return rate;
+  }
+
+  async convert(amount: number, currency: string): Promise<number> {
+    return amount * (await this.rate(currency));
+  }
+
+  @CacheEvict("rates")
+  async publish(currency: string, rate: number): Promise<void> {
+    this.rates.set(currency, rate);
+  }
+}
+
+const Job = createAnnotation<"Job", string, () => Promise<void>>("Job", {
+  requiresAdvice: true,
+});
+
+const jobs = P.annotated(Job);
+
+@Injectable()
+class JobLog {
+  readonly lines: string[] = [];
+}
+
+@Aspect()
+class JobAspect {
+  private readonly running = new Set<string>();
+
+  constructor(private readonly log: JobLog) {}
+
+  @Around(jobs)
+  async run(joinPoint: ProceedingJoinPointOf<typeof jobs>): Promise<void> {
+    const name = joinPoint.annotation(Job);
+    if (this.running.has(name)) {
+      this.log.lines.push(`${name} skipped: the previous run is not finished`);
+      return;
+    }
+    this.running.add(name);
+    try {
+      await joinPoint.proceed();
+      this.log.lines.push(`${name} finished`);
+    } catch (error) {
+      this.log.lines.push(`${name} failed: ${error}`);
+    } finally {
+      this.running.delete(name);
+    }
+  }
+}
+
+@Injectable()
+class Outbox {
+  readonly pending: string[] = [];
+
+  readonly sent: string[] = [];
+
+  async flush(): Promise<void> {
+    for (const message of this.pending.splice(0)) {
+      if (message === "") {
+        throw new Error("Cannot send an empty message");
+      }
+      this.sent.push(message);
+    }
+  }
+}
+
+@Injectable()
+class OutboxRelayJob {
+  constructor(private readonly outbox: Outbox) {}
+
+  @Job("outbox-relay")
+  async relay(): Promise<void> {
+    await this.outbox.flush();
+  }
+}
+
+@Injectable()
+class UserRepository {
+  private readonly names = new Map<number, string>();
+
+  async findName(id: number): Promise<string | undefined> {
+    return this.names.get(id);
+  }
+
+  async rename(id: number, name: string): Promise<void> {
+    this.names.set(id, name);
+  }
+
+  size(): number {
+    return this.names.size;
+  }
+}
+
+@Injectable()
+class OrderRepository {
+  async findByUser(userId: number): Promise<string[]> {
+    return userId === 1 ? ["order-1"] : [];
+  }
+}
+
+@Injectable()
+class IdGenerator {
+  private last = 0;
+
+  async next(): Promise<number> {
+    this.last += 1;
+    return this.last;
+  }
+}
+
+@Module({
+  providers: [UserRepository, OrderRepository, IdGenerator],
+  exports: [UserRepository, OrderRepository, IdGenerator],
+})
+class PersistenceModule {}
+
+const repositoryQueries = P.all(
+  P.inModule(PersistenceModule),
+  P.bean("*Repository"),
+  P.matching({
+    methodMatcher: { isRuntime: false, matches: (method) => method.isAsync },
+  }),
+);
+
+@Injectable()
+class Timings {
+  readonly samples: { member: string; milliseconds: number }[] = [];
+}
+
+@Aspect()
+class RepositoryTimingAspect {
+  constructor(private readonly timings: Timings) {}
+
+  @Around(repositoryQueries)
+  async time(
+    joinPoint: ProceedingJoinPointOf<typeof repositoryQueries>,
+  ): Promise<unknown> {
+    const { targetType, name } = joinPoint.signature;
+    const started = performance.now();
+    try {
+      return await joinPoint.proceed();
+    } finally {
+      this.timings.samples.push({
+        member: `${targetType.name}.${String(name)}`,
+        milliseconds: performance.now() - started,
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Advisors
+// ---------------------------------------------------------------------------
 
 @Advisor()
 class TransactionAdvisor {
@@ -393,16 +776,20 @@ class TransactionAdvisor {
   readonly order = 100;
 
   readonly advice: MethodInterceptor = {
-    invoke: (invocation) => this.transactions.run(() => invocation.proceed()),
+    invoke: (invocation) =>
+      this.database.transactional(async () => invocation.proceed()),
   };
 
-  constructor(private readonly transactions: TransactionManager) {}
+  constructor(private readonly database: Database) {}
 }
 
 @Injectable()
 @Transactional()
 class InvoiceService {
+  constructor(private readonly database: Database) {}
+
   async issue(account: Account, amount: number): Promise<string> {
+    this.database.write(`invoiced:${account.id}`, amount);
     if (amount <= 0) {
       throw new RangeError(`Cannot invoice ${amount}`);
     }
@@ -510,6 +897,37 @@ async function billing(...providers: (new (...args: any[]) => unknown)[]) {
   return moduleRef.init();
 }
 
+/**
+ * The members of the billing module `pointcut` matches statically, as the
+ * advised members of an aspect with that pointcut.
+ */
+async function matchedBy(pointcut: Pointcut<any>): Promise<string[]> {
+  @Aspect()
+  class Probe {
+    @Before(pointcut)
+    probe(): void {}
+  }
+  const moduleRef = await billing(Probe);
+  return moduleRef
+    .get(AspectInspector)
+    .advisedMembers()
+    .filter(({ advisors }) => advisors.some(({ type }) => type === Probe))
+    .map(({ type, name }) => `${type.name}.${String(name)}`)
+    .sort();
+}
+
+/** A module with `AspectModule` and `providers`, compiled and initialized. */
+async function application(
+  providers: (new (...args: any[]) => unknown)[],
+  returnValueAdapters: ReturnValueAdapter<any>[] = [],
+) {
+  const moduleRef = await Test.createTestingModule({
+    imports: [AspectModule.forRoot({ report: false, returnValueAdapters })],
+    providers,
+  }).compile();
+  return moduleRef.init();
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   trace.length = 0;
@@ -595,6 +1013,39 @@ describe("README examples", () => {
     accounts.findAll();
 
     expect(moduleRef.get(QueryAspect).seen).toEqual(["find"]);
+  });
+
+  it("pointcut composition: selects by name, module, provider token and their combinations", async () => {
+    expect(await matchedBy(reads)).toEqual([
+      "AccountService.find",
+      "AccountService.findAll",
+    ]);
+    expect(await matchedBy(billingWrites)).toEqual([
+      "AccountService.deposit",
+      "AccountService.open",
+      "PaymentGateway.charge",
+      "PaymentGateway.refund",
+    ]);
+    expect(await matchedBy(accountChanges)).toEqual([
+      "AccountService.deposit",
+      "AccountService.open",
+    ]);
+    expect(await matchedBy(gateways)).toEqual([
+      "PaymentGateway.charge",
+      "PaymentGateway.refund",
+    ]);
+  });
+
+  it("pointcut composition: narrows annotated methods to the calls whose arguments match", async () => {
+    const moduleRef = await billing(AccountChargeAspect);
+    const gateway = moduleRef.get(PaymentGateway);
+
+    const receipt = await gateway.charge(new Account("acc-1", 100), 30);
+    await gateway.refund(receipt);
+
+    expect(moduleRef.get(AccountChargeAspect).seen).toEqual([
+      "charge of acc-1, 3 attempts",
+    ]);
   });
 
   it("before advice: prevents the join point by throwing, for the calls its arguments match", async () => {
@@ -689,26 +1140,223 @@ describe("README examples", () => {
     expect([...closing]).toEqual([["ACME", 103]]);
   });
 
-  it("advisors: runs a MethodInterceptor around the methods of an annotated class", async () => {
+  it("other result types: follows an async generator to its end with a custom adapter", async () => {
+    const moduleRef = await application(
+      [EventStore, ReplayAspect],
+      [asyncGeneratorAdapter],
+    );
+    const store = moduleRef.get(EventStore);
+    const { lines } = moduleRef.get(ReplayAspect);
+    store.events.set("orders", ["created", "paid", "shipped"]);
+
+    const replay = store.replay("orders");
+    expect(lines).toEqual([]);
+    const events: string[] = [];
+    for await (const event of replay) {
+      events.push(event);
+      expect(lines).toEqual([]);
+    }
+    expect(events).toEqual(["created", "paid", "shipped"]);
+    expect(lines).toEqual(["orders closed"]);
+
+    for await (const event of store.replay("orders")) {
+      expect(event).toBe("created");
+      break;
+    }
+    expect(lines).toEqual(["orders closed", "orders closed"]);
+
+    lines.length = 0;
+    await expect(store.replay("missing").next()).rejects.toThrow(
+      "Unknown stream missing",
+    );
+    expect(lines).toEqual([
+      "missing failed: Error: Unknown stream missing",
+      "missing closed",
+    ]);
+  });
+
+  it("other result types: runs after advice at the return of the generator without the adapter", async () => {
+    const moduleRef = await application([EventStore, ReplayAspect]);
+    const { lines } = moduleRef.get(ReplayAspect);
+
+    const replay = moduleRef.get(EventStore).replay("missing");
+    expect(lines).toEqual(["missing closed"]);
+    await expect(replay.next()).rejects.toThrow("Unknown stream missing");
+
+    expect(lines).toEqual(["missing closed"]);
+  });
+
+  it("transaction recipe: commits a service method and rolls back the self-invoked calls of a failed one", async () => {
+    const moduleRef = await application([
+      Database,
+      TransactionAspect,
+      WalletRepository,
+      WalletService,
+    ]);
+    const database = moduleRef.get(Database);
+    const wallets = moduleRef.get(WalletRepository);
+    const service = moduleRef.get(WalletService);
+
+    await wallets.add("alice", 25);
+
+    await service.move("alice", "bob", 10);
+    await service.payAll("alice", ["bob", "carol"], 10).catch(() => undefined);
+
+    const balances = [
+      await wallets.balance("alice"),
+      await wallets.balance("bob"),
+      await wallets.balance("carol"),
+    ];
+
+    expect(balances).toEqual([15, 10, 0]);
+    expect(database.log).toEqual(["begin", "commit", "begin", "rollback"]);
+  });
+
+  it("transaction recipe: keeps concurrent transactions apart", async () => {
+    const moduleRef = await application([
+      Database,
+      TransactionAspect,
+      WalletRepository,
+      WalletService,
+    ]);
+    const wallets = moduleRef.get(WalletRepository);
+    const service = moduleRef.get(WalletService);
+    await wallets.add("alice", 10);
+
+    const outcomes = await Promise.allSettled([
+      service.move("alice", "bob", 10),
+      service.move("dave", "carol", 10),
+    ]);
+
+    expect(outcomes.map(({ status }) => status)).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    expect(await wallets.balance("bob")).toBe(10);
+    expect(await wallets.balance("carol")).toBe(0);
+  });
+
+  it("transaction recipe: refuses to run a transactional method without the aspect", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [AspectModule.forRoot({ report: false })],
-      providers: [InvoiceService, TransactionManager, TransactionAdvisor],
+      imports: [AspectModule.forRoot({ report: false, strict: false })],
+      providers: [Database, WalletRepository, WalletService],
+    })
+      .setLogger(new RecordingLogger())
+      .compile();
+    await moduleRef.init();
+
+    expect(() => moduleRef.get(WalletService).move("alice", "bob", 1)).toThrow(
+      AspectConfigurationError,
+    );
+    expect(await moduleRef.get(WalletRepository).balance("bob")).toBe(0);
+  });
+
+  it("caching recipe: shares one lookup between concurrent and self-invoked calls until the eviction", async () => {
+    const moduleRef = await application([CacheAspect, ExchangeRates]);
+    const rates = moduleRef.get(ExchangeRates);
+
+    const first = await Promise.all([
+      rates.convert(10, "EUR"),
+      rates.convert(20, "EUR"),
+      rates.rate("EUR"),
+    ]);
+    const lookups = rates.lookups;
+
+    await rates.publish("EUR", 1.2);
+    const second = await rates.convert(10, "EUR");
+
+    expect(first).toEqual([11, 22, 1.1]);
+    expect(lookups).toBe(1);
+    expect(second).toBe(12);
+    expect(rates.lookups).toBe(2);
+  });
+
+  it("caching recipe: does not keep a rejected lookup", async () => {
+    const moduleRef = await application([CacheAspect, ExchangeRates]);
+    const rates = moduleRef.get(ExchangeRates);
+
+    await expect(rates.rate("GBP")).rejects.toThrow("No rate for GBP");
+    await rates.publish("GBP", 1.3);
+
+    await expect(rates.rate("GBP")).resolves.toBe(1.3);
+    expect(rates.lookups).toBe(2);
+  });
+
+  it("job recipe: reports the failure of a job instead of rejecting, and skips an overlapping run", async () => {
+    const moduleRef = await application([
+      JobAspect,
+      JobLog,
+      Outbox,
+      OutboxRelayJob,
+    ]);
+    const job = moduleRef.get(OutboxRelayJob);
+    const outbox = moduleRef.get(Outbox);
+    const { lines } = moduleRef.get(JobLog);
+
+    outbox.pending.push("welcome");
+    await Promise.all([job.relay(), job.relay()]);
+
+    expect(outbox.sent).toEqual(["welcome"]);
+    expect(lines).toEqual([
+      "outbox-relay skipped: the previous run is not finished",
+      "outbox-relay finished",
+    ]);
+
+    lines.length = 0;
+    outbox.pending.push("");
+    await expect(job.relay()).resolves.toBeUndefined();
+    await job.relay();
+
+    expect(lines).toEqual([
+      "outbox-relay failed: Error: Cannot send an empty message",
+      "outbox-relay finished",
+    ]);
+  });
+
+  it("timing recipe: times the asynchronous methods of the repositories of the module, selected without a decorator", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AspectModule.forRoot({ report: false }), PersistenceModule],
+      providers: [Timings, RepositoryTimingAspect],
     }).compile();
+    await moduleRef.init();
+    const users = moduleRef.get(UserRepository);
+
+    await users.rename(1, "Ada");
+    expect(await users.findName(1)).toBe("Ada");
+    expect(users.size()).toBe(1);
+    expect(await moduleRef.get(OrderRepository).findByUser(1)).toEqual([
+      "order-1",
+    ]);
+    expect(await moduleRef.get(IdGenerator).next()).toBe(1);
+
+    const { samples } = moduleRef.get(Timings);
+    expect(samples.map(({ member }) => member)).toEqual([
+      "UserRepository.rename",
+      "UserRepository.findName",
+      "OrderRepository.findByUser",
+    ]);
+    expect(samples.every(({ milliseconds }) => milliseconds >= 0)).toBe(true);
+  });
+
+  it("advisors: runs a MethodInterceptor around the methods of an annotated class", async () => {
+    const moduleRef = await application([
+      Database,
+      InvoiceService,
+      TransactionAdvisor,
+    ]);
     const invoices = moduleRef.get(InvoiceService);
+    const database = moduleRef.get(Database);
 
     await expect(invoices.issue(new Account("acc-1"), 10)).resolves.toBe(
       "invoice-acc-1-10",
     );
-    await expect(invoices.issue(new Account("acc-1"), 0)).rejects.toThrow(
+    await expect(invoices.issue(new Account("acc-2"), 0)).rejects.toThrow(
       RangeError,
     );
 
-    expect(moduleRef.get(TransactionManager).log).toEqual([
-      "begin",
-      "commit",
-      "begin",
-      "rollback",
-    ]);
+    expect(database.log).toEqual(["begin", "commit", "begin", "rollback"]);
+    expect(database.read("invoiced:acc-1")).toBe(10);
+    expect(database.read("invoiced:acc-2")).toBe(0);
   });
 
   it("instantiation models: keeps the state of a perTarget aspect per target object", async () => {
@@ -770,6 +1418,13 @@ describe("README examples", () => {
         name: "charge",
         kind: "method",
         advisors,
+      },
+      {
+        type: PaymentGateway,
+        declaringType: PaymentGateway,
+        name: "refund",
+        kind: "method",
+        advisors: [advisors[0]],
       },
     ]);
   });

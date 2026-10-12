@@ -6,7 +6,7 @@
 
 **Spring-style aspect-oriented programming for NestJS.** An aspect is a Nest provider that holds a crosscutting concern, such as retries, auditing or transactions, together with pointcuts that select the methods it applies to. `AspectModule` weaves the aspects of an application into every class its container manages.
 
-[Quick start](#quick-start) · [Module options](#aspectmodule) · [Annotations](#annotations) · [Pointcuts](#pointcuts) · [Advice](#advice) · [Ordering](#ordering) · [Asynchronous join points](#asynchronous-join-points) · [Advisors](#advisors) · [Introductions](#introductions) · [Inspection](#inspection) · [Testing](#testing) · [Validation and errors](#bootstrap-validation) · [Limitations](#limitations) · [Spring mapping](#spring-concept-mapping)
+[Aspect or enhancer](#when-to-use-an-aspect-and-when-a-nest-enhancer) · [Quick start](#quick-start) · [Module options](#aspectmodule) · [Annotations](#annotations) · [Pointcuts](#pointcuts) · [Advice](#advice) · [Ordering](#ordering) · [Asynchronous join points](#asynchronous-join-points) · [Recipes](#recipes) · [Advisors](#advisors) · [Introductions](#introductions) · [Inspection](#inspection) · [Testing](#testing) · [Validation and errors](#bootstrap-validation) · [Limitations](#limitations) · [Spring mapping](#spring-concept-mapping)
 
 ## What it is
 
@@ -17,6 +17,26 @@
 - **Correct for asynchronous code.** Advice follows the settlement of a promise, and of an Observable with the adapter of `nestjs-aspect/rxjs`.
 - **Errors instead of silent no-ops.** A misconfiguration fails the bootstrap, and a method whose required advice is missing cannot be called.
 - **Every managed class.** Providers, controllers, gateways, guards, interceptors, pipes, filters and middleware, in the singleton, request and transient scopes.
+
+## When to use an aspect and when a Nest enhancer
+
+Nest runs guards, pipes, interceptors and exception filters around the handlers it dispatches to: HTTP route handlers, microservice message handlers, WebSocket gateway handlers and GraphQL resolvers. They receive the `ExecutionContext` with the request and the response, and they remain the right tool for the request pipeline. Advice sees a method call, its arguments and its outcome, not the request. This package is for the calls that enhancers do not reach.
+
+| Concern                                                                                                                        | Tool             |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| Authentication and authorization of a handler                                                                                  | Guard            |
+| Validation and transformation of the arguments of a handler                                                                    | Pipe             |
+| Logging, timing, a timeout, response mapping or response caching (`CacheInterceptor`) of a handler                             | Interceptor      |
+| Mapping an error to a response                                                                                                 | Exception filter |
+| Behavior around a call from one provider to another: service to service, service to repository, a client of a remote system    | Aspect           |
+| Behavior around a method that no handler dispatch reaches: one that a timer, a job worker, an event emitter or a command calls | Aspect           |
+| One behavior for many methods selected by module, class, name or provider token, without a decorator on each of them           | Aspect           |
+| Behavior that also applies when a method calls another method of the same object                                               | Aspect           |
+
+- **An enhancer binds to a handler.** `@UseGuards()`, `@UseInterceptors()`, `@UsePipes()` and `@UseFilters()` on a method that Nest does not dispatch to as a handler have no effect, and a global enhancer applies to every handler, not to every provider.
+- **An interceptor surrounds the handler as a whole.** It cannot delimit a transaction at one service method, cache the result of one repository query or retry one call of a remote client.
+- **A call that starts outside a handler has no enhancer chain.** An error a job throws reaches no exception filter.
+- **Advice has no `ExecutionContext`.** A concern that reads the request, sets a response header or depends on the route belongs in an enhancer. On a route handler both apply: [advice runs inside the interceptors](#scopes-self-invocation-and-the-request-pipeline).
 
 ## Installation
 
@@ -120,7 +140,7 @@ const { entries } = app.get(AuditTrail);
 // ]
 ```
 
-A complete HTTP application with a retry aspect and an audit aspect is in [examples/basic](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect/examples/basic).
+A complete HTTP application with transaction, retry and audit aspects around the calls between its providers is in [examples/basic](https://github.com/thilllon/nestjs-kit/tree/main/packages/nestjs-aspect/examples/basic).
 
 ## AspectModule
 
@@ -215,6 +235,11 @@ export class PaymentGateway {
     account.balance -= amount;
     return `receipt-${account.id}-${amount}`;
   }
+
+  @Retryable({ attempts: 2 })
+  async refund(receipt: string): Promise<string> {
+    return `refund-${receipt}`;
+  }
 }
 
 @Injectable()
@@ -289,11 +314,48 @@ export const queries = inBilling
 export const deposits = P.within(AccountService).and(P.args(Account, Number));
 ```
 
+`queries` selects `AccountService.find`: `findAll` carries `Internal`, and `open` and `deposit` do not match the name. `deposits` selects the calls of the methods of `AccountService` that pass an account and a number.
+
 - **Types.** `charge` carries the signature of `PaymentGateway.charge`, `retryable` the method contract and the value type of `Retryable`, and `deposits` types `joinPoint.args` as `[Account, number]`. `and` guarantees the annotations of both sides, `or` those common to both, `not` none. Broad pointcuts such as `P.within` and `P.name` type arguments and results as `unknown`.
 - **Default join points.** Broad pointcuts match methods only, and leave out the Nest lifecycle hooks `onModuleInit`, `onApplicationBootstrap`, `onModuleDestroy`, `beforeApplicationShutdown` and `onApplicationShutdown`. `P.method` selects a lifecycle hook, and `P.kind("getter")` or `P.kind("setter")` selects accessors. A constructor is never a join point.
 - **Static and dynamic matching.** Every designator except `P.args` is evaluated once per class member when the class is woven. `P.args` is evaluated on every call of a member the rest of the pointcut matches; combine it with a static designator. In `P.args`, a class matches an argument that is `instanceof` it, `String`, `Number`, `Boolean`, `BigInt` and `Symbol` match their primitives, `P.ANY` matches one argument and `P.REST` the remaining ones.
 - **`P.bean`** matches a class when one of its registrations has a matching token, `useClass` tokens included. A `useExisting` token and the instance of a singleton `useFactory` or `useValue` provider are matched when the application initializes, and the instance of a request-scoped or transient `useFactory` provider when the container first resolves one. `P.bean` selects the class: its advice then applies to every instance of that class.
 - **`P.inModule(Module, { transitive: true })`** follows the imports of the module. A global module counts only when the `@Module()` decorator of the importing module lists it.
+
+### Composition
+
+A composed pointcut states a selection that would otherwise need a decorator on every method. These build on the pointcuts above:
+
+```ts
+import { P } from "nestjs-aspect";
+
+// Reads by naming convention, in any class.
+export const reads = P.any(P.name("find*"), P.name("get*"), P.name("list*"));
+
+// Every other method of a module: PaymentGateway.charge,
+// PaymentGateway.refund, AccountService.open and AccountService.deposit.
+export const billingWrites = inBilling.and(reads.not());
+
+// Methods of one class by name: AccountService.open and
+// AccountService.deposit.
+export const accountChanges = P.within(AccountService).and(
+  P.name(/^(open|deposit)$/),
+);
+
+// The classes of a module by provider token: PaymentGateway.charge and
+// PaymentGateway.refund.
+export const gateways = P.all(inBilling, P.bean("*Gateway"));
+
+// The calls of annotated methods by argument: those of
+// PaymentGateway.charge, not those of PaymentGateway.refund.
+export const accountCharges = P.annotated(Retryable).and(
+  P.args(Account, P.REST),
+);
+```
+
+- `P.any()` and `.or()` widen a selection, `P.all()` and `.and()` narrow it, and `.not()` excludes from it. `reads.not()` alone matches almost every method of the application; `.not()` belongs behind `.and()`.
+- `gateways` keeps selecting the gateways that later join the module. A class joins the selection by its registration, not by a decorator.
+- `accountCharges` guarantees `Retryable` and types the first argument: its advice reads `joinPoint.annotation(Retryable).attempts` and `joinPoint.args[0].id`.
 
 ## Advice
 
@@ -571,14 +633,94 @@ An Observable is lazy, so the advice runs within each subscription:
 - A result that is never subscribed runs no after advice; a result that is subscribed twice runs it twice.
 - Before advice and the code of around advice run when the method is called, not at subscription.
 
-A custom `ReturnValueAdapter` (`supports`, `onSuccess`, `onError`, `finally`) makes advice follow another result type.
+### Other result types
+
+A `ReturnValueAdapter` makes advice follow a result that settles after the method has returned and is neither a promise nor an Observable. An `async` generator method returns its generator before it has produced a value: without an adapter, after advice runs at that moment and after-throwing advice never sees an error that a later iteration raises. This adapter follows the generator to its end:
+
+```ts
+import { Injectable } from "@nestjs/common";
+import {
+  After,
+  AfterThrowing,
+  Aspect,
+  type JoinPointOf,
+  P,
+  type ReturnValueAdapter,
+} from "nestjs-aspect";
+
+export const asyncGeneratorAdapter: ReturnValueAdapter<
+  AsyncGenerator<unknown>
+> = {
+  supports(value: unknown): value is AsyncGenerator<unknown> {
+    return Object.prototype.toString.call(value) === "[object AsyncGenerator]";
+  },
+  async *onSuccess(value, callback) {
+    let last: unknown;
+    for await (const item of value) {
+      last = item;
+      yield item;
+    }
+    await callback(last);
+  },
+  async *onError(value, callback) {
+    try {
+      yield* value;
+    } catch (error) {
+      await callback(error);
+      throw error;
+    }
+  },
+  async *finally(value, callback) {
+    try {
+      yield* value;
+    } finally {
+      await callback();
+    }
+  },
+};
+
+@Injectable()
+export class EventStore {
+  readonly events = new Map<string, string[]>();
+
+  async *replay(stream: string): AsyncGenerator<string> {
+    const events = this.events.get(stream);
+    if (!events) {
+      throw new Error(`Unknown stream ${stream}`);
+    }
+    yield* events;
+  }
+}
+
+export const replays = P.method(EventStore, "replay");
+
+@Aspect()
+export class ReplayAspect {
+  readonly lines: string[] = [];
+
+  @After(replays)
+  closed(joinPoint: JoinPointOf<typeof replays>): void {
+    this.lines.push(`${joinPoint.args[0]} closed`);
+  }
+
+  @AfterThrowing(replays)
+  failed(joinPoint: JoinPointOf<typeof replays>, error: unknown): void {
+    this.lines.push(`${joinPoint.args[0]} failed: ${error}`);
+  }
+}
+```
+
+Register it with `AspectModule.forRoot({ returnValueAdapters: [asyncGeneratorAdapter] })`. `closed` runs when the consumer has read the last event, when it leaves the loop early and when the replay fails; `failed` runs for an error that an iteration raises, here the unknown stream at the first one. Like an Observable, a generator that is never iterated runs no after advice.
+
+- `supports` decides by value which results the adapter follows; adapters are consulted in the order of the option, before the built-in `promiseAdapter`.
+- `onSuccess` calls `callback` with the value after-returning advice receives, `onError` with the error, and `finally` without an argument. Each returns a result of the same type and waits for what `callback` returns.
 
 ## Scopes, self-invocation and the request pipeline
 
 - **Targets of every scope are advised**: singleton, request-scoped and transient.
 - **Aspects and advisors are singletons.** One that is request-scoped or transient, by its own scope or because it depends on a request-scoped provider, is rejected when the application initializes. Per-request state belongs to the join point: resolve a request-scoped provider inside the advice with `ModuleRef.resolve()` and `ContextIdFactory`, or read it from a CLS store.
 - **Aspects and advisors are never advised.** An aspect inherits the advice of a superclass without `@Aspect`; an aspect that extends another `@Aspect` class is rejected.
-- **Self-invocation is advised.** A call from a method to another method of the same object (`this.other()`) runs the advice of that method, unlike in Spring: the dispatcher is the member on the class prototype, not a proxy in front of the object.
+- **Self-invocation is advised.** A call from a method to another method of the same object (`this.other()`) runs the advice of that method, unlike in Spring: the dispatcher is the member on the class prototype, not a proxy in front of the object. The [transaction](#a-transaction-around-a-service-method) and [caching](#caching-the-result-of-a-provider-method) recipes rely on it.
 - **Controllers.** On a route handler, advice runs inside the Nest interceptors and after the pipes, so it sees the transformed arguments:
 
   ```
@@ -587,29 +729,59 @@ A custom `ReturnValueAdapter` (`supports`, `onSuccess`, `onError`, `finally`) ma
 
   An error thrown by advice reaches the exception filters like an error of the handler. Route metadata and `SetMetadata` values stay visible on a woven handler.
 
-## Advisors
+## Recipes
 
-`@Advisor()` marks a provider as an advisor: one pointcut and one advice, the layer aspects compile to. The static member `pointcut` selects the join points; an instance supplies `advice`, a `MethodInterceptor`, and an optional `order`.
+Each recipe advises calls that no Nest enhancer surrounds. The code of each one is complete.
+
+### A transaction around a service method
+
+An interceptor can open a transaction only around a whole route handler, and not at all for a method that a job or another service calls. The aspect delimits the transaction at the service method, and an `AsyncLocalStorage` carries it to the repositories the method calls. `Database` stands in for a database client.
 
 ```ts
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Injectable } from "@nestjs/common";
 import {
-  Advisor,
+  Around,
+  Aspect,
   createAnnotation,
-  type MethodInterceptor,
   P,
+  type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
-export const Transactional = createAnnotation<"Transactional">("Transactional");
+export const Transactional = createAnnotation<
+  "Transactional",
+  void,
+  (...args: any[]) => Promise<unknown>
+>("Transactional", { requiresAdvice: true });
 
 @Injectable()
-export class TransactionManager {
+export class Database {
+  private readonly committed = new Map<string, number>();
+
+  private readonly transaction = new AsyncLocalStorage<Map<string, number>>();
+
   readonly log: string[] = [];
 
-  async run(work: () => unknown): Promise<unknown> {
+  read(key: string): number {
+    const writes = this.transaction.getStore();
+    return writes?.get(key) ?? this.committed.get(key) ?? 0;
+  }
+
+  write(key: string, value: number): void {
+    (this.transaction.getStore() ?? this.committed).set(key, value);
+  }
+
+  async transactional<T>(work: () => Promise<T>): Promise<T> {
+    if (this.transaction.getStore()) {
+      return work();
+    }
+    const writes = new Map<string, number>();
     this.log.push("begin");
     try {
-      const result = await work();
+      const result = await this.transaction.run(writes, work);
+      for (const [key, value] of writes) {
+        this.committed.set(key, value);
+      }
       this.log.push("commit");
       return result;
     } catch (error) {
@@ -618,6 +790,346 @@ export class TransactionManager {
     }
   }
 }
+
+export const transactional = P.annotated(Transactional);
+
+@Aspect({ order: 100 })
+export class TransactionAspect {
+  constructor(private readonly database: Database) {}
+
+  @Around(transactional)
+  run(
+    joinPoint: ProceedingJoinPointOf<typeof transactional>,
+  ): Promise<unknown> {
+    return this.database.transactional(() => joinPoint.proceed());
+  }
+}
+
+@Injectable()
+export class WalletRepository {
+  constructor(private readonly database: Database) {}
+
+  async balance(owner: string): Promise<number> {
+    return this.database.read(owner);
+  }
+
+  async add(owner: string, amount: number): Promise<void> {
+    const balance = this.database.read(owner) + amount;
+    if (balance < 0) {
+      throw new RangeError(`${owner} cannot pay ${-amount}`);
+    }
+    this.database.write(owner, balance);
+  }
+}
+
+@Injectable()
+export class WalletService {
+  constructor(private readonly wallets: WalletRepository) {}
+
+  @Transactional()
+  async move(from: string, to: string, amount: number): Promise<void> {
+    await this.wallets.add(to, amount);
+    await this.wallets.add(from, -amount);
+  }
+
+  @Transactional()
+  async payAll(
+    from: string,
+    recipients: string[],
+    amount: number,
+  ): Promise<void> {
+    for (const to of recipients) {
+      await this.move(from, to, amount);
+    }
+  }
+}
+```
+
+`payAll` calls `move` on the same object. That call is advised too and joins the transaction of `payAll`, so one failed payment rolls back all of them:
+
+```ts
+await wallets.add("alice", 25);
+
+await service.move("alice", "bob", 10);
+await service.payAll("alice", ["bob", "carol"], 10).catch(() => undefined);
+
+const balances = [
+  await wallets.balance("alice"),
+  await wallets.balance("bob"),
+  await wallets.balance("carol"),
+];
+// [15, 10, 0]
+// database.log: ["begin", "commit", "begin", "rollback"]
+```
+
+`requiresAdvice` makes a `@Transactional()` method fail instead of running without a transaction when `TransactionAspect` is not registered.
+
+### Caching the result of a provider method
+
+`CacheInterceptor` caches the response of a handler. The result of a method that several services, jobs and handlers call is cached at the method. The aspect stores the promise, so concurrent calls with the same arguments share one lookup.
+
+```ts
+import { Injectable } from "@nestjs/common";
+import {
+  AfterReturning,
+  Around,
+  Aspect,
+  createAnnotation,
+  type JoinPointOf,
+  P,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
+
+export const Cacheable = createAnnotation<
+  "Cacheable",
+  string,
+  (...args: any[]) => Promise<unknown>
+>("Cacheable");
+
+export const CacheEvict = createAnnotation<"CacheEvict", string>("CacheEvict");
+
+export const cacheable = P.annotated(Cacheable);
+export const cacheEvict = P.annotated(CacheEvict);
+
+@Aspect({ order: 50 })
+export class CacheAspect {
+  private readonly caches = new Map<string, Map<string, Promise<unknown>>>();
+
+  @Around(cacheable)
+  read(joinPoint: ProceedingJoinPointOf<typeof cacheable>): Promise<unknown> {
+    const name = joinPoint.annotation(Cacheable);
+    const cache = this.caches.get(name) ?? new Map<string, Promise<unknown>>();
+    this.caches.set(name, cache);
+    const key = JSON.stringify(joinPoint.args);
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = joinPoint.proceed();
+      cache.set(key, cached);
+      cached.catch(() => cache.delete(key));
+    }
+    return cached;
+  }
+
+  @AfterReturning(cacheEvict)
+  evict(joinPoint: JoinPointOf<typeof cacheEvict>): void {
+    this.caches.delete(joinPoint.annotation(CacheEvict));
+  }
+}
+
+@Injectable()
+export class ExchangeRates {
+  private readonly rates = new Map([["EUR", 1.1]]);
+
+  lookups = 0;
+
+  @Cacheable("rates")
+  async rate(currency: string): Promise<number> {
+    this.lookups += 1;
+    const rate = this.rates.get(currency);
+    if (rate === undefined) {
+      throw new RangeError(`No rate for ${currency}`);
+    }
+    return rate;
+  }
+
+  async convert(amount: number, currency: string): Promise<number> {
+    return amount * (await this.rate(currency));
+  }
+
+  @CacheEvict("rates")
+  async publish(currency: string, rate: number): Promise<void> {
+    this.rates.set(currency, rate);
+  }
+}
+```
+
+`convert` reaches the cache through `this.rate()`. A rejected lookup is not kept, and `publish` empties the cache once it has succeeded:
+
+```ts
+const first = await Promise.all([
+  rates.convert(10, "EUR"),
+  rates.convert(20, "EUR"),
+  rates.rate("EUR"),
+]);
+const lookups = rates.lookups;
+// first: [11, 22, 1.1], lookups: 1
+
+await rates.publish("EUR", 1.2);
+const second = await rates.convert(10, "EUR");
+// second: 12, rates.lookups: 2
+```
+
+### Jobs outside the request pipeline
+
+A method that a timer, a job worker or an event emitter calls is no handler: no interceptor surrounds it and no exception filter receives its error. The rejection of a job that nothing awaits is an unhandled rejection, which ends the Node.js process by default. The aspect reports the failure of a job and skips a run that would overlap the previous one.
+
+```ts
+import { Injectable } from "@nestjs/common";
+import {
+  Around,
+  Aspect,
+  createAnnotation,
+  P,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
+
+export const Job = createAnnotation<"Job", string, () => Promise<void>>("Job", {
+  requiresAdvice: true,
+});
+
+export const jobs = P.annotated(Job);
+
+@Injectable()
+export class JobLog {
+  readonly lines: string[] = [];
+}
+
+@Aspect()
+export class JobAspect {
+  private readonly running = new Set<string>();
+
+  constructor(private readonly log: JobLog) {}
+
+  @Around(jobs)
+  async run(joinPoint: ProceedingJoinPointOf<typeof jobs>): Promise<void> {
+    const name = joinPoint.annotation(Job);
+    if (this.running.has(name)) {
+      this.log.lines.push(`${name} skipped: the previous run is not finished`);
+      return;
+    }
+    this.running.add(name);
+    try {
+      await joinPoint.proceed();
+      this.log.lines.push(`${name} finished`);
+    } catch (error) {
+      this.log.lines.push(`${name} failed: ${error}`);
+    } finally {
+      this.running.delete(name);
+    }
+  }
+}
+
+@Injectable()
+export class Outbox {
+  readonly pending: string[] = [];
+
+  readonly sent: string[] = [];
+
+  async flush(): Promise<void> {
+    for (const message of this.pending.splice(0)) {
+      if (message === "") {
+        throw new Error("Cannot send an empty message");
+      }
+      this.sent.push(message);
+    }
+  }
+}
+
+@Injectable()
+export class OutboxRelayJob {
+  constructor(private readonly outbox: Outbox) {}
+
+  @Job("outbox-relay")
+  async relay(): Promise<void> {
+    await this.outbox.flush();
+  }
+}
+```
+
+Whatever starts the job calls `relay()` without a handler for its failure, for example `setInterval(() => void job.relay(), 5000)`.
+
+### Timing every repository of a module
+
+An interceptor times a handler. Timing the repositories behind it with enhancers is not possible, and a decorator on every repository method leaves out the method added next. The pointcut selects the asynchronous methods of every provider of `PersistenceModule` whose token ends in `Repository`; the repositories carry no decorator.
+
+```ts
+import { Injectable, Module } from "@nestjs/common";
+import { Around, Aspect, P, type ProceedingJoinPointOf } from "nestjs-aspect";
+
+@Injectable()
+export class UserRepository {
+  private readonly names = new Map<number, string>();
+
+  async findName(id: number): Promise<string | undefined> {
+    return this.names.get(id);
+  }
+
+  async rename(id: number, name: string): Promise<void> {
+    this.names.set(id, name);
+  }
+
+  size(): number {
+    return this.names.size;
+  }
+}
+
+@Injectable()
+export class OrderRepository {
+  async findByUser(userId: number): Promise<string[]> {
+    return userId === 1 ? ["order-1"] : [];
+  }
+}
+
+@Injectable()
+export class IdGenerator {
+  private last = 0;
+
+  async next(): Promise<number> {
+    this.last += 1;
+    return this.last;
+  }
+}
+
+@Module({
+  providers: [UserRepository, OrderRepository, IdGenerator],
+  exports: [UserRepository, OrderRepository, IdGenerator],
+})
+export class PersistenceModule {}
+
+export const repositoryQueries = P.all(
+  P.inModule(PersistenceModule),
+  P.bean("*Repository"),
+  P.matching({
+    methodMatcher: { isRuntime: false, matches: (method) => method.isAsync },
+  }),
+);
+
+@Injectable()
+export class Timings {
+  readonly samples: { member: string; milliseconds: number }[] = [];
+}
+
+@Aspect()
+export class RepositoryTimingAspect {
+  constructor(private readonly timings: Timings) {}
+
+  @Around(repositoryQueries)
+  async time(
+    joinPoint: ProceedingJoinPointOf<typeof repositoryQueries>,
+  ): Promise<unknown> {
+    const { targetType, name } = joinPoint.signature;
+    const started = performance.now();
+    try {
+      return await joinPoint.proceed();
+    } finally {
+      this.timings.samples.push({
+        member: `${targetType.name}.${String(name)}`,
+        milliseconds: performance.now() - started,
+      });
+    }
+  }
+}
+```
+
+`UserRepository.size` is synchronous and `IdGenerator` is no repository, so neither is timed. `P.matching` selects by a property no designator covers, here `MethodRef.isAsync`, which keeps the asynchronous advice away from synchronous methods.
+
+## Advisors
+
+`@Advisor()` marks a provider as an advisor: one pointcut and one advice, the layer aspects compile to. The static member `pointcut` selects the join points; an instance supplies `advice`, a `MethodInterceptor`, and an optional `order`. This advisor is the counterpart of `TransactionAspect` of the [transaction recipe](#a-transaction-around-a-service-method), and also covers the methods of a class that carries `@Transactional()`:
+
+```ts
+import { Injectable } from "@nestjs/common";
+import { Advisor, type MethodInterceptor, P } from "nestjs-aspect";
 
 @Advisor()
 export class TransactionAdvisor {
@@ -628,16 +1140,20 @@ export class TransactionAdvisor {
   readonly order = 100;
 
   readonly advice: MethodInterceptor = {
-    invoke: (invocation) => this.transactions.run(() => invocation.proceed()),
+    invoke: (invocation) =>
+      this.database.transactional(async () => invocation.proceed()),
   };
 
-  constructor(private readonly transactions: TransactionManager) {}
+  constructor(private readonly database: Database) {}
 }
 
 @Injectable()
 @Transactional()
 export class InvoiceService {
+  constructor(private readonly database: Database) {}
+
   async issue(account: Account, amount: number): Promise<string> {
+    this.database.write(`invoiced:${account.id}`, amount);
     if (amount <= 0) {
       throw new RangeError(`Cannot invoice ${amount}`);
     }

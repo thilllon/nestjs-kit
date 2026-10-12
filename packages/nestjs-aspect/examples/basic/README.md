@@ -1,13 +1,16 @@
-# Retry and audit aspects on NestJS
+# Aspects around provider calls on NestJS
 
-A NestJS HTTP application whose cross-cutting behavior lives in two aspects woven by [`nestjs-aspect`](../../README.md). It needs no external services: an in-memory client stands in for a remote inventory service.
+A NestJS HTTP application whose providers are advised by three aspects woven by [`nestjs-aspect`](../../README.md). It needs no external services: an in-memory `Database` stands in for a database client and an in-memory client for a remote inventory service.
+
+Nest guards, interceptors, pipes and exception filters surround route handlers. The aspects of this example advise what lies behind the handlers: the calls from the service to the repository and to the inventory client, also when no request starts them.
 
 The example shows:
 
-- an annotation, `@Retryable({ attempts })`, that accepts only methods returning a promise and fails the bootstrap when no advisor handles it: one whose pointcut refers to the annotation;
-- `RetryAspect`, whose `@Around` advice reads the annotation value from the join point and calls the method again after a transient error;
-- `AuditAspect`, whose `@Before`, `@AfterReturning` and `@AfterThrowing` advice records every call into `OrdersModule`, selected with `P.inModule(OrdersModule)`, through an injected `AuditLog` provider;
-- aspect order: `AuditAspect` (`order: 10`) runs outside `RetryAspect` (`order: 20`), so a retried call is audited once;
+- `TransactionAspect`, whose `@Around` advice runs a method annotated with `@Transactional()` in a transaction. An `AsyncLocalStorage` in `Database` carries the transaction to the repository calls of the method, and a failed method discards its writes;
+- `RetryAspect`, whose `@Around` advice reads the value of `@Retryable({ attempts })` from the join point and repeats one call of the inventory client after a transient error, inside the transaction of the calling service method;
+- `AuditAspect`, whose `@Before`, `@AfterReturning` and `@AfterThrowing` advice records the calls between the providers of `OrdersModule`. Its pointcut, `P.inModule(OrdersModule).and(P.within(OrdersController, Database).not())`, selects them without a decorator on any of them and leaves the route handlers to Nest;
+- annotations that accept only methods returning a promise and fail the bootstrap when no advisor handles them;
+- aspect order: `AuditAspect` (`order: 10`) runs outside `TransactionAspect` (`order: 15`) and `RetryAspect` (`order: 20`), so the outcome of a method is audited after its commit or rollback and a retried call is audited once;
 - `AspectInspector`, which lists the advice of a method.
 
 ## Run
@@ -30,16 +33,18 @@ Place an order. The SKU selects how the inventory client behaves: `flaky` fails 
 curl --header "content-type: application/json" \
   --data '{"sku":"flaky","quantity":2}' \
   http://localhost:3000/orders
+curl http://localhost:3000/orders
 curl http://localhost:3000/audit
 ```
 
-The order succeeds on the third call of `InventoryClient.reserve`, and the audit trail holds one `call` and one `return` entry for it. An order for `offline` answers `503` after three attempts and adds an `error` entry for each layer. `GET /audit` is declared outside `OrdersModule`, so it adds no entry.
+The order succeeds on the third call of `InventoryClient.reserve`, and the audit trail holds one `call` and one `return` entry for that method. An order for `offline` answers `503` after three attempts: `OrdersService.place` has stored the order before the reservation fails, the transaction rolls back, and `GET /orders` does not list it. `GET /audit` is declared outside `OrdersModule`, so it adds no entry.
 
 ## Files
 
-- `src/retryable.ts` declares the `Retryable` annotation and `TransientError`.
-- `src/retry.aspect.ts` and `src/audit.aspect.ts` are the aspects; `src/audit-log.ts` is the provider `AuditAspect` injects.
-- `src/orders.module.ts` declares the advised controller, service and inventory client.
+- `src/transactional.ts` declares the `Transactional` annotation; `src/retryable.ts` declares the `Retryable` annotation and `TransientError`.
+- `src/transaction.aspect.ts`, `src/retry.aspect.ts` and `src/audit.aspect.ts` are the aspects; `src/audit-log.ts` is the provider `AuditAspect` injects.
+- `src/database.ts` is the in-memory database with transactions.
+- `src/orders.module.ts` declares the controller and the advised service, repository and inventory client.
 - `src/app.module.ts` imports `AspectModule.forRoot()` first and registers the aspects as providers.
 - `src/create-app.ts` creates the Nest application on the Express adapter; `src/main.ts` starts it.
-- `src/create-app.test.ts` boots the application and checks the retries and the audit trail. Run it from the repository root with `pnpm --filter nestjs-aspect-basic-example test`.
+- `src/create-app.test.ts` boots the application and checks the transactions, the retries and the audit trail. Run it from the repository root with `pnpm --filter nestjs-aspect-basic-example test`.
