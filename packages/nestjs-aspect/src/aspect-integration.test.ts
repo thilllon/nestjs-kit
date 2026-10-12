@@ -11,7 +11,7 @@ import {
   Aspect,
   Before,
 } from "./aspect-decorators";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type {
   AnyShape,
   JoinPoint,

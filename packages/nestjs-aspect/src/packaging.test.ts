@@ -25,7 +25,7 @@ const scenario = `
   const describe = (type, name) => Object.getOwnPropertyDescriptor(type.prototype, name);
   Retryable({ attempts: 3 })(UserService.prototype, "findById", describe(UserService, "findById"));
 
-  const retryable = kit.P.annotated(Retryable).and(kit.P.within(UserService));
+  const retryable = kit.Pointcut.annotated(Retryable).and(kit.Pointcut.within(UserService));
   class ResilienceAspect {
     retry(joinPoint) { return joinPoint.proceed(); }
   }
@@ -77,7 +77,7 @@ const application = `
     class TraceAspect {
       before(joinPoint) { log.push(label + " " + joinPoint.toString()); }
     }
-    decorators.Before(decorators.P.within(Greeter))(TraceAspect.prototype, "before", describe(TraceAspect, "before"));
+    decorators.Before(decorators.Pointcut.within(Greeter))(TraceAspect.prototype, "before", describe(TraceAspect, "before"));
     decorators.Aspect()(TraceAspect);
     class AppModule {}
     common.Module({
@@ -128,7 +128,7 @@ const declarations = `import {
   Aspect,
   Before,
   createAnnotation,
-  P,
+  Pointcut as P,
   type JoinPointOf,
   type MethodInterceptor,
   type ProceedingJoinPointOf,
@@ -158,6 +158,11 @@ class UserService {
 
 const retryable = P.annotated(Retryable);
 const rename = P.method(UserService, "rename");
+// The alias names the designator namespace and the pointcut type.
+const broad: P = P.within(UserService);
+// @ts-expect-error A broad pointcut does not carry the signature of rename.
+const narrowed: P<{ target: UserService; args: [name: string]; returns: string; annotations: never }> = broad;
+void narrowed;
 
 @Aspect({ order: 10 })
 class ResilienceAspect {
@@ -240,7 +245,7 @@ describe("built nestjs-aspect package", () => {
           "AspectUsageError",
           "Before",
           "DeclareParents",
-          "P",
+          "Pointcut",
           "createAnnotation",
           "introduced",
           "isAnnotation",

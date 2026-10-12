@@ -8,7 +8,7 @@ import {
   isDefaultJoinPoint,
   matchesStatically,
 } from "./pointcut";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { Class, JoinPointKind, MethodRef, PointcutLike } from "./types";
 
 const Audited = createAnnotation<"Audited">("Audited");

@@ -9,7 +9,7 @@ import { Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectUsageError } from "./errors";
 import { DeclareParents } from "./introduction";
 import { ORIGINAL } from "./method-ref";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
 import { weavingRegistry } from "./weaving-registry";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";

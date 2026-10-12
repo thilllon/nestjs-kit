@@ -7,7 +7,7 @@ import { createAnnotation } from "./annotation";
 import { AspectModule } from "./aspect.module";
 import { Advisor, Around, Aspect, Before } from "./aspect-decorators";
 import { AspectConfigurationError, AspectNotReadyError } from "./errors";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type {
   AnyShape,
   JoinPoint,

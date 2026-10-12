@@ -1,4 +1,9 @@
-import { Around, Aspect, P, type ProceedingJoinPointOf } from "nestjs-aspect";
+import {
+  Around,
+  Aspect,
+  Pointcut as P,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
 import { Retryable, TransientError } from "./retryable.js";
 
 const retryable = P.annotated(Retryable);

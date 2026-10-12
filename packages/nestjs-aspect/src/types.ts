@@ -103,7 +103,7 @@ export interface Annotation<
 /** Decorator created by Nest's `Reflector.createDecorator`. */
 export type NestAnnotation<V> = ReflectableDecorator<any, V>;
 
-/** Everything `P.annotated()` and `joinPoint.findAnnotation()` accept. */
+/** Everything `Pointcut.annotated()` and `joinPoint.findAnnotation()` accept. */
 export type AnnotationLike<V = unknown> =
   | Annotation<V, any, any>
   | NestAnnotation<V>;
@@ -217,7 +217,8 @@ export interface PointcutLike {
   readonly methodMatcher: MethodMatcher;
   /**
    * Opt-in for join points that broad pointcuts leave out: Nest lifecycle
-   * hooks (selected by `P.method`) and accessors (selected by `P.kind`).
+   * hooks (selected by `Pointcut.method`) and accessors (selected by
+   * `Pointcut.kind`).
    * Returns true when the pointcut statically matches `method` through a
    * designator that selects it explicitly. A pointcut without this member
    * matches default join points only. See `matchesStatically`.
@@ -230,7 +231,7 @@ export interface PointcutLike {
   readonly guarantees?: ReadonlySet<string>;
 }
 
-/** Typed, composable pointcut produced by `P`. */
+/** Typed, composable pointcut produced by the `Pointcut` designators. */
 export interface Pointcut<S extends Shape = AnyShape> extends PointcutLike {
   /** Phantom member that carries the shape; never set at run time. */
   readonly __shape?: S;

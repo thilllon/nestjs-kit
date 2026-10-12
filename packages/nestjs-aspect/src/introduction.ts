@@ -76,7 +76,7 @@ function ownIntroductions(type: object): readonly IntroductionMetadata[] {
  * interface, on a static member of an aspect:
  *
  * ```ts
- * @DeclareParents(P.inModule(ServiceModule), { use: DefaultUsageTracked })
+ * @DeclareParents(Pointcut.inModule(ServiceModule), { use: DefaultUsageTracked })
  * static readonly mixin: UsageTracked;
  * ```
  *

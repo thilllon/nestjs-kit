@@ -4,7 +4,7 @@ import {
   Aspect,
   Before,
   type JoinPointOf,
-  P,
+  Pointcut as P,
 } from "nestjs-aspect";
 import { CallTrace } from "./call-trace.js";
 import { Database } from "./database.js";

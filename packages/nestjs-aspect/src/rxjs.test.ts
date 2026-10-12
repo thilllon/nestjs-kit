@@ -24,7 +24,7 @@ import {
   Around,
   Aspect,
 } from "./aspect-decorators";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import { observableAdapter } from "./rxjs";
 import type {
   AnyShape,

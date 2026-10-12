@@ -49,7 +49,7 @@ export {
   type ArgOf,
   type ArgsOf,
   type MethodKeys,
-  P,
+  Pointcut,
   type PointcutFactory,
 } from "./pointcut-designators";
 export type {
@@ -82,7 +82,6 @@ export type {
   NestAnnotation,
   OrShape,
   ProceedingJoinPointOf,
-  Pointcut,
   PointcutAdvisor,
   PointcutLike,
   ProceedingJoinPoint,

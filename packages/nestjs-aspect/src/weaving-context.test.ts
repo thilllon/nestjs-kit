@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AspectModule } from "./aspect.module";
 import { Aspect, Before } from "./aspect-decorators";
 import { AspectUsageError } from "./errors";
-import { P } from "./pointcut-designators";
+import { Pointcut as P } from "./pointcut-designators";
 import type { AnyShape, Class, JoinPoint } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 import { isStub } from "./weaving-stub";

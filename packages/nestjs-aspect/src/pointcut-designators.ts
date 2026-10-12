@@ -20,14 +20,17 @@ import type {
   MethodRef,
   NestAnnotation,
   OrShape,
-  Pointcut,
+  Pointcut as PointcutInterface,
   Shape,
 } from "./types";
 
-/** `P.args` matcher for one argument of any value. */
+/** `Pointcut.args` matcher for one argument of any value. */
 export const ANY: unique symbol = Symbol.for("nestjs-aspect:any");
 
-/** `P.args` matcher for zero or more trailing arguments. Valid in last position only. */
+/**
+ * `Pointcut.args` matcher for zero or more trailing arguments. Valid in last
+ * position only.
+ */
 export const REST: unique symbol = Symbol.for("nestjs-aspect:rest");
 
 export type MethodKeys<T> = {
@@ -41,7 +44,7 @@ export type ArgMatcher =
   | typeof ANY
   | typeof REST;
 
-/** Argument type one `P.args` matcher stands for. */
+/** Argument type one `Pointcut.args` matcher stands for. */
 export type ArgOf<H> = H extends StringConstructor
   ? string
   : H extends NumberConstructor
@@ -65,7 +68,7 @@ export type ArgsOf<M extends readonly ArgMatcher[]> = M extends readonly [
     : [ArgOf<H>, ...ArgsOf<R>]
   : [];
 
-/** Shape of `P.all(...)`: the shapes folded with `and`. */
+/** Shape of `Pointcut.all(...)`: the shapes folded with `and`. */
 export type AllShapes<Pointcuts extends readonly Pointcut<any>[]> =
   Pointcuts extends readonly [
     Pointcut<infer H extends Shape>,
@@ -78,7 +81,7 @@ export type AllShapes<Pointcuts extends readonly Pointcut<any>[]> =
         : never
     : AnyShape;
 
-/** Shape of `P.any(...)`: the shapes folded with `or`. */
+/** Shape of `Pointcut.any(...)`: the shapes folded with `or`. */
 export type AnyShapes<Pointcuts extends readonly Pointcut<any>[]> =
   Pointcuts extends readonly [
     Pointcut<infer H extends Shape>,
@@ -180,9 +183,9 @@ export interface PointcutFactory {
    * `args(...)`: run-time argument check (runtime matcher). A class matches
    * an argument that is `instanceof` it; `String`, `Number`, `Boolean`,
    * `BigInt` and `Symbol` match their primitives and type the argument as
-   * the primitive. `P.ANY` matches one
-   * argument and `P.REST` the remaining ones. Without `P.REST` the argument
-   * count must equal the matcher count.
+   * the primitive. `Pointcut.ANY` matches one argument and `Pointcut.REST`
+   * the remaining ones. Without `Pointcut.REST` the argument count must equal
+   * the matcher count.
    */
   args<M extends readonly ArgMatcher[]>(
     ...matchers: M
@@ -321,7 +324,7 @@ function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
   const restIndex = matchers.indexOf(REST);
   if (restIndex !== -1 && restIndex !== matchers.length - 1) {
     throw new AspectConfigurationError(
-      "P.REST is valid only as the last matcher of P.args()",
+      "Pointcut.REST is valid only as the last matcher of Pointcut.args()",
     );
   }
   const variadic = restIndex !== -1;
@@ -329,7 +332,7 @@ function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
   for (const matcher of positional) {
     if (matcher !== ANY && typeof matcher !== "function") {
       throw new AspectConfigurationError(
-        "P.args() accepts classes, P.ANY and P.REST",
+        "Pointcut.args() accepts classes, Pointcut.ANY and Pointcut.REST",
       );
     }
   }
@@ -385,8 +388,14 @@ function targetAnnotated(annotation: AnnotationLike<any>): Pointcut<any> {
   });
 }
 
+/**
+ * Typed, composable pointcut. The type shares its name with the designator
+ * namespace, so one import binding gives both.
+ */
+export type Pointcut<S extends Shape = AnyShape> = PointcutInterface<S>;
+
 /** Pointcut designators. */
-export const P: PointcutFactory = {
+export const Pointcut: PointcutFactory = {
   method: (type, name) =>
     createPointcut({
       classFilter: typeFilter(type),

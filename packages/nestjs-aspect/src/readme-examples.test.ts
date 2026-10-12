@@ -28,7 +28,7 @@ import {
   isIntroduced,
   type JoinPointOf,
   type MethodInterceptor,
-  P,
+  Pointcut as P,
   type Pointcut,
   type ProceedingJoinPointOf,
   type ReturnValueAdapter,
