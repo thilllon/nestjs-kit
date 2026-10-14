@@ -55,6 +55,8 @@ Two further terms describe matching:
 
 `nestjs-aspect` implements the Spring AOP model on NestJS. Where a decision arises, the Spring convention applies; the library deviates only where the platform (TypeScript, Node.js, the Nest container) makes the Spring behavior impossible or wrong, and section 6 lists every such deviation with its reason.
 
+The Spring convention governs concepts and semantics. Syntax follows TypeScript and Nest: a Java construct without a TypeScript counterpart takes the form a Nest application already uses, as annotations and decorator factories do (section 4.8).
+
 ### 2.2 Goals
 
 1. **Non-invasive pointcuts that are independent of the class hierarchy.** An aspect selects join points in classes that do not import it, do not extend a base class for it and carry no decorator for it. Pointcuts match by class, member name, member kind, module, provider token, Reflect metadata and arguments. Annotations are one designator among several, not a requirement.
@@ -237,7 +239,7 @@ A per-object aspect instance is created at the first matched call on that object
 | `JoinPoint`, `ProceedingJoinPoint`                                  | `JoinPoint<S>`, `ProceedingJoinPoint<S>`; aliases `JoinPointOf<typeof pointcut>`, `ProceedingJoinPointOf<...>` | `proceed()` and `proceedWith(...args)`.                                                                                 |
 | `args(account, ..)` binding                                         | `P.args(Account, P.REST)` types `joinPoint.args` as `[Account, ...unknown[]]`                                  | The arguments are read from the join point; there is no binding by parameter name.                                      |
 | `@annotation(retryable)` binding                                    | `P.annotated(Retryable)` makes `joinPoint.annotation(Retryable)` callable and typed                            | The compiler accepts the call only when the pointcut guarantees the annotation.                                         |
-| Java annotation                                                     | `createAnnotation(name, options?)`, or a Nest `Reflector.createDecorator()` decorator                          | A typed value and an optional method contract.                                                                          |
+| Java annotation                                                     | `createAnnotation(name, options?)`, or a Nest `Reflector.createDecorator()` decorator                          | A typed value; `createAnnotation` also takes an optional method contract. Section 4.8.                                  |
 | `@Order`, `Ordered`                                                 | `@Aspect({ order })`, the `order` property of an `@Advisor` instance                                           | Lower runs first.                                                                                                       |
 | `perthis`, `pertarget`                                              | `instantiation: "perTarget"`                                                                                   | One model: there is no proxy object.                                                                                    |
 | `pertypewithin`                                                     | `instantiation: "perClass"`                                                                                    |                                                                                                                         |
@@ -411,6 +413,23 @@ export class UsageTrackingAspect {
 - Each target object has its own delegate, created on first use.
 - The methods and accessors of the implementation class become members of every matched class and run on the delegate of the object they are called on.
 - `joinPoint.introduced(Token)` corresponds to binding the introduced view in advice; `isIntroduced(object, Token)` and `introduced(object, Token)` correspond to obtaining the bean as the introduced type.
+
+### 4.8 Annotations and decorator syntax
+
+**Annotations.** A Java annotation is inert metadata on a class or a method. It does nothing by itself; Spring reads it through reflection, for example in the `@annotation`, `@within` and `@target` designators. TypeScript has no annotation construct. It has decorators: functions that run when a class is defined and can register, replace or wrap what they decorate. TypeScript also uses the term _type annotation_ for the `: T` syntax, which is unrelated.
+
+`nestjs-aspect` keeps the Java meaning and implements it with decorators. An annotation is a decorator that only records metadata, its name and an optional value, on a class or a member. `createAnnotation()` creates one, and a decorator created with Nest's `Reflector.createDecorator()` serves as one. An annotation has no behavior until a pointcut selects it, so an annotation that nothing selects is a silent no-op unless it requires advice (section 6). The other decorators of the API are not annotations: `@Aspect()`, `@Advisor()`, the advice decorators and `@DeclareParents` declare aspects and advisors.
+
+The name keeps the correspondence with Spring: `P.annotated`, `P.withinAnnotated` and `P.targetAnnotated` are `@annotation`, `@within` and `@target`, and `joinPoint.annotation(A)` binds the annotation as `@annotation(retryable)` does. The general term _decorator_ would not separate the decorators that only mark members from the decorators that declare aspects, and a reader of an annotated class needs that separation: the annotation marks the members a concern applies to, and an aspect elsewhere supplies the concern.
+
+**Decorator syntax.** A decorator is an expression that evaluates to a function. `@Aspect` applies the function `Aspect` itself; `@Aspect()` calls `Aspect` and applies the decorator it returns. In Java, `@Aspect` and `@Aspect()` are the same annotation, and the parentheses are optional.
+
+Every decorator of the API is a factory and is written with parentheses, also without arguments:
+
+- Nest's decorators are factories (`@Injectable()`, `@Controller()`, `@Global()`), and an aspect is a provider declared next to them.
+- Each decorator has one spelling. `@Aspect()` and `@Aspect({ order: 20 })` have the same form, and an annotation is applied the same way with or without a value: `@Draft()`, `@Audited("member.invite")`.
+- A factory accepts new options without a change of spelling.
+- Writing `@Aspect`, `@Advisor` or an annotation without its parentheses is a compile error, not a decorator that is silently ignored.
 
 ---
 
