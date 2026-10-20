@@ -17,6 +17,8 @@ Each package README covers installation and usage.
   - Azure Blob Storage operations and direct uploads through SAS URLs.
 - [`nestjs-drizzle-pg`](packages/nestjs-drizzle-pg/README.md) [![npm version of nestjs-drizzle-pg](https://img.shields.io/npm/v/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg) [![Monthly npm downloads of nestjs-drizzle-pg](https://img.shields.io/npm/dm/nestjs-drizzle-pg)](https://www.npmjs.com/package/nestjs-drizzle-pg)
   - Drizzle ORM with PostgreSQL pools or clients.
+- [`@nestjs-kit/better-auth`](packages/nestjskit__better-auth/README.md) (first release pending)
+  - Better Auth sessions, guards and authorization for NestJS applications.
 - [`@nestjs-kit/cloudinary`](packages/nestjskit__cloudinary/README.md) [![npm version of @nestjs-kit/cloudinary](https://img.shields.io/npm/v/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary) [![Monthly npm downloads of @nestjs-kit/cloudinary](https://img.shields.io/npm/dm/%40nestjs-kit%2Fcloudinary)](https://www.npmjs.com/package/@nestjs-kit/cloudinary)
   - Signed uploads and media uploads with Cloudinary transformation options.
 - [`@nestjs-kit/nodemailer`](packages/nestjskit__nodemailer/README.md) [![npm version of @nestjs-kit/nodemailer](https://img.shields.io/npm/v/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer) [![Monthly npm downloads of @nestjs-kit/nodemailer](https://img.shields.io/npm/dm/%40nestjs-kit%2Fnodemailer)](https://www.npmjs.com/package/@nestjs-kit/nodemailer)
@@ -33,8 +35,6 @@ Each package README covers installation and usage.
   - Sendbird Platform API calls with per-application tokens.
 - [`nestjs-sendgrid`](packages/nestjs-sendgrid/README.md) [![npm version of nestjs-sendgrid](https://img.shields.io/npm/v/nestjs-sendgrid)](https://www.npmjs.com/package/nestjs-sendgrid) [![Monthly npm downloads of nestjs-sendgrid](https://img.shields.io/npm/dm/nestjs-sendgrid)](https://www.npmjs.com/package/nestjs-sendgrid)
   - Mail Send and Web API calls through isolated Twilio SendGrid accounts.
-- [`nestjs-slightly-better-auth`](packages/nestjs-slightly-better-auth/README.md) [![npm version of nestjs-slightly-better-auth](https://img.shields.io/npm/v/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth) [![Monthly npm downloads of nestjs-slightly-better-auth](https://img.shields.io/npm/dm/nestjs-slightly-better-auth)](https://www.npmjs.com/package/nestjs-slightly-better-auth)
-  - Better Auth sessions, guards and authorization for NestJS applications.
 - [`nestjs-strategy`](packages/nestjs-strategy/README.md) [![npm version of nestjs-strategy](https://img.shields.io/npm/v/nestjs-strategy)](https://www.npmjs.com/package/nestjs-strategy) [![Monthly npm downloads of nestjs-strategy](https://img.shields.io/npm/dm/nestjs-strategy)](https://www.npmjs.com/package/nestjs-strategy)
   - Strategy-pattern registries that select Nest providers by key.
 

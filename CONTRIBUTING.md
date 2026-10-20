@@ -33,7 +33,7 @@ Run `pnpm format` to apply formatting. Biome covers all supported files througho
 
 `pnpm test` runs every workspace project's `test` script through Turbo. Run a single project's unit tests with, for example, `pnpm --filter @nestjs-kit/s3 test`, and a single file with `pnpm --filter @nestjs-kit/s3 test src/s3.module.test.ts`. Each project's `vitest.config.mts` combines the options in root `vitest.shared.mts` with the project's own `vitest` and `unplugin-swc`, and defines the `unit`, `e2e` and `packaging` Vitest projects that the `test`, `test:e2e` and `test:packaging` scripts select. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
-Each package with `src/packaging*.test.ts` files has a `test:packaging` script that checks real Node consumers of its built ESM and CJS artifacts. `pnpm exec turbo run test:packaging` builds and checks every such package; `pnpm --filter nestjs-strategy test:packaging` checks one package after its build. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs each package's script again on the Node.js version at the floor of that package's `engines.node` range. Packaging tests start Node, pnpm, compiler and bundler processes, so a slow file runs its independent tests concurrently with `describe.concurrent` or `it.concurrent`, and a package with slow packaging tests splits them into several `src/packaging*.test.ts` files: CI then runs each file in its own job, once on the pinned Node.js LTS and once on the engines floor. Run one file with, for example, `pnpm --filter nestjs-slightly-better-auth test:packaging src/packaging-consumers.test.ts`.
+Each package with `src/packaging*.test.ts` files has a `test:packaging` script that checks real Node consumers of its built ESM and CJS artifacts. `pnpm exec turbo run test:packaging` builds and checks every such package; `pnpm --filter nestjs-strategy test:packaging` checks one package after its build. These checks are separate from default unit tests so a clean checkout does not need generated files before running `pnpm test`. CI runs each package's script again on the Node.js version at the floor of that package's `engines.node` range. Packaging tests start Node, pnpm, compiler and bundler processes, so a slow file runs its independent tests concurrently with `describe.concurrent` or `it.concurrent`, and a package with slow packaging tests splits them into several `src/packaging*.test.ts` files: CI then runs each file in its own job, once on the pinned Node.js LTS and once on the engines floor. Run one file with, for example, `pnpm --filter @nestjs-kit/better-auth test:packaging src/packaging-consumers.test.ts`.
 
 Each package with `*.e2e.test.ts` files has a `compose.yaml` that declares only the services its tests use, and `docker:up`, `docker:down` and `test:e2e` scripts. For integration tests against real databases and message brokers, install Docker with Compose and run one package at a time:
 
@@ -43,12 +43,12 @@ pnpm --filter nestjs-drizzle-pg test:e2e
 pnpm --filter nestjs-drizzle-pg docker:down
 ```
 
-| Package                       | Services                                         |
-| ----------------------------- | ------------------------------------------------ |
-| `nestjs-drizzle-pg`           | PostgreSQL                                       |
-| `nestjs-pg-listen`            | PostgreSQL                                       |
-| `@nestjs-kit/redis`           | Redis, Valkey                                    |
-| `nestjs-slightly-better-auth` | PostgreSQL, NATS, Kafka, RabbitMQ, MQTT 5, Redis |
+| Package                   | Services                                         |
+| ------------------------- | ------------------------------------------------ |
+| `nestjs-drizzle-pg`       | PostgreSQL                                       |
+| `nestjs-pg-listen`        | PostgreSQL                                       |
+| `@nestjs-kit/redis`       | Redis, Valkey                                    |
+| `@nestjs-kit/better-auth` | PostgreSQL, NATS, Kafka, RabbitMQ, MQTT 5, Redis |
 
 Packages share the default ports, so stop one package's services before starting another's. Compose starts isolated services, binds their client ports to `127.0.0.1`, and waits for health checks:
 
@@ -105,8 +105,8 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-pubnub`: the PubNub realtime messaging adapter.
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
-- `packages/nestjs-slightly-better-auth`: the Better Auth integration, with its design workspace, research and historical adapter reference. Its `examples` directory holds private Express, Fastify, Apollo GraphQL, Socket.IO and TCP microservice applications; their unit tests boot each application, and releases skip them.
 - `packages/nestjs-strategy`: strategy-pattern registries for Nest providers.
+- `packages/nestjskit__better-auth`: `@nestjs-kit/better-auth`, the Better Auth integration awaiting its first npm release, with its design workspace, research and historical adapter reference. Its `examples` directory holds private Express, Fastify, Apollo GraphQL, Socket.IO and TCP microservice applications; their unit tests boot each application, and releases skip them.
 - `packages/nestjskit__cloudinary`: `@nestjs-kit/cloudinary`, the Cloudinary upload adapter.
 - `packages/nestjskit__nodemailer`: `@nestjs-kit/nodemailer`, the Nodemailer email adapter.
 - `packages/nestjskit__redis`: `@nestjs-kit/redis`, Redis and Valkey client registrations.
