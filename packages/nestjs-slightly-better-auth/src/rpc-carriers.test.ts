@@ -161,9 +161,10 @@ describe("RPC carriers", () => {
         payloadCarrier(),
         context(
           { auth: values },
-          new TcpContext([{}, "topic"] as ConstructorParameters<
-            typeof TcpContext
-          >[0]),
+          new TcpContext([
+            {} as ConstructorParameters<typeof TcpContext>[0][0],
+            "topic",
+          ]),
         ),
       ],
     ] as const;

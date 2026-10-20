@@ -15,6 +15,11 @@ updates:
     ignore:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # graphql 17 is outside the graphql peer ranges of @apollo/server 5.5.1
+      # and @apollo/subgraph 2.15.1 (^16.11.0), @nestjs/mercurius 14.0.3
+      # (^16.10.0) and graphql-subscriptions 3.0.0 (^15.7.2 || ^16.0.0).
+      - dependency-name: "graphql"
+        update-types: ["version-update:semver-major"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     # Matches pnpm minimumReleaseAge so version updates pass the lockfile policy.
