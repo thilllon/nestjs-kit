@@ -29,7 +29,7 @@ async function compileConsumer(
   source?: string,
 ): Promise<void> {
   const directory = await mkdtemp(
-    join(tmpdir(), `nsba-built-consumer-${extension}-`),
+    join(tmpdir(), `nestjs-kit-better-auth-built-consumer-${extension}-`),
   );
   const modules = join(directory, "node_modules");
   try {

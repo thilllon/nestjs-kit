@@ -513,7 +513,7 @@ function redis(): RpcFamily {
  * the run, so its reply consumer group joins once; correlation ids keep the boots' replies apart.
  */
 function kafka(): RpcFamily {
-  const run = `nsba-kit-${randomUUID()}`;
+  const run = `nestjs-kit-better-auth-kit-${randomUUID()}`;
   const brokers = [`127.0.0.1:${port("KAFKA_PORT", 59092)}`];
   const admin = new Kafka({
     clientId: `${run}-admin`,
@@ -699,7 +699,7 @@ async function createRpcApp(
   auth: AuthLike,
   options: RpcAppOptions,
 ): Promise<INestApplication> {
-  const id = `nsba-${randomUUID()}`;
+  const id = `nestjs-kit-better-auth-${randomUUID()}`;
   const server = await family.server(id, [...handlers.keys()]);
   @Module({
     imports: [

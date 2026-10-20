@@ -376,7 +376,7 @@ export interface CorsOriginOptions {
 export interface NestjsPluginOptions {
   /**
    * Header better-auth reads the client IP from, contributed to advanced.ipAddress.ipAddressHeaders as a default
-   * (user values win and come first). Default: a random name per plugin instance (per nestjs() call), `x-nsba-ip-<32 hex chars>`, generated with
+   * (user values win and come first). Default: a random name per plugin instance (per nestjs() call), `x-nestjs-kit-better-auth-ip-<32 hex chars>`, generated with
    * globalThis.crypto.randomUUID(); it never leaves the process and clients cannot guess it. A string pins a fixed name
    * (for a trusted sidecar that calls auth.handler itself); false contributes nothing (configure advanced.ipAddress yourself).
    */

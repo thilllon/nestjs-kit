@@ -1331,7 +1331,7 @@ export function httpPlatformConformance(
   const spoofedIp = {
     "x-forwarded-for": "203.0.113.20",
     "x-real-ip": "203.0.113.21",
-    [`x-nsba-ip-${"0".repeat(32)}`]: "203.0.113.22",
+    [`x-nestjs-kit-better-auth-ip-${"0".repeat(32)}`]: "203.0.113.22",
   };
   add(
     "H-ip-platform",
@@ -1478,7 +1478,7 @@ export function httpPlatformConformance(
         headers: {
           "x-forwarded-for": "203.0.113.7",
           "x-real-ip": "203.0.113.8",
-          [`x-nsba-ip-${"0".repeat(32)}`]: "203.0.113.9",
+          [`x-nestjs-kit-better-auth-ip-${"0".repeat(32)}`]: "203.0.113.9",
         },
       });
       const ip = json(response).ip;

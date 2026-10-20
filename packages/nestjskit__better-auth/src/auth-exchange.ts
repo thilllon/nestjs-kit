@@ -202,7 +202,10 @@ export class AuthExchange {
       }
       const ipHeader = entry.bridge.clientIpHeader;
       for (const name of [...headers.keys()]) {
-        if (name.startsWith("x-nsba-ip-") || name === ipHeader?.toLowerCase()) {
+        if (
+          name.startsWith("x-nestjs-kit-better-auth-ip-") ||
+          name === ipHeader?.toLowerCase()
+        ) {
           headers.delete(name);
         }
       }

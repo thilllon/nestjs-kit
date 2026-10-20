@@ -95,7 +95,7 @@ export function rpcTransport(
       class Probe {
         handler(): void {}
       }
-      MessagePattern("nsba-probe")(
+      MessagePattern("nestjs-kit-better-auth-probe")(
         Probe.prototype,
         "handler",
         Object.getOwnPropertyDescriptor(Probe.prototype, "handler")!,
@@ -104,7 +104,10 @@ export function rpcTransport(
         "microservices:pattern",
         Probe.prototype.handler,
       );
-      if (!Array.isArray(patterns) || patterns[0] !== "nsba-probe") {
+      if (
+        !Array.isArray(patterns) ||
+        patterns[0] !== "nestjs-kit-better-auth-probe"
+      ) {
         throw new BetterAuthConfigurationError(
           "NEST_METADATA_KEY_CHANGED",
           "Nest RPC pattern metadata failed its canary",

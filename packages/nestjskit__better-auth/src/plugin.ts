@@ -70,7 +70,7 @@ export function nestjs(
     options.clientIpHeader === false
       ? null
       : (options.clientIpHeader ??
-        `x-nsba-ip-${globalThis.crypto.randomUUID().replaceAll("-", "")}`);
+        `x-nestjs-kit-better-auth-ip-${globalThis.crypto.randomUUID().replaceAll("-", "")}`);
   const handle: BridgeHandle = {
     protocol: 4,
     clientIpHeader,

@@ -137,7 +137,7 @@ describe("RPC real broker carriers", () => {
   it.each(Object.keys(carrierFactories) as Family[])(
     "authenticates isolated per-message identities over %s",
     async (family) => {
-      const id = `nsba-${family}-${randomUUID()}`;
+      const id = `nestjs-kit-better-auth-${family}-${randomUUID()}`;
       const protectedPattern = `${id}.private`;
       const publicPattern = `${id}.public`;
       const auth = createTestAuth({

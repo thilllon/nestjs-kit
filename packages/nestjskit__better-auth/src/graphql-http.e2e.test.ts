@@ -335,7 +335,7 @@ async function securityFixture(
       before: createAuthMiddleware(async (context) => {
         if (context.path === "/get-session") {
           const entry = [...(context.headers?.entries() ?? [])].find(([name]) =>
-            name.startsWith("x-nsba-ip-"),
+            name.startsWith("x-nestjs-kit-better-auth-ip-"),
           );
           sessionIps.push(entry?.[1] ?? null);
         }

@@ -15,7 +15,9 @@ const compiler = fileURLToPath(
 );
 
 async function compile(source: string): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "nsba-contract-types-"));
+  const directory = await mkdtemp(
+    join(tmpdir(), "nestjs-kit-better-auth-contract-types-"),
+  );
   try {
     await symlink(
       join(sourceDirectory, "../node_modules"),

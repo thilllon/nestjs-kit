@@ -214,7 +214,9 @@ async function copyFixtures(directory: string): Promise<void> {
 // and removes them afterwards.
 export function installToolchainConsumers(names: readonly Consumer[]): void {
   beforeAll(async () => {
-    workspace = await mkdtemp(join(tmpdir(), "nsba-packed-toolchains-"));
+    workspace = await mkdtemp(
+      join(tmpdir(), "nestjs-kit-better-auth-packed-toolchains-"),
+    );
     const directory = workspace;
     const tarball = join(directory, "package.tgz");
     await run("pnpm", ["pack", "--out", tarball], {

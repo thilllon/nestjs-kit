@@ -35,7 +35,7 @@ function fixture(sources: PrincipalSource[]) {
     sources,
     options: {},
     credentialHeaders: ["cookie"],
-    bridge: { clientIpHeader: "x-nsba-ip-test" },
+    bridge: { clientIpHeader: "x-nestjs-kit-better-auth-ip-test" },
   } as unknown as InstanceEntry;
   const resolver = new ChainPrincipalResolver(
     { get: () => entry, list: () => [entry] },
@@ -151,15 +151,18 @@ describe("principal chain", () => {
     const call = {
       ...f.call,
       headers: () =>
-        new Headers({ "x-nsba-ip-fake": "bad", "x-nsba-ip-test": "spoof" }),
+        new Headers({
+          "x-nestjs-kit-better-auth-ip-fake": "bad",
+          "x-nestjs-kit-better-auth-ip-test": "spoof",
+        }),
       clientIp: "127.0.0.9",
     };
     await f.resolver.resolve(call, f.request);
     await f.resolver.resolve(call, { ...f.request, sourceSet: "[0,1]" });
     expect(seen).toHaveLength(2);
     expect(io).toHaveBeenCalledTimes(1);
-    expect(seen[0]!.get("x-nsba-ip-fake")).toBeNull();
-    expect(seen[0]!.get("x-nsba-ip-test")).toBe("127.0.0.9");
+    expect(seen[0]!.get("x-nestjs-kit-better-auth-ip-fake")).toBeNull();
+    expect(seen[0]!.get("x-nestjs-kit-better-auth-ip-test")).toBe("127.0.0.9");
   });
   it("bypasses the principal memo only for the producing session-backed source", async () => {
     const session = vi.fn(async () => ({ outcome: "absent" as const })),

@@ -49,7 +49,7 @@ let root: string;
 let files: string[];
 
 beforeAll(async () => {
-  workspace = await mkdtemp(join(tmpdir(), "nsba-archive-"));
+  workspace = await mkdtemp(join(tmpdir(), "nestjs-kit-better-auth-archive-"));
   const tarball = join(workspace, "package.tgz");
   await execute("pnpm", ["pack", "--out", tarball], {
     cwd: packageRoot,

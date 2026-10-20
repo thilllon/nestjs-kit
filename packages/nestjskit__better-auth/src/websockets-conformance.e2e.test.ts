@@ -69,7 +69,7 @@ type FixtureName = Exclude<keyof TransportFixtures, "graph">;
 type Flavor = "socket.io" | "ws";
 
 /** The namespace (Socket.IO) or path (ws) of the gateway that authenticates connections through WS_CONNECTION_AUTH. */
-const CONNECTION_ROUTE = "/nsba-connection";
+const CONNECTION_ROUTE = "/nestjs-kit-better-auth-connection";
 const REPLY_TIMEOUT_MS = 5000;
 
 function flatten(fixtures: TransportFixtures): Map<string, FixtureHandler> {
@@ -142,8 +142,8 @@ function fixtureGateway(
 
 /** The namespaces (Socket.IO) or paths (ws) of the two gateways that serve the `inherited` fixture. */
 const INHERITED_ROUTES = {
-  public: "/nsba-inherited-public",
-  denied: "/nsba-inherited-denied",
+  public: "/nestjs-kit-better-auth-inherited-public",
+  denied: "/nestjs-kit-better-auth-inherited-denied",
 } as const;
 
 /** The `inherited` fixture as one message handler of an abstract base gateway, served by two subclass gateways. */

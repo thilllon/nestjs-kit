@@ -124,7 +124,7 @@ export class BetterAuthService<A extends AuthLike = RegisteredAuth> {
     for (const name of [...headers.keys()]) {
       if (
         name.startsWith(":") ||
-        name.startsWith("x-nsba-ip-") ||
+        name.startsWith("x-nestjs-kit-better-auth-ip-") ||
         name === entry.bridge.clientIpHeader?.toLowerCase()
       ) {
         headers.delete(name);

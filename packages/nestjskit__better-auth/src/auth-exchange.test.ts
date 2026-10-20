@@ -30,7 +30,7 @@ function fixture(overrides: Partial<InstanceEntry> = {}) {
       options: {},
       rateLimit: { enabled: true },
     },
-    bridge: { clientIpHeader: "x-nsba-ip-private" },
+    bridge: { clientIpHeader: "x-nestjs-kit-better-auth-ip-private" },
     credentialHeaders: ["x-api-key"],
     ...overrides,
   } as unknown as InstanceEntry;
@@ -276,8 +276,8 @@ describe("AuthExchange", () => {
       "x-hop": "remove",
       "keep-alive": "timeout=5",
       "transfer-encoding": "chunked",
-      "x-nsba-ip-private": "spoof",
-      "x-nsba-ip-other": "spoof",
+      "x-nestjs-kit-better-auth-ip-private": "spoof",
+      "x-nestjs-kit-better-auth-ip-other": "spoof",
       origin: "https://browser.example",
       "x-forwarded-host": "proxy.example",
       cookie: "session=abc",
@@ -288,19 +288,21 @@ describe("AuthExchange", () => {
     const request = handler.mock.calls[0]![0];
     expect(request.url).toBe("https://auth.example/api/auth/a%2Fb?x=%2F");
     expect(await request.text()).toBe("hello");
-    expect(request.headers.get("x-nsba-ip-private")).toBe("203.0.113.1");
+    expect(request.headers.get("x-nestjs-kit-better-auth-ip-private")).toBe(
+      "203.0.113.1",
+    );
     for (const name of [
       "connection",
       "keep-alive",
       "transfer-encoding",
       "x-hop",
-      "x-nsba-ip-other",
+      "x-nestjs-kit-better-auth-ip-other",
     ]) {
       expect(request.headers.has(name)).toBe(false);
     }
     expect(request.headers.get("origin")).toBe("https://browser.example");
     expect(request.headers.get("x-forwarded-host")).toBe("proxy.example");
-    expect(headers.get("x-nsba-ip-private")).toBe("spoof");
+    expect(headers.get("x-nestjs-kit-better-auth-ip-private")).toBe("spoof");
   });
   it("retains dynamic origins, rejects invalid URLs, and clears IP spoofing without an address", async () => {
     const { exchange, entry, init, handler } = fixture();
@@ -311,15 +313,19 @@ describe("AuthExchange", () => {
     await binding.handle(
       inbound({
         clientIp: null,
-        headers: new Headers({ "x-nsba-ip-private": "spoof" }),
+        headers: new Headers({
+          "x-nestjs-kit-better-auth-ip-private": "spoof",
+        }),
       }),
     );
     expect(handler.mock.calls[0]![0].url).toContain(
       "http://untrusted.example/",
     );
-    expect(handler.mock.calls[0]![0].headers.has("x-nsba-ip-private")).toBe(
-      false,
-    );
+    expect(
+      handler.mock.calls[0]![0].headers.has(
+        "x-nestjs-kit-better-auth-ip-private",
+      ),
+    ).toBe(false);
     const response = await binding.handle(inbound({ url: "not a url" }));
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({

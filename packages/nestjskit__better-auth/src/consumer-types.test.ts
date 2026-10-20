@@ -43,7 +43,9 @@ type Assert<T extends true> = T;
 
 /** Type-checks one consumer module and returns the compiler diagnostics. */
 async function diagnostics(source: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "nsba-consumer-types-"));
+  const directory = await mkdtemp(
+    join(tmpdir(), "nestjs-kit-better-auth-consumer-types-"),
+  );
   try {
     await symlink(
       join(sourceDirectory, "../node_modules"),

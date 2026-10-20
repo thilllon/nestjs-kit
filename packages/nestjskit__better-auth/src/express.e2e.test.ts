@@ -445,7 +445,7 @@ describe("ExpressPlatform", () => {
           "x-forwarded-host": "evil.example",
           "x-forwarded-proto": "https",
           "x-forwarded-for": "198.51.100.9",
-          "x-nsba-ip-spoof": "chosen",
+          "x-nestjs-kit-better-auth-ip-spoof": "chosen",
           connection: "x-remove",
           "x-remove": "secret",
         },
@@ -455,11 +455,11 @@ describe("ExpressPlatform", () => {
       expect(body.url).toBe("http://safe.example/api/auth/headers");
       expect(body.headers["x-forwarded-host"]).toBe("evil.example");
       expect(body.headers["x-forwarded-proto"]).toBe("https");
-      expect(body.headers["x-nsba-ip-spoof"]).toBeUndefined();
+      expect(body.headers["x-nestjs-kit-better-auth-ip-spoof"]).toBeUndefined();
       expect(body.headers.connection).toBeUndefined();
       expect(body.headers["x-remove"]).toBeUndefined();
       const injected = Object.entries(body.headers).find(([name]) =>
-        name.startsWith("x-nsba-ip-"),
+        name.startsWith("x-nestjs-kit-better-auth-ip-"),
       );
       expect(injected?.[1]).toBe("127.0.0.1");
     } finally {

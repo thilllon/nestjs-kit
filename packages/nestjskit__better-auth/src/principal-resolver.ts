@@ -77,7 +77,7 @@ export function requestHeaders(
   for (const name of [...headers.keys()]) {
     if (
       name.startsWith(":") ||
-      name.startsWith("x-nsba-ip-") ||
+      name.startsWith("x-nestjs-kit-better-auth-ip-") ||
       name === entry.bridge.clientIpHeader
     ) {
       headers.delete(name);

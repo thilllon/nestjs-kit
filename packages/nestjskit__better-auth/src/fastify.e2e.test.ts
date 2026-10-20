@@ -270,9 +270,9 @@ describe("FastifyPlatform", () => {
         {
           method: "PUT",
           path: "/api/auth/multipart",
-          contentType: "multipart/form-data; boundary=nsba",
+          contentType: "multipart/form-data; boundary=nestjs-kit-better-auth",
           bytes: Buffer.from(
-            '--nsba\r\nContent-Disposition: form-data; name="file"\r\n\r\n\u0000raw\r\n--nsba--\r\n',
+            '--nestjs-kit-better-auth\r\nContent-Disposition: form-data; name="file"\r\n\r\n\u0000raw\r\n--nestjs-kit-better-auth--\r\n',
           ),
         },
         {
@@ -682,7 +682,7 @@ describe("FastifyPlatform", () => {
             around: [
               async ({ request, platformRequest }) => {
                 const bridge = [...request.headers].find(([name]) =>
-                  name.startsWith("x-nsba-ip-"),
+                  name.startsWith("x-nestjs-kit-better-auth-ip-"),
                 );
                 observed.push({
                   native: platform.requests.clientIp(platformRequest),

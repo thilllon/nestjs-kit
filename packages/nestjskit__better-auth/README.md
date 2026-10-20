@@ -8,6 +8,8 @@ A NestJS integration for [Better Auth](https://www.better-auth.com). A construct
 
 This package is being prepared for its first npm release and is not yet published on npm.
 
+It supersedes `nestjs-slightly-better-auth` with the same API under the `@nestjs-kit/better-auth` import paths. The two packages use separate plugin ids, symbols and injection tokens, so one application uses only one of them.
+
 - [Install](#install)
 - [Entry points](#entry-points)
 - [Construct the Better Auth instance](#construct-the-better-auth-instance)
@@ -146,7 +148,7 @@ declare module "@nestjs-kit/better-auth" {
 
 The example stores data in PostgreSQL through `pg` (`pnpm add pg`); any [Better Auth database](https://www.better-auth.com/docs/concepts/database) works. The plugin is pure construction-time configuration: it adds fixed hook entries and database-hook dispatchers when Better Auth builds its pipeline, and the Nest module binds its hook tables to them later. The module never wraps, clones or mutates the `auth` object. Startup fails with `PLUGIN_MISSING` when an instance has no `nestjs()`, and with `PLUGIN_SHARED_BETWEEN_INSTANCES` when two instances share one plugin object, so call `nestjs()` inside each `betterAuth()` call. When a plugin after `nestjs()` declares after-hooks, startup logs `W_PLUGIN_NOT_LAST`: those hooks would run after the plugin's cookie bridge and endpoint-result observer, which then miss their changes. Nest `@BeforeAuth()` and `@AfterAuth()` hooks run after the application's own `hooks` option and after the hooks of earlier plugins.
 
-`nestjs({ clientIpHeader })` controls how Better Auth learns the client IP. By default the plugin adds a random header name per `nestjs()` call (`x-nsba-ip-<32 hex characters>`) to `advanced.ipAddress.ipAddressHeaders`, the platform sets it from its own trust-proxy-aware client IP, and the kernel deletes any client-sent copy, so a client cannot choose its rate-limit bucket or the IP recorded on its sessions. A string pins a fixed header name for a trusted sidecar that calls `auth.handler` itself; `false` contributes nothing, and Better Auth's own `advanced.ipAddress` settings apply.
+`nestjs({ clientIpHeader })` controls how Better Auth learns the client IP. By default the plugin adds a random header name per `nestjs()` call (`x-nestjs-kit-better-auth-ip-<32 hex characters>`) to `advanced.ipAddress.ipAddressHeaders`, the platform sets it from its own trust-proxy-aware client IP, and the kernel deletes any client-sent copy, so a client cannot choose its rate-limit bucket or the IP recorded on its sessions. A string pins a fixed header name for a trusted sidecar that calls `auth.handler` itself; `false` contributes nothing, and Better Auth's own `advanced.ipAddress` settings apply.
 
 The `Register` augmentation types `BetterAuthService`, `AuthSession`, `AuthUser`, `AuthPrincipal`, hook contexts and permission maps from `typeof auth`. Named instances go under `instances: { admin: typeof adminAuth }`. Without the augmentation, types fall back to Better Auth's default session shape and permission maps accept any resource. With it, the default instance's `forRoot()` rejects an `auth` of another type.
 

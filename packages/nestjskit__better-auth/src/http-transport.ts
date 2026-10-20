@@ -123,14 +123,14 @@ export class HttpTransport implements AuthTransport {
     class Probe {
       route(): void {}
     }
-    Get("/nsba-canary/:id")(
+    Get("/nestjs-kit-better-auth-canary/:id")(
       Probe.prototype,
       "route",
       Object.getOwnPropertyDescriptor(Probe.prototype, "route")!,
     );
     if (
       Reflect.getMetadata("path", Probe.prototype.route) !==
-        "/nsba-canary/:id" ||
+        "/nestjs-kit-better-auth-canary/:id" ||
       Reflect.getMetadata("method", Probe.prototype.route) !== RequestMethod.GET
     ) {
       throw new BetterAuthConfigurationError(

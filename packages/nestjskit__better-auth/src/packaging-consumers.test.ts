@@ -298,7 +298,9 @@ function nodeScript(
 }
 
 beforeAll(async () => {
-  workspace = await mkdtemp(join(tmpdir(), "nsba-packed-consumers-"));
+  workspace = await mkdtemp(
+    join(tmpdir(), "nestjs-kit-better-auth-packed-consumers-"),
+  );
   tarball = join(workspace, "package.tgz");
   await run("pnpm", ["pack", "--out", tarball], {
     cwd: packageRoot,
