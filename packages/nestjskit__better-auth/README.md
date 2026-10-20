@@ -6,8 +6,6 @@
 
 A NestJS integration for [Better Auth](https://www.better-auth.com). A construction-time Better Auth plugin bridges hooks and cookies into Nest; the Nest module mounts Better Auth's routes on Express or Fastify, authenticates controllers, GraphQL operations, WebSocket messages and microservice messages through one guard, and evaluates admin, organization and API-key permissions through Better Auth's own endpoints.
 
-This package is being prepared for its first npm release and is not yet published on npm.
-
 It supersedes the deprecated `nestjs-slightly-better-auth`; [Migrate from `nestjs-slightly-better-auth`](#migrate-from-nestjs-slightly-better-auth) lists the steps.
 
 - [Install](#install)
