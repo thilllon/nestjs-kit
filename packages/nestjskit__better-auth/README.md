@@ -8,9 +8,10 @@ A NestJS integration for [Better Auth](https://www.better-auth.com). A construct
 
 This package is being prepared for its first npm release and is not yet published on npm.
 
-It supersedes `nestjs-slightly-better-auth` with the same API under the `@nestjs-kit/better-auth` import paths. The two packages use separate plugin ids, symbols and injection tokens, so one application uses only one of them.
+It supersedes the deprecated `nestjs-slightly-better-auth`; [Migrate from `nestjs-slightly-better-auth`](#migrate-from-nestjs-slightly-better-auth) lists the steps.
 
 - [Install](#install)
+- [Migrate from `nestjs-slightly-better-auth`](#migrate-from-nestjs-slightly-better-auth)
 - [Entry points](#entry-points)
 - [Construct the Better Auth instance](#construct-the-better-auth-instance)
 - [Register the module](#register-the-module)
@@ -57,6 +58,20 @@ pnpm add @nestjs/microservices @nats-io/transport-node
 ```
 
 Nest's gRPC transport uses `@grpc/grpc-js` and `@grpc/proto-loader`, Kafka uses `kafkajs`, RabbitMQ uses `amqplib` and `amqp-connection-manager`, MQTT uses `mqtt`, and Redis uses `ioredis`. TCP needs no client library. Applications that do not import `./microservices` do not need any of these packages.
+
+## Migrate from `nestjs-slightly-better-auth`
+
+`@nestjs-kit/better-auth` 2.0.0 has the API of `nestjs-slightly-better-auth` 2.0.0, which is deprecated and receives no further releases.
+
+1. Replace the dependency:
+
+   ```sh
+   pnpm remove nestjs-slightly-better-auth
+   pnpm add @nestjs-kit/better-auth
+   ```
+
+2. Replace the module specifier `nestjs-slightly-better-auth` with `@nestjs-kit/better-auth` in every import and every `declare module` augmentation, subpaths included: `nestjs-slightly-better-auth/express` becomes `@nestjs-kit/better-auth/express`, and likewise for `/plugin`, `/platform`, `/fastify`, `/graphql`, `/websockets`, `/microservices`, `/admin`, `/organization`, `/api-key`, `/testing` and `/testing/conformance`.
+3. Replace both halves together. The Better Auth plugin id (`NESTJS_PLUGIN_ID` of `@nestjs-kit/better-auth/plugin`), the `Symbol.for` keys and the injection token values belong to the package name, so the Better Auth plugin of one package does not work with the Nest module of the other. Code that compares the plugin id with the string `"nestjs-slightly-better-auth"` uses `NESTJS_PLUGIN_ID` instead.
 
 ## Compatibility
 
