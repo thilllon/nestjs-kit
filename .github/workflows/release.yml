@@ -43,7 +43,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EVENT_SHA"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - id: prepare
         run: |
@@ -213,7 +213,7 @@ jobs:
           test "$VALIDATED_BASE" = "$EVENT_SHA"
           test "$(git rev-parse HEAD)" = "$EVENT_SHA"
           test "$(git rev-parse 'HEAD^{tree}')" = "$VALIDATED_TREE"
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build

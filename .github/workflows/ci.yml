@@ -50,7 +50,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - name: Classify the change
         id: scope
         run: |
@@ -182,7 +182,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - name: Validate conventional PR title
         if: github.event_name == 'pull_request'
@@ -219,7 +219,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       # Each filter selects the package and its dependents, which include its
       # examples. The tasks run as separate steps so that unit tests do not
@@ -261,7 +261,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec turbo run build --filter="./$DIRECTORY"
       - name: Test packed consumers on the pinned Node.js LTS
@@ -295,7 +295,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec turbo run build --filter="...{./$DIRECTORY}"
       - name: Start integration services
