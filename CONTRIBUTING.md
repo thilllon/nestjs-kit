@@ -106,7 +106,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 - `packages/nestjs-sendbird`: the Sendbird Platform API adapter.
 - `packages/nestjs-sendgrid`: the Twilio SendGrid adapter.
 - `packages/nestjs-strategy`: strategy-pattern registries for Nest providers.
-- `packages/nestjskit__better-auth`: `@nestjs-kit/better-auth`, the Better Auth integration awaiting its first npm release, with its design workspace, research and historical adapter reference. Its `examples` directory holds private Express, Fastify, Apollo GraphQL, Socket.IO and TCP microservice applications; their unit tests boot each application, and releases skip them.
+- `packages/nestjskit__better-auth`: `@nestjs-kit/better-auth`, the Better Auth integration, with its design workspace, research and historical adapter reference. Its `examples` directory holds private Express, Fastify, Apollo GraphQL, Socket.IO and TCP microservice applications; their unit tests boot each application, and releases skip them.
 - `packages/nestjskit__cloudinary`: `@nestjs-kit/cloudinary`, the Cloudinary upload adapter.
 - `packages/nestjskit__nodemailer`: `@nestjs-kit/nodemailer`, the Nodemailer email adapter.
 - `packages/nestjskit__redis`: `@nestjs-kit/redis`, Redis and Valkey client registrations.
