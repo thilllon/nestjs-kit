@@ -29,7 +29,7 @@ It supersedes the deprecated `nestjs-slightly-better-auth`; [Migrate from `nestj
 pnpm add @nestjs-kit/better-auth better-auth
 ```
 
-Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.5 or newer (below 2), `reflect-metadata` and `rxjs`. The package requires Node.js 24.11 or newer (`engines.node` is `>=24.11.0`). Install the Nest platform adapter your application uses, `@nestjs/platform-express` or `@nestjs/platform-fastify`; the `./express` and `./fastify` entries import neither at runtime.
+Peer dependencies: `@nestjs/common` and `@nestjs/core` 12, `better-auth` 1.7.7 or newer (below 2), `reflect-metadata` and `rxjs`. The package requires Node.js 24.11 or newer (`engines.node` is `>=24.11.0`). Install the Nest platform adapter your application uses, `@nestjs/platform-express` or `@nestjs/platform-fastify`; the `./express` and `./fastify` entries import neither at runtime.
 
 The `./testing` and `./testing/conformance` entries also need the optional peer `@nestjs/testing` 12; the root entry never loads it or a test runner. API keys use Better Auth's `@better-auth/api-key` plugin, which the application installs and registers itself (`pnpm add @better-auth/api-key`); the `./api-key` entry never imports it. [Compatibility](#compatibility) lists the tested versions and module systems.
 
@@ -77,13 +77,13 @@ Nest's gRPC transport uses `@grpc/grpc-js` and `@grpc/proto-loader`, Kafka uses 
 | -------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Node.js                          | 24.11.0 or newer                                  | 24.11.0 and the current LTS                                                      |
 | `@nestjs/common`, `@nestjs/core` | `^12.0.3`                                         | 12.0.3 and the newest 12.x release, with the matching `@nestjs/platform-express` |
-| `better-auth`                    | `>=1.7.5 <2`                                      | 1.7.5 and the newest 1.x release                                                 |
+| `better-auth`                    | `>=1.7.7 <2`                                      | 1.7.7 and the newest 1.x release                                                 |
 | TypeScript declarations          | `nodenext`, `node16` ESM and `bundler` resolution | TypeScript 5.9, the newest 6.x and 7 in each resolution mode                     |
 | Bundlers                         | esbuild, `nest build --webpack`                   | esbuild 0.28 and Nest CLI 12 with webpack 5                                      |
 
 The packaging tests pack this package, install the tarball with pnpm into temporary applications outside the workspace and run them with the peers installed at their declared floors and at the newest versions inside the peer ranges. The newest versions are those that pnpm's default minimum release age admits, so a new release enters the matrix after that delay. Each application compiles one Nest source as ESM and as CommonJS, signs up users of a default and a named Better Auth instance, calls a guarded route of each with its session cookie, checks that neither instance accepts the other's cookie, and closes. CI runs these tests on the current Node.js LTS and on Node.js 24.11.0.
 
-The declared floors are the supported floors. NestJS 11 and Better Auth releases before 1.7.5 are outside the peer ranges and are not tested.
+The declared floors are the supported floors. NestJS 11 and Better Auth releases before 1.7.7 are outside the peer ranges and are not tested.
 
 Module systems:
 
@@ -105,7 +105,7 @@ Toolchains:
 | esbuild ESM bundles with `--splitting`, esbuild CommonJS bundles, `nest build --webpack`                | Supported and tested                                |
 | TypeScript `node16` CommonJS files that import NestJS 12 or Better Auth                                 | Unsupported: their declarations are ESM only        |
 | CommonJS with `--no-experimental-require-module`                                                        | Unsupported: only `./platform` and `./fastify` load |
-| NestJS 11, Better Auth before 1.7.5                                                                     | Unsupported: outside the peer ranges                |
+| NestJS 11, Better Auth before 1.7.7                                                                     | Unsupported: outside the peer ranges                |
 | TypeScript before 5.9, the Nest CLI's rspack builder, webpack bundles of `node_modules`, other bundlers | Untested                                            |
 
 The packaging tests also inspect the packed archive. It contains only `package.json`, this README, the license and the `dist` files that the export map reaches; source maps name only this package's sources, and runtime maps embed them. Each entry exports exactly the names listed in [`fixtures/public-api.json`](fixtures/public-api.json), and no emitted file has a default export or top-level `await`.
