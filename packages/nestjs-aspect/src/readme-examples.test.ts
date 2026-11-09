@@ -60,6 +60,46 @@ import { observableAdapter } from "./rxjs";
 import { RecordingLogger } from "./weaving-fixture";
 
 // ---------------------------------------------------------------------------
+// Minimal example
+// ---------------------------------------------------------------------------
+
+const Timed = createAnnotation<
+  "Timed",
+  void,
+  (...args: any[]) => Promise<unknown>
+>("Timed");
+
+@Aspect()
+class TimingAspect {
+  private readonly logger = new Logger(TimingAspect.name);
+
+  @Around(Timed)
+  async time(joinPoint: ProceedingJoinPointOf<typeof Timed>): Promise<unknown> {
+    const started = performance.now();
+    try {
+      return await joinPoint.proceed();
+    } finally {
+      const elapsed = (performance.now() - started).toFixed(1);
+      this.logger.log(`${joinPoint} took ${elapsed} ms`);
+    }
+  }
+}
+
+@Injectable()
+class ReportService {
+  @Timed()
+  async build(id: string): Promise<string> {
+    return `report ${id}`;
+  }
+}
+
+@Module({
+  imports: [AspectModule.forRoot()],
+  providers: [TimingAspect, ReportService],
+})
+class ReportModule {}
+
+// ---------------------------------------------------------------------------
 // Quick start
 // ---------------------------------------------------------------------------
 
@@ -1437,6 +1477,19 @@ describe("README examples", () => {
       (block) => !source.includes(normalize(block)),
     );
     expect(missing).toEqual([]);
+  });
+
+  it("minimal example: logs the duration of a call of a method that carries the annotation", async () => {
+    const log = vi.spyOn(Logger.prototype, "log");
+    const app = await NestFactory.createApplicationContext(ReportModule);
+
+    await expect(app.get(ReportService).build("r-1")).resolves.toBe(
+      "report r-1",
+    );
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/^ReportService\.build\("r-1"\) took \d+\.\d ms$/),
+    );
   });
 
   it("quick start: records the actor, the subject and the outcome of every audited call", async () => {

@@ -242,8 +242,29 @@ export interface Pointcut<S extends Shape = AnyShape> extends PointcutLike {
   not(): Pointcut<AnyShape>;
 }
 
+/**
+ * Shape of `Pointcut.annotated(a)` for an annotation with the method contract
+ * `F` and the name `N`.
+ */
+export type AnnotatedShape<F extends AnyFunction, N extends string> = {
+  target: object;
+  args: Parameters<F>;
+  returns: ReturnType<F>;
+  annotations: N;
+};
+
+/**
+ * Shape of a pointcut, or of `Pointcut.annotated(a)` for an annotation `a`,
+ * which the advice decorators accept in place of a pointcut.
+ */
 export type ShapeOf<PointcutType> =
-  PointcutType extends Pointcut<infer S> ? S : never;
+  PointcutType extends Pointcut<infer S>
+    ? S
+    : PointcutType extends Annotation<any, infer F, infer N>
+      ? AnnotatedShape<F, N>
+      : PointcutType extends NestAnnotation<any>
+        ? AnyShape
+        : never;
 
 // ---------------------------------------------------------------------------
 // Join points
@@ -291,8 +312,10 @@ export interface ProceedingJoinPoint<S extends Shape> extends JoinPoint<S> {
   ): S["returns"];
 }
 
+/** Join point of the advice for a pointcut or an annotation. */
 export type JoinPointOf<PointcutType> = JoinPoint<ShapeOf<PointcutType>>;
 
+/** Proceeding join point of around advice for a pointcut or an annotation. */
 export type ProceedingJoinPointOf<PointcutType> = ProceedingJoinPoint<
   ShapeOf<PointcutType>
 >;

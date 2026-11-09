@@ -244,3 +244,78 @@ describe("two aspects woven into a service of a feature module", () => {
     ]);
   });
 });
+
+describe("advice that names an annotation in place of a pointcut", () => {
+  it("weaves the annotated members and satisfies a requiresAdvice annotation", async () => {
+    const log: string[] = [];
+    const Timed = createAnnotation<"Timed", { label: string }>("Timed", {
+      requiresAdvice: true,
+    });
+
+    @Injectable()
+    class ReportService {
+      @Timed({ label: "build" })
+      async build(id: number): Promise<string> {
+        log.push(`build ${id}`);
+        return `report-${id}`;
+      }
+
+      @Roles(["admin"])
+      @Retryable({ attempts: 2 })
+      async publish(id: number): Promise<void> {
+        log.push(`publish ${id}`);
+        throw new RangeError(`unpublished ${id}`);
+      }
+
+      plain(): string {
+        log.push("plain");
+        return "plain";
+      }
+    }
+
+    @Aspect()
+    class TimingAspect {
+      @Around(Timed)
+      async time(
+        joinPoint: ProceedingJoinPointOf<typeof Timed>,
+      ): Promise<unknown> {
+        const { label } = joinPoint.annotation(Timed);
+        log.push(`start ${label}`);
+        const result = await joinPoint.proceed();
+        log.push(`end ${label}`);
+        return result;
+      }
+
+      @Before(Roles)
+      roles(joinPoint: JoinPointOf<typeof Roles>): void {
+        log.push(`roles ${joinPoint.findAnnotation(Roles)?.join()}`);
+      }
+
+      @AfterThrowing(Retryable, { throwing: RangeError })
+      failed(
+        _joinPoint: JoinPointOf<typeof Retryable>,
+        error: RangeError,
+      ): void {
+        log.push(`failed ${error.message}`);
+      }
+    }
+
+    const { moduleRef } = await initWoven({
+      providers: [ReportService, TimingAspect],
+    });
+    const service = moduleRef.get(ReportService);
+
+    await expect(service.build(1)).resolves.toBe("report-1");
+    await expect(service.publish(2)).rejects.toThrow("unpublished 2");
+    expect(service.plain()).toBe("plain");
+    expect(log).toEqual([
+      "start build",
+      "build 1",
+      "end build",
+      "roles admin",
+      "publish 2",
+      "failed unpublished 2",
+      "plain",
+    ]);
+  });
+});

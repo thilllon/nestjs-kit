@@ -9,6 +9,7 @@ import { AspectConfigurationError } from "./errors";
 import { createPointcut } from "./pointcut";
 import type {
   AndShape,
+  AnnotatedShape,
   Annotation,
   AnnotationLike,
   AnyShape,
@@ -149,12 +150,7 @@ export interface PointcutFactory {
    */
   annotated<V, F extends AnyFunction, N extends string>(
     a: Annotation<V, F, N>,
-  ): Pointcut<{
-    target: object;
-    args: Parameters<F>;
-    returns: ReturnType<F>;
-    annotations: N;
-  }>;
+  ): Pointcut<AnnotatedShape<F, N>>;
   annotated<V>(a: NestAnnotation<V>): Pointcut<AnyShape>;
 
   /** `@within(A)`: the declaring class carries A. */
@@ -356,7 +352,8 @@ function argsMatcher(matchers: readonly ArgMatcher[]): MethodMatcher {
   };
 }
 
-function annotated(annotation: AnnotationLike<any>): Pointcut<any> {
+/** `Pointcut.annotated`; the advice decorators normalize an annotation with it. */
+export function annotated(annotation: AnnotationLike<any>): Pointcut<any> {
   return createPointcut({
     methodMatcher: staticMatcher((method) =>
       hasMethodAnnotation(annotation, method),

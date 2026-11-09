@@ -58,6 +58,7 @@ export type {
   AdviceAdapter,
   AdviceKind,
   AndShape,
+  AnnotatedShape,
   Annotation,
   AnnotationLike,
   AnyShape,

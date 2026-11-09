@@ -12,6 +12,7 @@ import {
   After,
   AfterReturning,
   AfterThrowing,
+  type AnyFunction,
   type AnyShape,
   Around,
   Aspect,
@@ -293,9 +294,93 @@ function declareUsage() {
     }
   }
 
+  // An annotation in place of a pointcut is P.annotated(annotation).
+  @Aspect()
+  class AnnotationAdviceAspect {
+    @Around(Retryable)
+    async retry(
+      joinPoint: ProceedingJoinPointOf<typeof Retryable>,
+    ): Promise<unknown> {
+      const { attempts }: RetryOptions = joinPoint.annotation(Retryable);
+      return joinPoint.proceed();
+    }
+
+    @Before(Audited)
+    audit(joinPoint: JoinPointOf<typeof Audited>): void {
+      joinPoint.annotation(Audited);
+      // @ts-expect-error the Audited annotation does not guarantee Retryable
+      joinPoint.annotation(Retryable);
+    }
+
+    @After(Retryable)
+    async release(joinPoint: JoinPointOf<typeof Retryable>): Promise<void> {}
+
+    @AfterReturning(Retryable)
+    settled(joinPoint: JoinPointOf<typeof Retryable>, result: unknown): void {}
+
+    @AfterThrowing(Retryable, { throwing: NotFoundError })
+    notFound(
+      joinPoint: JoinPointOf<typeof Retryable>,
+      error: NotFoundError,
+    ): void {}
+
+    @Before(Roles)
+    nest(joinPoint: JoinPointOf<typeof Roles>): void {
+      const found: string[] | undefined = joinPoint.findAnnotation(Roles);
+      // @ts-expect-error a Nest decorator has no name the advice can guarantee
+      joinPoint.annotation(Roles);
+    }
+
+    // @ts-expect-error around advice for Retryable must return a Promise
+    @Around(Retryable)
+    wrongReturn(joinPoint: ProceedingJoinPointOf<typeof Retryable>): string {
+      return "x";
+    }
+
+    // @ts-expect-error the throwing filter fixes the error parameter type
+    @AfterThrowing(Retryable, { throwing: NotFoundError })
+    wrongError(
+      joinPoint: JoinPointOf<typeof Retryable>,
+      error: ConflictError,
+    ): void {}
+  }
+
+  // An annotation whose contract is a synchronous method types the join point
+  // as synchronous.
+  const Logged = createAnnotation<"Logged", void, (name: string) => string>(
+    "Logged",
+  );
+
+  @Aspect()
+  class SyncAnnotationAspect {
+    // @ts-expect-error async advice on a join point known to be synchronous
+    @Before(Logged)
+    async check(joinPoint: JoinPointOf<typeof Logged>): Promise<void> {}
+
+    @Around(Logged)
+    log(joinPoint: ProceedingJoinPointOf<typeof Logged>): string {
+      const [name]: readonly [name: string] = joinPoint.args;
+      // @ts-expect-error proceedWith arguments are checked against the contract
+      joinPoint.proceedWith(1);
+      return joinPoint.proceedWith(name.trim());
+    }
+  }
+
+  /** Never called: the decorator throws when it is evaluated. */
+  function adviseAClass(): void {
+    @Aspect()
+    class ClassAspect {
+      // @ts-expect-error an advice decorator requires a pointcut or an annotation
+      @Before(UserService)
+      notAnAnnotation(joinPoint: JoinPoint<any>): void {}
+    }
+  }
+
   return {
     Audited,
+    Logged,
     Retryable,
+    Roles,
     Settings,
     UserService,
     accountOps,
@@ -329,6 +414,32 @@ describe("public types", () => {
 
     expectTypeOf<S["returns"]>().toEqualTypeOf<Promise<unknown>>();
     expectTypeOf<S["annotations"]>().toEqualTypeOf<"Retryable">();
+  });
+
+  it("give an annotation the shape of P.annotated(annotation)", () => {
+    const usage = declareUsage();
+    const annotatedRetryable = P.annotated(usage.Retryable);
+    const annotatedLogged = P.annotated(usage.Logged);
+    const annotatedRoles = P.annotated(usage.Roles);
+
+    expectTypeOf<ShapeOf<Usage["Retryable"]>>().toEqualTypeOf<
+      ShapeOf<typeof annotatedRetryable>
+    >();
+    expectTypeOf<ShapeOf<Usage["Logged"]>>().toEqualTypeOf<
+      ShapeOf<typeof annotatedLogged>
+    >();
+    expectTypeOf<ShapeOf<Usage["Roles"]>>().toEqualTypeOf<
+      ShapeOf<typeof annotatedRoles>
+    >();
+    expectTypeOf<ShapeOf<Usage["Logged"]>["args"]>().toEqualTypeOf<
+      [name: string]
+    >();
+    expectTypeOf<JoinPointOf<Usage["Audited"]>>().toEqualTypeOf<
+      JoinPoint<
+        ShapeOf<ReturnType<typeof P.annotated<void, AnyFunction, "Audited">>>
+      >
+    >();
+    expectTypeOf<ShapeOf<Usage["Roles"]>>().toEqualTypeOf<AnyShape>();
   });
 
   it("type P.args as an argument tuple", () => {

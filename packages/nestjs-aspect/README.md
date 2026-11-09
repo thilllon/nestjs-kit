@@ -65,7 +65,68 @@ The package ships ES module and CommonJS builds with TypeScript declarations. It
 
 ## Quick start
 
-An annotation marks the methods, an aspect holds the behavior, and `AspectModule.forRoot()` weaves the aspect into the application. `Pointcut` is the namespace of the pointcut designators, the functions that build pointcuts; the examples import it as `P` for brevity. This application records who changed what: every audited method leaves an entry with its actor, whether it succeeds or fails.
+An annotation marks the methods, an aspect holds the behavior, and `AspectModule.forRoot()` weaves the aspect into the application.
+
+### Minimal example
+
+This aspect logs how long each method marked `@Timed()` takes:
+
+```ts
+import { Injectable, Logger, Module } from "@nestjs/common";
+import {
+  Around,
+  Aspect,
+  AspectModule,
+  createAnnotation,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
+
+export const Timed = createAnnotation<
+  "Timed",
+  void,
+  (...args: any[]) => Promise<unknown>
+>("Timed");
+
+@Aspect()
+export class TimingAspect {
+  private readonly logger = new Logger(TimingAspect.name);
+
+  @Around(Timed)
+  async time(joinPoint: ProceedingJoinPointOf<typeof Timed>): Promise<unknown> {
+    const started = performance.now();
+    try {
+      return await joinPoint.proceed();
+    } finally {
+      const elapsed = (performance.now() - started).toFixed(1);
+      this.logger.log(`${joinPoint} took ${elapsed} ms`);
+    }
+  }
+}
+
+@Injectable()
+export class ReportService {
+  @Timed()
+  async build(id: string): Promise<string> {
+    return `report ${id}`;
+  }
+}
+
+@Module({
+  imports: [AspectModule.forRoot()],
+  providers: [TimingAspect, ReportService],
+})
+export class ReportModule {}
+```
+
+- **`Timed`** takes no value. Its third type parameter is the method contract: `@Timed()` applies only to a method that returns a promise, which the `async` advice returns in its place.
+- **`@Around(Timed)`** advises every method that carries `Timed`. `ProceedingJoinPointOf<typeof Timed>` types the join point from the contract; for an annotation that carries a value, `joinPoint.annotation(...)` returns that value.
+- **`ReportService`** has no timing code and does not import the aspect. A call of `build("r-1")` logs a line such as `ReportService.build("r-1") took 0.1 ms`.
+
+An annotation in place of a pointcut is shorthand for the pointcut `Pointcut.annotated(annotation)`. When the selection needs more, such as a module, a class or a name pattern, the advice takes a [pointcut](#pointcuts) composed of designators.
+
+### Full example: an audit log
+
+`Pointcut` is the namespace of the pointcut designators, the functions that build pointcuts; the examples import it as `P` for brevity. This application records who changed what: every audited method leaves an entry with its actor, whether it succeeds or fails.
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -267,7 +328,7 @@ export const Evicts = createAnnotation<
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses. An annotation without a method contract also applies to accessors.
 - **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice. The same holds after the application has closed or has failed to initialize: on an instance its container created, the call of a member that requires advice raises `AspectConfigurationError`.
 - `isAnnotation(value)` tells an annotation from other functions.
-- Decorators created with Nest's `Reflector.createDecorator()` are accepted by `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `joinPoint.findAnnotation`.
+- Decorators created with Nest's `Reflector.createDecorator()` are accepted by the advice decorators, `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `joinPoint.findAnnotation`.
 
 ## The example application
 
@@ -496,7 +557,7 @@ Further rules:
 
 ## Advice
 
-`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JoinPointOf<typeof pointcut>` and `ProceedingJoinPointOf<typeof pointcut>` are the join point types of a pointcut.
+`@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JoinPointOf<typeof pointcut>` and `ProceedingJoinPointOf<typeof pointcut>` are the join point types of a pointcut. An annotation `A`, created by `createAnnotation()` or `Reflector.createDecorator()`, stands for the pointcut `P.annotated(A)`: `@Around(A)` is `@Around(P.annotated(A))`, and `JoinPointOf<typeof A>` is the join point type of `P.annotated(A)`.
 
 | Decorator                                 | Advice signature                                                                | Semantics                                                                                                           |
 | ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -510,7 +571,7 @@ Use the least powerful advice that does the job: an after-returning advice canno
 
 ### Before
 
-Before advice runs ahead of the join point and can prevent it only by throwing. This aspect checks a permission at the service method. A guard checks it at a route handler; the same method called by a job, a queue consumer or another service passes no guard. `Actor` is the provider of the [Quick start](#quick-start), and `Permissions` stands in for the store of the granted permissions.
+Before advice runs ahead of the join point and can prevent it only by throwing. This aspect checks a permission at the service method. A guard checks it at a route handler; the same method called by a job, a queue consumer or another service passes no guard. `Actor` is the provider of the [audit log example](#full-example-an-audit-log), and `Permissions` stands in for the store of the granted permissions.
 
 ```ts
 import { ForbiddenException, Injectable } from "@nestjs/common";
@@ -1015,7 +1076,7 @@ export class JobAspect {
 
 - `Scheduled` stands in for the decorator of a scheduling package, and `Scheduler` of `SchedulerModule` for its scheduler, which calls every method that carries the decorator on a timer. `P.annotated` accepts a decorator made with `Reflector.createDecorator()`; `P.metadata(key)` selects the methods of a decorator that stores its metadata under another key.
 - A replica that does not get the lock skips the run.
-- The job runs as the actor `job:<name>`. `PermissionAspect` of [Before](#before) checks the permissions of that actor on the service methods the job calls, and `AuditAspect` of the [Quick start](#quick-start) records it.
+- The job runs as the actor `job:<name>`. `PermissionAspect` of [Before](#before) checks the permissions of that actor on the service methods the job calls, and `AuditAspect` of the [audit log example](#full-example-an-audit-log) records it.
 - The advice reports the failure and rethrows it, so the scheduler, or the queue worker in its place, still sees the rejection. A failure of the reporter is logged and does not replace the error of the job.
 
 The job itself holds its work and nothing else. It stores the prices of a supplier through `CatalogService.reprice` of [the example application](#the-example-application), which requires the permission `catalog:write`:
@@ -1241,7 +1302,7 @@ Weaving replaces each matched method on its class prototype with a dispatcher th
 | `strict`              | `true`    | With `true`, the [bootstrap validation](#bootstrap-validation) fails `init()`. With `false`, its findings are warnings and the calls they concern fail instead.   |
 | `exclude`             | `[]`      | Classes that are never woven: a class excludes itself and its subclasses, a `ClassFilter` excludes the classes it matches.                                        |
 
-`AspectModule.forRootAsync()` takes the options from a factory, a class or an existing provider. This module registers the providers of the [Quick start](#quick-start):
+`AspectModule.forRootAsync()` takes the options from a factory, a class or an existing provider. This module registers the providers of the [audit log example](#full-example-an-audit-log):
 
 ```ts
 import { Injectable, Module } from "@nestjs/common";
@@ -1450,7 +1511,7 @@ try {
 ## Scopes, self-invocation and the request pipeline
 
 - **Targets of every scope are advised**: singleton, request-scoped and transient.
-- **Aspects and advisors are singletons.** One that is request-scoped or transient, by its own scope or because it depends on a request-scoped provider, is rejected when the application initializes. Per-request state belongs to the join point. Advice has no request object, so the route that works for every call is an `AsyncLocalStorage`: a middleware or a guard stores the user or the tenant of the request, and the advice reads the store, also in the calls a job makes inside its own store. `Actor` of the [Quick start](#quick-start) is such a provider. `ModuleRef.resolve()` needs a context id, which `ContextIdFactory.getByRequest()` derives from the request: advice can use it only where the target exposes the request, as a request-scoped provider that injects `REQUEST` does.
+- **Aspects and advisors are singletons.** One that is request-scoped or transient, by its own scope or because it depends on a request-scoped provider, is rejected when the application initializes. Per-request state belongs to the join point. Advice has no request object, so the route that works for every call is an `AsyncLocalStorage`: a middleware or a guard stores the user or the tenant of the request, and the advice reads the store, also in the calls a job makes inside its own store. `Actor` of the [audit log example](#full-example-an-audit-log) is such a provider. `ModuleRef.resolve()` needs a context id, which `ContextIdFactory.getByRequest()` derives from the request: advice can use it only where the target exposes the request, as a request-scoped provider that injects `REQUEST` does.
 - **Aspects and advisors are never advised.** An aspect inherits the advice of a superclass without `@Aspect`; an aspect that extends another `@Aspect` class is rejected.
 - **Self-invocation is advised.** A call from a method to another method of the same object (`this.other()`) runs the advice of that method, unlike in Spring: the dispatcher is the member on the class prototype, not a proxy in front of the object.
 - **Controllers.** On a route handler, advice runs inside the Nest interceptors and after the pipes, so it sees the transformed arguments:
@@ -1628,7 +1689,7 @@ expect(selected).toEqual([
 - `advisorsOf(type, name, kind?)` returns the advisors of one member in the order their advice runs: `{ type, methodName?, kind?, order }`, where `type` is the aspect or advisor class. [Ordering](#ordering) pins the chain of a method with it.
 - It reports static matches: an advisor with `P.args` is listed for every member it may advise. It lists nothing after the application has shut down.
 
-When the application initializes, the weaver logs the same information as the **weaving report** through the Nest `Logger`, with the context `AspectModule` and at the level of the `report` option. One line names a member and one advisor, in chain order. This is the report of the [Quick start](#quick-start):
+When the application initializes, the weaver logs the same information as the **weaving report** through the Nest `Logger`, with the context `AspectModule` and at the level of the `report` option. One line names a member and one advisor, in chain order. This is the report of the [audit log example](#full-example-an-audit-log):
 
 ```
 MemberService.invite <- AuditAspect.succeeded (afterReturning, no order)
@@ -1641,7 +1702,7 @@ ApiKeyService.revoke <- AuditAspect.failed (afterThrowing, no order)
 
 ## Testing
 
-Weaving happens while the module compiles, so advice runs after `compile()` without `init()`. The bootstrap validation, the weaving report and the weaving of factory and value provider instances run in `init()`. This test of `AuditAspect` compiles the module of the [Quick start](#quick-start) with a stand-in for the provider the aspect writes to:
+Weaving happens while the module compiles, so advice runs after `compile()` without `init()`. The bootstrap validation, the weaving report and the weaving of factory and value provider instances run in `init()`. This test of `AuditAspect` compiles the module of the [audit log example](#full-example-an-audit-log) with a stand-in for the provider the aspect writes to:
 
 ```ts
 describe("AuditAspect", () => {
@@ -1752,6 +1813,7 @@ Independent of `strict`, `compile()` fails when `AspectModule` is registered mor
 | `execution(* Type+.name(..))`, a name pattern of `execution`        | `P.method(Type, "name")`, `P.name()`                                     |
 | `within(Type)`, `target(Type)`, `this(Type)`                        | `P.within(Type)`, `P.target(Type)`                                       |
 | `@annotation(A)`, `@within(A)`, `@target(A)`                        | `P.annotated(A)`, `P.withinAnnotated(A)`, `P.targetAnnotated(A)`         |
+| `@Around("@annotation(A)")`                                         | `@Around(A)`, shorthand for `@Around(P.annotated(A))`                    |
 | `args(String, *, ..)`                                               | `P.args(String, P.ANY, P.REST)`                                          |
 | Attribute-driven pointcut                                           | `P.metadata()`                                                           |
 | Custom `Pointcut`                                                   | `P.matching()`                                                           |
