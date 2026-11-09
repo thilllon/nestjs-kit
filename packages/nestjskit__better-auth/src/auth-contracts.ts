@@ -192,8 +192,9 @@ export type AuthHandlerInterceptor = (
 export type BetterAuthModuleOptions<A extends AuthLike> =
   BetterAuthStaticOptions & BetterAuthRuntimeOptions<A>;
 
-export interface BetterAuthModuleAsyncOptions<A extends AuthLike>
-  extends BetterAuthStaticOptions {
+export interface BetterAuthModuleAsyncOptions<
+  A extends AuthLike,
+> extends BetterAuthStaticOptions {
   imports?: ModuleMetadata["imports"];
   inject?: readonly (InjectionToken | OptionalFactoryDependency)[];
   useFactory: (
@@ -204,8 +205,9 @@ export interface BetterAuthModuleAsyncOptions<A extends AuthLike>
 /** A static or app-level key returned from useFactory is a compile error with a readable message (EXP-C9). [C] */
 export type BetterAuthFactoryResult<A extends AuthLike> =
   BetterAuthRuntimeOptions<A> & {
-    [K in keyof (BetterAuthStaticOptions &
-      BetterAuthAppOptions)]?: StaticOptionMustBePassedToForRootAsync<K>;
+    [
+      K in keyof (BetterAuthStaticOptions & BetterAuthAppOptions)
+    ]?: StaticOptionMustBePassedToForRootAsync<K>;
   };
 export interface StaticOptionMustBePassedToForRootAsync<K extends string> {
   readonly __error: `'${K}' is a static option: pass it to forRootAsync() next to useFactory, not in its result`;

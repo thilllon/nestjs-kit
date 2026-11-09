@@ -225,9 +225,7 @@ class ReferenceTransport implements AuthTransport {
     const scanner = new MetadataScanner();
     for (const wrapper of context.discovery.getProviders()) {
       const target = wrapper.metatype as
-        | (abstract new (
-            ...args: never[]
-          ) => unknown)
+        | (abstract new (...args: never[]) => unknown)
         | undefined;
       if (
         !target?.prototype ||

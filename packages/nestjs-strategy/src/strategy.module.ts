@@ -26,8 +26,9 @@ export interface StrategyModuleOptions extends StrategyModuleBaseOptions {
   group?: never;
 }
 
-export interface StrategyGroupModuleOptions<K extends string>
-  extends StrategyModuleBaseOptions {
+export interface StrategyGroupModuleOptions<
+  K extends string,
+> extends StrategyModuleBaseOptions {
   /**
    * Group declared with `defineStrategyGroup()`. The strategies must register
    * every declared key and no other key.

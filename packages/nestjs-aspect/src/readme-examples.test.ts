@@ -1424,8 +1424,9 @@ const _typedArguments: (
   joinPoint: JoinPointOf<typeof typedArguments>,
 ) => readonly [string, number] = (joinPoint) => joinPoint.args;
 const quoting = P.method(ShippingClient, "quote");
-const _quoting: (joinPoint: JoinPointOf<typeof quoting>) => readonly [string] =
-  (joinPoint) => joinPoint.args;
+const _quoting: (
+  joinPoint: JoinPointOf<typeof quoting>,
+) => readonly [string] = (joinPoint) => joinPoint.args;
 
 /** The members `aspect` advises, in the order the inspector lists them. */
 function advisedBy(

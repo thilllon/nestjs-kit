@@ -1,7 +1,4 @@
-export {
-  PgListenModule,
-  PG_LISTEN_SUBSCRIBER,
-} from "./pg-listen.module";
+export { PgListenModule, PG_LISTEN_SUBSCRIBER } from "./pg-listen.module";
 export { PgListenService } from "./pg-listen.service";
 export {
   type PgListenModuleOptions,

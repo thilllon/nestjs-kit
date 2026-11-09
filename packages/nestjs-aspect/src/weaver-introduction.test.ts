@@ -359,12 +359,10 @@ describe("introductions", () => {
     }).toThrow("as the type of the static member Declaring.mixin");
     expect(() => {
       class Declaring {
-        @(
-          DeclareParents(anything, { use: DefaultUsageTracked }) as (
-            target: object,
-            key: string,
-          ) => void
-        )
+        @(DeclareParents(anything, { use: DefaultUsageTracked }) as (
+          target: object,
+          key: string,
+        ) => void)
         readonly mixin!: UsageTracked;
       }
       return Declaring;

@@ -48,9 +48,7 @@ export function recordUpgradeRequest(
   });
 }
 export function withUpgradeRequest<
-  T extends new (
-    ...args: any[]
-  ) => WsAdapterLike,
+  T extends new (...args: any[]) => WsAdapterLike,
 >(Base: T): T {
   return class extends Base {
     override bindClientConnect(

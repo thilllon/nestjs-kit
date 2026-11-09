@@ -554,9 +554,8 @@ it("does not reuse an exact-args reader adapter under a different active invocat
   const { READER_CONTEXT } = await import("./auth-tokens.js");
   const { RequestScope } = await import("./request-scope.js");
   const { PrincipalReadings } = await import("./principal-readings.js");
-  const { ExecutionContextHost } = await import(
-    "@nestjs/core/helpers/execution-context-host.js"
-  );
+  const { ExecutionContextHost } =
+    await import("@nestjs/core/helpers/execution-context-host.js");
   const scope = new RequestScope(),
     readings = new PrincipalReadings(scope),
     arg = {};
@@ -621,9 +620,8 @@ it("allows optional absence but never downgrades a rejected presented credential
 });
 
 it("deduplicates synchronous projection failures on scope-less nested invocations", async () => {
-  const { IntrinsicException } = await import(
-    "@nestjs/common/exceptions/intrinsic.exception.js"
-  );
+  const { IntrinsicException } =
+    await import("@nestjs/common/exceptions/intrinsic.exception.js");
   @Injectable()
   @UseBetterAuth()
   class Reader {
@@ -750,9 +748,8 @@ it("inherits another instance identity while direct calls consult the target ins
 });
 
 it("publishes policy values only to their own invocation, never an inheriting child", async () => {
-  const { defineInvocationParam, Require, requirement } = await import(
-    "./auth-decorators.js"
-  );
+  const { defineInvocationParam, Require, requirement } =
+    await import("./auth-decorators.js");
   const slot = Symbol("selected resource"),
     Resource = defineInvocationParam(slot, {
       missing: "No resource decision on this invocation",

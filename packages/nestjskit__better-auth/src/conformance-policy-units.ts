@@ -158,7 +158,9 @@ async function keySessions(auth: AuthLike, key: string): Promise<boolean> {
 }
 
 async function remainingOf(auth: AuthLike, keyId: string): Promise<number> {
-  const row = await (await sdkContext(auth)).adapter.findOne<{
+  const row = await (
+    await sdkContext(auth)
+  ).adapter.findOne<{
     remaining: number | null;
   }>({ model: "apikey", where: [{ field: "id", value: keyId }] });
   return row?.remaining ?? Number.NaN;
@@ -184,7 +186,9 @@ async function setRole(
   userId: string,
   role: string | null,
 ): Promise<void> {
-  await (await sdkContext(auth)).adapter.update({
+  await (
+    await sdkContext(auth)
+  ).adapter.update({
     model: "user",
     where: [{ field: "id", value: userId }],
     update: { role },
@@ -1233,9 +1237,12 @@ export function unitPolicyCases(
         const freshToken =
           "@nestjs-kit/better-auth:conformance/class-fresh-token";
         const userId = await kitUser(auth);
-        const user = await (await sdkContext(auth)).adapter.findOne<
-          Record<string, unknown>
-        >({ model: "user", where: [{ field: "id", value: userId }] });
+        const user = await (
+          await sdkContext(auth)
+        ).adapter.findOne<Record<string, unknown>>({
+          model: "user",
+          where: [{ field: "id", value: userId }],
+        });
         const keys: KitKeys = {
           keys: new Map([["conformance-class-key", { userId, grant: {} }]]),
           verifications: 0,
