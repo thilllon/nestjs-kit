@@ -66,7 +66,10 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B 
 type Assert<T extends true> = T;
 `;
 
-it("derives unregistered SDK sessions and requires a mapper for custom sessions", async () => {
+// tsc runs in a separate process; the unit-test default of 5 s is too short.
+it("derives unregistered SDK sessions and requires a mapper for custom sessions", {
+  timeout: 30_000,
+}, async () => {
   await compile(`
 import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
@@ -125,7 +128,10 @@ const deleteResult: DatabaseHookResult<"user.delete", "before"> = { data: { id: 
 `);
 });
 
-it("preserves augmented default and named instances, plugin permissions, and raw hook types", async () => {
+// tsc runs in a separate process; the unit-test default of 5 s is too short.
+it("preserves augmented default and named instances, plugin permissions, and raw hook types", {
+  timeout: 30_000,
+}, async () => {
   await compile(`
 import { betterAuth } from "better-auth";
 import { admin, customSession, organization } from "better-auth/plugins";
