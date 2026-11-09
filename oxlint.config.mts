@@ -6,6 +6,18 @@ export default defineConfig({
   },
   rules: {
     curly: ["error", "all"],
+    eqeqeq: ["error", "always", { null: "ignore" }],
+    "no-cond-assign": ["error", "always"],
+    "no-fallthrough": "error",
+    "no-prototype-builtins": "error",
+    "no-self-compare": "error",
+    "no-var": "error",
+    "no-restricted-globals": [
+      "error",
+      { name: "isFinite", message: "Use Number.isFinite instead." },
+      { name: "isNaN", message: "Use Number.isNaN instead." },
+    ],
+    "typescript/no-empty-object-type": "error",
     "prefer-rest-params": "error",
     "typescript/no-empty-interface": "error",
     "typescript/no-unsafe-function-type": "error",

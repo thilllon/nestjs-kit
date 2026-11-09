@@ -44,7 +44,7 @@ Keep this file current as maintainer decisions change. `CLAUDE.md` imports this 
 
 - Keep these small package adapters flat: source files and colocated tests belong directly in each package's `src/`, without a `src/lib/` wrapper.
 
-- oxlint and oxfmt must cover every supported file throughout the repository, including root files, examples, Markdown and YAML. Exclude generated/dependency state, not source directories. oxfmt is the only formatter; do not add a second formatter for any file type.
+- oxlint lints every JavaScript and TypeScript file and oxfmt formats every supported file throughout the repository, including root files, examples, Markdown and YAML. Exclude generated/dependency state, not source directories. oxfmt is the only formatter; do not add a second formatter for any file type.
 - Use braces for control-flow bodies, including single-statement branches and loops. oxlint enforces `curly` with the `all` option.
 - Separate class methods, including constructors, with a blank line. Write nonempty `@Module({ ... })` metadata objects across multiple lines; keep oxfmt's `objectWrap` at its default `preserve` behavior.
 - Name all test files `*.test.ts`, with middleware E2E tests named `*.e2e.test.ts`. Use `fixtures` for any necessary fixture directories; remove stale fixture exclusions and unused assets.

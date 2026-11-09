@@ -24,7 +24,7 @@ export interface GetSessionWithHeaders {
 }
 
 /** Augment this interface with the application auth instance and named instances. */
-// oxlint-disable-next-line typescript/no-empty-interface -- Public module augmentation point must remain an interface.
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type -- Public module augmentation point must remain an interface.
 export interface Register {}
 export type IsRegistered = Register extends { auth: AuthLike } ? true : false;
 export type RegisteredAuth = Register extends { auth: infer A extends AuthLike }

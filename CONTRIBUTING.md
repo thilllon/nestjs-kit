@@ -29,7 +29,7 @@ pnpm test
 pnpm exec turbo run test:packaging
 ```
 
-Run `pnpm format` to apply formatting. oxlint lints and oxfmt formats every supported file throughout the repository, including root configuration, examples, Markdown and YAML. Generated files and dependencies follow `.gitignore`; source directories are not excluded. oxlint, oxfmt, commitlint and Vitest use typed `.mts` configuration files.
+Run `pnpm format` to apply formatting. oxlint lints every JavaScript and TypeScript file, and oxfmt formats every supported file throughout the repository, including root configuration, examples, Markdown and YAML. Generated files and dependencies follow `.gitignore`; source directories are not excluded. oxlint, oxfmt, commitlint and Vitest use typed `.mts` configuration files.
 
 `pnpm test` runs every workspace project's `test` script through Turbo. Run a single project's unit tests with, for example, `pnpm --filter @nestjs-kit/s3 test`, and a single file with `pnpm --filter @nestjs-kit/s3 test src/s3.module.test.ts`. Each project's `vitest.config.mts` combines the options in root `vitest.shared.mts` with the project's own `vitest` and `unplugin-swc`, and defines the `unit`, `e2e` and `packaging` Vitest projects that the `test`, `test:e2e` and `test:packaging` scripts select. Keep unit tests focused on behavior such as error propagation, connection cleanup, configuration isolation, and signing rules. Do not add tests merely to repeat framework behavior or trivial getters. Unit tests run without cloud credentials or a database. Name tests `*.test.ts` and middleware integration tests `*.e2e.test.ts`. Store necessary test assets in `fixtures` directories, and remove unused fixtures and stale configuration exclusions.
 
