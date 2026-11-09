@@ -235,7 +235,7 @@ describe("route planning", () => {
       @AcceptPrincipals("machine") @RequireAuth() machine() {}
     }
     const { planner } = fixture([], {
-      // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+      // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
       defaultAccessFor: (_target: Function, method: string) =>
         method === "two" ? "inherit" : undefined,
     });

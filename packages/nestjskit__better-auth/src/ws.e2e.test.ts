@@ -116,7 +116,7 @@ it("keeps public ws lazy, denies protected and public direct calls before effect
     }
 
     protected override emitMessage<
-      // biome-ignore lint/complexity/noBannedTypes: Matches the native Nest filter generic signature.
+      // oxlint-disable-next-line typescript/no-unsafe-function-type -- Matches the native Nest filter generic signature.
       TClient extends { emit?: Function; send?: Function },
     >(client: TClient, event: string, payload: unknown) {
       observed?.(payload);

@@ -7,20 +7,20 @@
   "scripts": {
     "typecheck": "tsc --project tsconfig.tools.json && turbo run typecheck",
     "build": "turbo run build",
-    "lint": "biome lint .",
-    "format": "biome format --write . && prettier --write \"**/*.{md,mdx,yaml,yml}\"",
-    "format:check": "biome format . && prettier --check \"**/*.{md,mdx,yaml,yml}\"",
+    "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
     "test": "turbo run test",
     "release:publish": "changeset publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.15",
     "@changesets/cli": "3.0.3",
     "@commitlint/cli": "21.2.3",
     "@commitlint/config-conventional": "21.2.3",
     "@commitlint/types": "^21.2.3",
     "@types/node": "24.19.2",
-    "prettier": "3.9.10",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
     "turbo": "2.11.7",
     "typescript": "6.0.3"
   }

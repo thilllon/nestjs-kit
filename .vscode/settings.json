@@ -1,8 +1,5 @@
 {
   "editor.formatOnSave": true,
-  "editor.defaultFormatter": "biomejs.biome",
-  "typescript.preferences.importModuleSpecifier": "relative",
-  "[markdown][yaml]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "typescript.preferences.importModuleSpecifier": "relative"
 }

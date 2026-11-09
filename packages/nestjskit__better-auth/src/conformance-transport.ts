@@ -1252,7 +1252,7 @@ function warningCodes(logger: CapturingLogger): Set<string> {
 }
 
 interface RecordedClaim {
-  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
   readonly target: Function;
   readonly method: string | undefined;
   readonly reach: GuardReach;
@@ -1266,7 +1266,7 @@ const RENAMED_METADATA = ":nestjs-kit-better-auth-conformance-renamed";
 
 interface ClaimRecording {
   /** Classes the validation context's discovery lists besides the app's controllers and providers. */
-  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
   readonly classes?: readonly Function[];
   /**
    * Write every string metadata key under another name while validate() runs, as if the installed Nest wrote its
@@ -1344,7 +1344,7 @@ async function recordClaims(
 }
 
 /** A class with the own class-level metadata of `target` and no methods: a push-only gateway, a controller without routes. */
-// biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+// oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
 function withoutHandlers(target: Function): Function {
   const clone = { [`${target.name}WithoutHandlers`]: class {} }[
     `${target.name}WithoutHandlers`

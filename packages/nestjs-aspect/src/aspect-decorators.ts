@@ -71,7 +71,7 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
     ? void | PromiseLike<void>
     : // Also a union with such a member, as `or()` of a synchronous and an asynchronous method produces.
       [Extract<S["returns"], Deferred>] extends [never]
-      ? // biome-ignore lint/suspicious/noConfusingVoidType: void is the return type required of synchronous advice
+      ? // void is the return type required of synchronous advice
         void
       : void | PromiseLike<void>;
 
@@ -82,7 +82,7 @@ export type AdviceResult<S extends Shape> = [S["returns"]] extends [
  */
 export type AsyncGuard<S extends Shape, T extends AnyFunction> =
   AdviceResult<S> extends void | PromiseLike<void>
-    ? // biome-ignore lint/suspicious/noConfusingVoidType: void is compared with the advice return type
+    ? // void is compared with the advice return type
       [void] extends [AdviceResult<S>]
       ? PromiseLike<void> extends AdviceResult<S>
         ? unknown

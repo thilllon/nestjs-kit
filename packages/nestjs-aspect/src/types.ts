@@ -96,7 +96,7 @@ export interface Annotation<
    * whose pointcut refers to the annotation.
    */
   readonly requiresAdvice: boolean;
-  // biome-ignore lint/suspicious/noConfusingVoidType: void marks an annotation that takes no value
+  // void marks an annotation that takes no value
   (...value: [V] extends [void] ? [] : [value: V]): MethodOrClassDecorator<F>;
 }
 

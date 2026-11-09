@@ -23,7 +23,7 @@ export class TransportRegistry {
     return [...this.transports];
   }
 
-  // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
   defaultAccessFor(target: Function, method: string): "inherit" | undefined {
     for (const transport of this.transports) {
       const answer = transport.defaultAccessFor?.(target, method);
