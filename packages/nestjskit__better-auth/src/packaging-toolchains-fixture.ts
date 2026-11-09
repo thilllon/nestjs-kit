@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Consumers that install the packed tarball and hand it to other toolchains:
-// TypeScript 5.9 and 6.x next to the workspace's TypeScript 7, esbuild, and
+// TypeScript 5.9 and 7.x next to the workspace's TypeScript 6, esbuild, and
 // the Nest CLI's webpack build. Each peer row has its own test file, so CI runs
 // the rows' compilers in separate jobs.
 
@@ -33,11 +33,11 @@ export const workspaceCompiler = fileURLToPath(
 export type Row = "floor" | "current";
 type Consumer = Row | "nest-cli";
 
-// Each row installs its compilers under an alias; "7" is the workspace compiler.
+// Each row installs its compilers under an alias; "6" is the workspace compiler.
 const compilers = {
   "5.9": { floor: "5.9.3", current: "~5.9.3" },
-  "6": { floor: "6.0.3", current: "^6.0.3" },
-  "7": null,
+  "6": null,
+  "7": { floor: "7.0.2", current: "^7.0.2" },
 } as const;
 type Compiler = keyof typeof compilers;
 // Object.keys() lists integer-like keys first; keep the version order.
@@ -310,7 +310,7 @@ const programs: Record<
 };
 
 function compilerPath(directory: string, compiler: Compiler): string {
-  return compiler === "7"
+  return compiler === "6"
     ? workspaceCompiler
     : join(directory, "node_modules", `typescript-${compiler}`, "bin", "tsc");
 }
@@ -319,7 +319,7 @@ function compilerPath(directory: string, compiler: Compiler): string {
 // mode, with and without the ./api-key augmentation.
 export function describeDeclarationConsumers(row: Row): void {
   describe.concurrent(`declaration consumers with the ${row} peer versions`, () => {
-    it("installs TypeScript 5.9 and 6.x next to the workspace TypeScript 7", async () => {
+    it("installs TypeScript 5.9 and 7.x next to the workspace TypeScript 6", async () => {
       const directory = consumerFor(row);
       const versions = await Promise.all(
         compilerNames.map(async (compiler) => {

@@ -20,6 +20,10 @@ updates:
       # (^16.10.0) and graphql-subscriptions 3.0.0 (^15.7.2 || ^16.0.0).
       - dependency-name: "graphql"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 has no classic compiler API, which tsdown's tsc
+      # declaration generator requires.
+      - dependency-name: "typescript"
+        versions: [">=7"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     # Matches pnpm minimumReleaseAge so version updates pass the lockfile policy.

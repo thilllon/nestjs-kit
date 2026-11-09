@@ -56,7 +56,7 @@ installToolchainConsumers(["current", "nest-cli"]);
 
 describeDeclarationConsumers("current");
 
-// The consumer application compiled by the workspace TypeScript 7, as the
+// The consumer application compiled by the workspace TypeScript 6, as the
 // input of the esbuild bundles.
 async function compileApp(directory: string): Promise<void> {
   await writeFile(
