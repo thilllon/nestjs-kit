@@ -1,9 +1,12 @@
 import "reflect-metadata";
 import { Injectable } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
+import { createAnnotation } from "./annotation";
 import {
   After,
+  AfterReturning,
   AfterThrowing,
   Advisor,
   Around,
@@ -17,7 +20,19 @@ import {
 } from "./aspect-decorators";
 import { matching, named } from "./aspect-fixture";
 import { AspectConfigurationError } from "./errors";
-import type { MethodInterceptor, Pointcut, PointcutAdvisor } from "./types";
+import { createClassRef, createMethodRef } from "./method-ref";
+import {
+  guaranteedAnnotations,
+  matchesStatically,
+  referencedAnnotations,
+} from "./pointcut";
+import { Pointcut as P } from "./pointcut-designators";
+import type {
+  AnnotationLike,
+  MethodInterceptor,
+  Pointcut,
+  PointcutAdvisor,
+} from "./types";
 
 const anything = matching();
 
@@ -147,6 +162,98 @@ describe("advice decorators", () => {
 
     expect(() => Before(notYetInitialized)).toThrow(AspectConfigurationError);
     expect(() => Around({} as Pointcut)).toThrow(/pointcut/);
+  });
+
+  it("record an annotation as the pointcut P.annotated(annotation)", () => {
+    const Audited = createAnnotation<"Audited">("Audited");
+    const Roles = Reflector.createDecorator<string[]>();
+
+    class Service {
+      @Audited()
+      @Roles(["admin"])
+      both(): void {}
+
+      @Audited()
+      audited(): void {}
+
+      @Roles(["admin"])
+      roles(): void {}
+
+      plain(): void {}
+    }
+
+    @Aspect()
+    class AnnotationAspect {
+      @Around(Audited)
+      @Before(Audited)
+      @After(Roles)
+      @AfterReturning(Roles)
+      @AfterThrowing(Audited, { throwing: RangeError })
+      advise(): void {}
+    }
+
+    const classRef = createClassRef(Service);
+    const members = ["both", "audited", "roles", "plain"].map((name) =>
+      createMethodRef(classRef, name, "method"),
+    );
+    const annotations: AnnotationLike<any>[] = [
+      Audited,
+      Roles,
+      Roles,
+      Audited,
+      Audited,
+    ];
+    const entries = getAdviceMetadata(AnnotationAspect);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "afterThrowing",
+      "afterReturning",
+      "after",
+      "before",
+      "around",
+    ]);
+    expect(entries[0]?.throwing).toBe(RangeError);
+    entries.forEach(({ pointcut }, index) => {
+      const expected = P.annotated(annotations[index] as never);
+      expect(
+        members.map((method) => matchesStatically(pointcut, method)),
+      ).toEqual(members.map((method) => matchesStatically(expected, method)));
+      expect(guaranteedAnnotations(pointcut)).toEqual(
+        guaranteedAnnotations(expected),
+      );
+      expect(referencedAnnotations(pointcut)).toEqual(
+        referencedAnnotations(expected),
+      );
+    });
+    expect([
+      ...guaranteedAnnotations(entries[3]?.pointcut ?? anything),
+    ]).toEqual(["Audited"]);
+  });
+
+  it("reject a function that is no annotation with the error of P.annotated", () => {
+    class NotAnAnnotation {}
+
+    const annotatedError = (() => {
+      try {
+        P.annotated(NotAnAnnotation as never);
+      } catch (error) {
+        return error;
+      }
+    })();
+
+    expect(annotatedError).toBeInstanceOf(AspectConfigurationError);
+    expect(() => Before(NotAnAnnotation as never)).toThrow(
+      (annotatedError as Error).message,
+    );
+    expect(() => Around(NotAnAnnotation as never)).toThrow(
+      AspectConfigurationError,
+    );
+  });
+
+  it("reject a missing pointcut or annotation as a possible circular import", () => {
+    expect(() => After(undefined as never)).toThrow(
+      "@After requires a pointcut; an undefined pointcut usually comes from a circular import",
+    );
   });
 
   it("reject a throwing option of @AfterThrowing that is no class when the decorator is evaluated", () => {

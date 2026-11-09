@@ -4,9 +4,11 @@ import "reflect-metadata";
 import { Injectable } from "@nestjs/common";
 import { AspectConfigurationError } from "./errors";
 import { isPointcutLike } from "./pointcut";
+import { annotated } from "./pointcut-designators";
 import type {
   AdviceKind,
   AdviceMetadata,
+  AnnotationLike,
   AnyShape,
   AspectMetadata,
   AspectOptions,
@@ -18,6 +20,7 @@ import type {
   PointcutLike,
   ProceedingJoinPoint,
   Shape,
+  ShapeOf,
 } from "./types";
 import { constructorChain, isOrder } from "./util";
 
@@ -120,10 +123,16 @@ function ownAdviceMetadata(type: object): readonly AdviceMetadata[] {
 
 function adviceDecorator(
   kind: AdviceKind,
-  pointcut: unknown,
+  pointcutOrAnnotation: unknown,
   throwing?: Class,
 ): (target: object, key: string | symbol) => void {
   const decorator = `@${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
+  // A pointcut is an object and an annotation a function: an annotation
+  // stands for `Pointcut.annotated(annotation)`, which validates it.
+  const pointcut =
+    typeof pointcutOrAnnotation === "function"
+      ? annotated(pointcutOrAnnotation as AnnotationLike<any>)
+      : pointcutOrAnnotation;
   if (!isPointcutLike(pointcut)) {
     throw new AspectConfigurationError(
       `${decorator} requires a pointcut; an undefined pointcut usually comes from a circular import`,
@@ -176,30 +185,74 @@ export function Aspect(options: AspectOptions = {}): ClassDecorator {
   };
 }
 
-/** Runs before the join point. An error prevents the join point from running. */
+/** Before or after advice and its parameter for the shape `S`. */
+type BeforeOrAfterDecorator<S extends Shape> = AdviceDecorator<
+  S,
+  (joinPoint: JoinPoint<S>) => AdviceResult<S>
+>;
+
+/** After-returning advice and its parameters for the shape `S`. */
+type AfterReturningDecorator<S extends Shape> = AdviceDecorator<
+  S,
+  (
+    joinPoint: JoinPoint<S>,
+    result: AdviceValue<S["returns"]>,
+  ) => AdviceResult<S>
+>;
+
+/** After-throwing advice and its parameters for the shape `S`. */
+type AfterThrowingDecorator<S extends Shape, E> = AdviceDecorator<
+  S,
+  (joinPoint: JoinPoint<S>, error: E) => AdviceResult<S>
+>;
+
+/** Around advice and its parameter for the shape `S`. */
+type AroundDecorator<S extends Shape> = AdviceDecorator<
+  AnyShape,
+  (joinPoint: ProceedingJoinPoint<S>) => S["returns"]
+>;
+
+/**
+ * Runs before the join point. An error prevents the join point from running.
+ *
+ * Every advice decorator accepts an annotation in place of a pointcut:
+ * `@Before(Audited)` is `@Before(Pointcut.annotated(Audited))`.
+ */
 export function Before<S extends Shape>(
   pointcut: Pointcut<S>,
-): AdviceDecorator<S, (joinPoint: JoinPoint<S>) => AdviceResult<S>> {
+): BeforeOrAfterDecorator<S>;
+export function Before<A extends AnnotationLike<any>>(
+  annotation: A,
+): BeforeOrAfterDecorator<ShapeOf<A>>;
+export function Before(
+  pointcut: Pointcut<Shape> | AnnotationLike<any>,
+): BeforeOrAfterDecorator<any> {
   return adviceDecorator("before", pointcut);
 }
 
 /** Runs after the join point, whatever its outcome (finally). */
 export function After<S extends Shape>(
   pointcut: Pointcut<S>,
-): AdviceDecorator<S, (joinPoint: JoinPoint<S>) => AdviceResult<S>> {
+): BeforeOrAfterDecorator<S>;
+export function After<A extends AnnotationLike<any>>(
+  annotation: A,
+): BeforeOrAfterDecorator<ShapeOf<A>>;
+export function After(
+  pointcut: Pointcut<Shape> | AnnotationLike<any>,
+): BeforeOrAfterDecorator<any> {
   return adviceDecorator("after", pointcut);
 }
 
 /** Runs after a normal completion with the settled result; cannot replace it. */
 export function AfterReturning<S extends Shape>(
   pointcut: Pointcut<S>,
-): AdviceDecorator<
-  S,
-  (
-    joinPoint: JoinPoint<S>,
-    result: AdviceValue<S["returns"]>,
-  ) => AdviceResult<S>
-> {
+): AfterReturningDecorator<S>;
+export function AfterReturning<A extends AnnotationLike<any>>(
+  annotation: A,
+): AfterReturningDecorator<ShapeOf<A>>;
+export function AfterReturning(
+  pointcut: Pointcut<Shape> | AnnotationLike<any>,
+): AfterReturningDecorator<any> {
   return adviceDecorator("afterReturning", pointcut);
 }
 
@@ -210,17 +263,28 @@ export function AfterReturning<S extends Shape>(
 export function AfterThrowing<S extends Shape, E = unknown>(
   pointcut: Pointcut<S>,
   options?: { throwing: Class<E> },
-): AdviceDecorator<S, (joinPoint: JoinPoint<S>, error: E) => AdviceResult<S>> {
+): AfterThrowingDecorator<S, E>;
+export function AfterThrowing<A extends AnnotationLike<any>, E = unknown>(
+  annotation: A,
+  options?: { throwing: Class<E> },
+): AfterThrowingDecorator<ShapeOf<A>, E>;
+export function AfterThrowing(
+  pointcut: Pointcut<Shape> | AnnotationLike<any>,
+  options?: { throwing: Class },
+): AfterThrowingDecorator<any, any> {
   return adviceDecorator("afterThrowing", pointcut, options?.throwing);
 }
 
 /** Surrounds the join point; the return value becomes the caller's result. */
 export function Around<S extends Shape>(
   pointcut: Pointcut<S>,
-): AdviceDecorator<
-  AnyShape,
-  (joinPoint: ProceedingJoinPoint<S>) => S["returns"]
-> {
+): AroundDecorator<S>;
+export function Around<A extends AnnotationLike<any>>(
+  annotation: A,
+): AroundDecorator<ShapeOf<A>>;
+export function Around(
+  pointcut: Pointcut<Shape> | AnnotationLike<any>,
+): AroundDecorator<any> {
   return adviceDecorator("around", pointcut);
 }
 

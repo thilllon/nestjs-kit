@@ -91,6 +91,7 @@ const publicApi = {
       "AdvisorType",
       "AllShapes",
       "AndShape",
+      "AnnotatedShape",
       "Annotation",
       "AnnotationLike",
       "AnnotationOptions",
