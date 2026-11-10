@@ -579,9 +579,8 @@ it("redacts outage causes with the request's credentials and keeps the raw cause
   try {
     const { vi } = await import("vitest");
     const { normalizeForRequest } = await import("./principal-resolver.js");
-    const { getRawCause, isInfrastructureError } = await import(
-      "./auth-errors.js"
-    );
+    const { getRawCause, isInfrastructureError } =
+      await import("./auth-errors.js");
     const { inspect } = await import("node:util");
     const cookie = "SECRET_COOKIE_VALUE_1234567890";
     const key = "invalid-key-long-enough";

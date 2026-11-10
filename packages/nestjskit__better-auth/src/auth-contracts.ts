@@ -192,8 +192,9 @@ export type AuthHandlerInterceptor = (
 export type BetterAuthModuleOptions<A extends AuthLike> =
   BetterAuthStaticOptions & BetterAuthRuntimeOptions<A>;
 
-export interface BetterAuthModuleAsyncOptions<A extends AuthLike>
-  extends BetterAuthStaticOptions {
+export interface BetterAuthModuleAsyncOptions<
+  A extends AuthLike,
+> extends BetterAuthStaticOptions {
   imports?: ModuleMetadata["imports"];
   inject?: readonly (InjectionToken | OptionalFactoryDependency)[];
   useFactory: (
@@ -204,8 +205,9 @@ export interface BetterAuthModuleAsyncOptions<A extends AuthLike>
 /** A static or app-level key returned from useFactory is a compile error with a readable message (EXP-C9). [C] */
 export type BetterAuthFactoryResult<A extends AuthLike> =
   BetterAuthRuntimeOptions<A> & {
-    [K in keyof (BetterAuthStaticOptions &
-      BetterAuthAppOptions)]?: StaticOptionMustBePassedToForRootAsync<K>;
+    [
+      K in keyof (BetterAuthStaticOptions & BetterAuthAppOptions)
+    ]?: StaticOptionMustBePassedToForRootAsync<K>;
   };
 export interface StaticOptionMustBePassedToForRootAsync<K extends string> {
   readonly __error: `'${K}' is a static option: pass it to forRootAsync() next to useFactory, not in its result`;
@@ -553,7 +555,7 @@ export interface ConformanceSkip {
 }
 
 /** What a case's run() resolves with: nothing when it passed, a ConformanceSkip when it does not apply. */
-// biome-ignore lint/suspicious/noConfusingVoidType: cases written as `async () => {}` resolve to void.
+// cases written as `async () => {}` resolve to void.
 export type ConformanceOutcome = void | ConformanceSkip;
 
 export interface ConformanceRunner {
@@ -800,7 +802,7 @@ export interface AuthTransport {
    * reference resolver) is never nested. The planner asks every registered transport; the first answer wins.
    *
    */
-  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
   defaultAccessFor?(target: Function, method: string): "inherit" | undefined;
   /**
    * Optional, synchronous, side-effect free: the lineage of this invocation (TransportCall.lineage) without building the whole call.
@@ -917,14 +919,14 @@ export interface TransportValidationContext {
   readonly moduleRef: ModuleRef;
   readonly hasHttpAdapter: boolean; // false for createMicroservice / createApplicationContext
   /** Compiled plan of a handler (class + method). */
-  // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
   readonly planOf: (target: Function, method: string) => RoutePlan;
   /**
    * Declare a handler this transport serves and how BetterAuthGuard reaches it. `method` undefined claims a class whose handlers the
    * transport could not enumerate (a class-level decorator is then required). Core decides coverage (§5.4 B16).
    */
   claim(
-    // biome-ignore lint/complexity/noBannedTypes: Nest metadata accepts class and function targets.
+    // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest metadata accepts class and function targets.
     target: Function,
     method: string | undefined,
     reach: GuardReach,

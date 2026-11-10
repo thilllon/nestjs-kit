@@ -30,7 +30,7 @@ function diagnosticOrigin(headers: Headers): string {
       value = "(invalid referer)";
     }
   }
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: Remove attacker-controlled log control characters.
+  // oxlint-disable-next-line no-control-regex -- Remove attacker-controlled log control characters.
   return value.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 100);
 }
 

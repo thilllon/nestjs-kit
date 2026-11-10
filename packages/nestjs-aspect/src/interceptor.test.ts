@@ -148,7 +148,7 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
         @AfterReturning(targets)
         returned(_jp: JoinPoint<AnyShape>, value: unknown): void {
           received.push(value);
-          // biome-ignore lint/correctness/noVoidTypeReturn: the test returns a value that the interceptor must ignore
+          // the test returns a value that the interceptor must ignore
           return "ignored" as unknown as undefined;
         }
       }
@@ -642,7 +642,7 @@ describe("a lazy thenable returned by a synchronous method", () => {
       return this;
     }
 
-    // biome-ignore lint/suspicious/noThenProperty: the fixture is a lazy query builder
+    // oxlint-disable-next-line unicorn/no-thenable -- the fixture is a lazy query builder
     then(resolve: (rows: string[]) => unknown): unknown {
       executed++;
       return Promise.resolve(["row"]).then(resolve);

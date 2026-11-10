@@ -67,10 +67,13 @@ type Assert<T extends true> = T;
 `;
 
 // tsc runs in a separate process; the unit-test default of 5 s is too short.
-it("derives unregistered SDK sessions and requires a mapper for custom sessions", {
-  timeout: 30_000,
-}, async () => {
-  await compile(`
+it(
+  "derives unregistered SDK sessions and requires a mapper for custom sessions",
+  {
+    timeout: 30_000,
+  },
+  async () => {
+    await compile(`
 import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
 import type { Session, User } from "better-auth";
@@ -126,13 +129,17 @@ const unsafeContext: DatabaseHookMethod<"user.create", "before"> = (_data, _cont
 // @ts-expect-error Delete hooks cannot replace the deleted row.
 const deleteResult: DatabaseHookResult<"user.delete", "before"> = { data: { id: "u1" } };
 `);
-});
+  },
+);
 
 // tsc runs in a separate process; the unit-test default of 5 s is too short.
-it("preserves augmented default and named instances, plugin permissions, and raw hook types", {
-  timeout: 30_000,
-}, async () => {
-  await compile(`
+it(
+  "preserves augmented default and named instances, plugin permissions, and raw hook types",
+  {
+    timeout: 30_000,
+  },
+  async () => {
+    await compile(`
 import { betterAuth } from "better-auth";
 import { admin, customSession, organization } from "better-auth/plugins";
 import type { AuthLike, AuthOf, AuthSession, AuthUser, SessionOf, IsRegistered, AdminPermissions, OrgPermissions, AuthHookContext, EndpointPath, DatabaseHookData } from ${JSON.stringify(typesPath)};
@@ -168,4 +175,5 @@ const check: DefaultInstanceCheck<typeof primary> = {};
 // @ts-expect-error The default instance must match the registry.
 const wrongDefault: DefaultInstanceCheck<typeof named> = {};
 `);
-});
+  },
+);

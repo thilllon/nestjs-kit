@@ -108,9 +108,7 @@ export function grpcCarrier(
       const Native = (
         microservices as unknown as Record<
           string,
-          new (
-            message: string,
-          ) => Error & { getError(): object }
+          new (message: string) => Error & { getError(): object }
         >
       )[name];
       // Native gRPC exceptions require an opt-in Nest filter. Wrap their payload

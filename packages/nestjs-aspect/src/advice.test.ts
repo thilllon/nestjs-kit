@@ -26,7 +26,7 @@ const context: InterceptorContext = {
 describe("promiseAdapter", () => {
   it("supports promises and their subclasses, not other thenables", () => {
     class Deferred<T> extends Promise<T> {}
-    // biome-ignore lint/suspicious/noThenProperty: the test needs a thenable that is not a Promise
+    // oxlint-disable-next-line unicorn/no-thenable -- the test needs a thenable that is not a Promise
     const thenable = { then: () => undefined };
 
     expect(promiseAdapter.supports(Promise.resolve(1))).toBe(true);
@@ -155,6 +155,7 @@ describe("return value adapter registry", () => {
   it("returns the first registered adapter that supports the value", () => {
     const everything: ReturnValueAdapter = {
       ...promiseAdapter,
+      // oxlint-disable-next-line no-unused-vars -- a type predicate names the parameter it narrows
       supports: (value): value is unknown => true,
     };
     const registry = createReturnValueAdapterRegistry([

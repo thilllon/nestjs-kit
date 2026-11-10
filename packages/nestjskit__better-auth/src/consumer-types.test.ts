@@ -92,11 +92,14 @@ async function diagnostics(source: string): Promise<string> {
 }
 
 describe("public consumer types from source entries", () => {
-  it("derives SDK fallbacks and rejects unknown principal kinds without a registry", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "derives SDK fallbacks and rejects unknown principal kinds without a registry",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import type { Session, User } from "better-auth";
 import {
   AcceptPrincipals,
@@ -138,14 +141,18 @@ definePrincipalParam({ kind: "robot", reason: "ROBOT_REQUIRED", project: (value)
 // @ts-expect-error Policies judge only registered principal kinds.
 definePolicy<{ scope: string }, "robot">({ id: "robot", evaluate: () => allow() });
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("requires a user-id mapper for customSession in every registration shape", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "requires a user-id mapper for customSession in every registration shape",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { betterAuth } from "better-auth";
 import { customSession } from "better-auth/plugins";
 import { BetterAuthModule } from "@nestjs-kit/better-auth";
@@ -167,13 +174,17 @@ BetterAuthModule.forRoot({ name: "custom", auth: custom });
 // @ts-expect-error An asynchronous factory result needs session.userId.
 BetterAuthModule.forRootAsync({ name: "custom", useFactory: async () => ({ auth: custom }) });
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("keeps static and app-level options outside asynchronous factories", {
-    timeout: 30_000,
-  }, async () => {
-    const source = `
+  it(
+    "keeps static and app-level options outside asynchronous factories",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      const source = `
 import { betterAuth } from "better-auth";
 import { BetterAuthModule } from "@nestjs-kit/better-auth";
 import { expressPlatform } from "@nestjs-kit/better-auth/express";
@@ -200,24 +211,28 @@ BetterAuthModule.forRootAsync({ name: "worker", platforms: [expressPlatform()], 
 // @ts-expect-error Named registrations cannot own app transports.
 BetterAuthModule.forRoot({ name: "worker", auth, transports: [rpcTransport()] });
 `;
-    expect(await diagnostics(source)).toBe("");
-    expect(
-      await diagnostics(
-        source.replace(
-          "// @ts-expect-error Principal sources define providers and are static.\n",
-          "",
+      expect(await diagnostics(source)).toBe("");
+      expect(
+        await diagnostics(
+          source.replace(
+            "// @ts-expect-error Principal sources define providers and are static.\n",
+            "",
+          ),
         ),
-      ),
-    ).toContain(
-      "required in type 'StaticOptionMustBePassedToForRootAsync<\"principals\">'",
-    );
-  });
+      ).toContain(
+        "required in type 'StaticOptionMustBePassedToForRootAsync<\"principals\">'",
+      );
+    },
+  );
 
-  it("types WebSocket credential mappers per client and accepts custom RPC carriers", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "types WebSocket credential mappers per client and accepts custom RPC carriers",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { WsAdapter } from "@nestjs/platform-ws";
 import { defaultCarriers, grpcCarrier, rpcTransport, type RpcCredentialCarrier } from "@nestjs-kit/better-auth/microservices";
 import {
@@ -260,14 +275,18 @@ rpcTransport({ carriers: [grpcCarrier({ metadata: ["authorization"] }), ...defau
 // @ts-expect-error A carrier returns header values as strings.
 rpcTransport({ carriers: [{ id: "numeric", matches: () => true, headers: () => ({ authorization: 1 }) }] });
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("fits the Mercurius subscription context and keeps GraphQL credential mappers synchronous", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "fits the Mercurius subscription context and keeps GraphQL credential mappers synchronous",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { GraphQLModule } from "@nestjs/graphql";
 import { MercuriusDriver, type MercuriusDriverConfig } from "@nestjs/mercurius";
 import { betterAuth } from "better-auth";
@@ -303,14 +322,18 @@ apolloTransport({ subscriptionCredentials: async () => ({ authorization: "Bearer
 // @ts-expect-error Unknown coverage modes cannot silently disable reference resolver checks.
 mercuriusTransport({ federationCoverage: "ignore" });
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("types registered default and named instances, their permissions and custom principal kinds", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "types registered default and named instances, their permissions and custom principal kinds",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { betterAuth } from "better-auth";
 import { admin, customSession, organization } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
@@ -405,14 +428,18 @@ AcceptPrincipals("robot");
 void CurrentScopes;
 void scoped;
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("keeps hook bodies raw and database hook payloads and results SDK-typed", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "keeps hook bodies raw and database hook payloads and results SDK-typed",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { betterAuth, type GenericEndpointContext } from "better-auth";
 import {
   AfterDatabase,
@@ -481,14 +508,18 @@ export class Hooks {
   }
 }
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("accepts hook methods that declare fewer parameters or wider contexts", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "accepts hook methods that declare fewer parameters or wider contexts",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { Inject, Injectable } from "@nestjs/common";
 import { betterAuth } from "better-auth";
 import {
@@ -564,14 +595,18 @@ export class CompatibleHooks {
   }
 }
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("limits ./testing overrides to registered principal kinds and policy decisions", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "limits ./testing overrides to registered principal kinds and policy decisions",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
 import { allow, type AuthPrincipalBase, type PrincipalSource } from "@nestjs-kit/better-auth";
@@ -621,14 +656,18 @@ stampPrincipal(context, { kind: "robot", source: "test", userId: null });
 // @ts-expect-error Decision stubs return allow(), deny() or undefined.
 overrideDecisions(Test.createTestingModule({}), () => true);
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("runs conformance kits through node:test and rejects mismatched extension kinds", {
-    timeout: 30_000,
-  }, async () => {
-    expect(
-      await diagnostics(`
+  it(
+    "runs conformance kits through node:test and rejects mismatched extension kinds",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      expect(
+        await diagnostics(`
 import { describe, it } from "node:test";
 import { apiKey } from "@better-auth/api-key";
 import { ExpressAdapter } from "@nestjs/platform-express";
@@ -698,14 +737,18 @@ httpPlatformConformance({ platform: apiKeyPrincipal(), createHttpAdapter: () => 
 // @ts-expect-error The kit bootstraps through NestFactory or Test.createTestingModule().
 httpPlatformConformance({ platform: expressPlatform(), createHttpAdapter: () => new ExpressAdapter(), bootstrap: ["cli"] });
 `),
-    ).toBe("");
-  });
+      ).toBe("");
+    },
+  );
 
-  it("adds the API-key principal kind only to programs that import ./api-key", {
-    timeout: 30_000,
-  }, async () => {
-    const [withSubpath, rootOnly] = await Promise.all([
-      diagnostics(`
+  it(
+    "adds the API-key principal kind only to programs that import ./api-key",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      const [withSubpath, rootOnly] = await Promise.all([
+        diagnostics(`
 import { betterAuth } from "better-auth";
 import { AcceptPrincipals, BetterAuthModule, type AuthPrincipal, type PrincipalKind, type PrincipalOfKind } from "@nestjs-kit/better-auth";
 import { permission } from "@nestjs-kit/better-auth/admin";
@@ -727,7 +770,7 @@ if (principal.kind === "api-key") {
   void organizationId;
 }
 `),
-      diagnostics(`
+        diagnostics(`
 import { AcceptPrincipals, type PrincipalKind } from "@nestjs-kit/better-auth";
 import { permission } from "@nestjs-kit/better-auth/admin";
 
@@ -737,22 +780,26 @@ AcceptPrincipals("session", "api-key");
 // @ts-expect-error The API-key kind needs the ./api-key subpath in the program.
 permission({ user: ["ban"] }, { principals: ["api-key"] });
 `),
-    ]);
-    expect({ withSubpath, rootOnly }).toEqual({
-      withSubpath: "",
-      rootOnly: "",
-    });
-  });
+      ]);
+      expect({ withSubpath, rootOnly }).toEqual({
+        withSubpath: "",
+        rootOnly: "",
+      });
+    },
+  );
 
-  it("compiles every public entry and keeps database hook types under plugin-augmented registrations", {
-    timeout: 60_000,
-  }, async () => {
-    // Every entry, including ./plugin with its database hook dispatcher, compiles in the program.
-    const entries = Object.keys(publicPaths)
-      .map((specifier) => `import "${specifier}";`)
-      .join("\n");
-    const [registered, customStatements] = await Promise.all([
-      diagnostics(`
+  it(
+    "compiles every public entry and keeps database hook types under plugin-augmented registrations",
+    {
+      timeout: 60_000,
+    },
+    async () => {
+      // Every entry, including ./plugin with its database hook dispatcher, compiles in the program.
+      const entries = Object.keys(publicPaths)
+        .map((specifier) => `import "${specifier}";`)
+        .join("\n");
+      const [registered, customStatements] = await Promise.all([
+        diagnostics(`
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { admin, organization } from "better-auth/plugins";
@@ -825,7 +872,7 @@ export class Hooks {
   }
 }
 `),
-      diagnostics(`
+        diagnostics(`
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { admin, organization } from "better-auth/plugins";
@@ -843,10 +890,11 @@ declare module "@nestjs-kit/better-auth" {
   }
 }
 `),
-    ]);
-    expect({ registered, customStatements }).toEqual({
-      registered: "",
-      customStatements: "",
-    });
-  });
+      ]);
+      expect({ registered, customStatements }).toEqual({
+        registered: "",
+        customStatements: "",
+      });
+    },
+  );
 });

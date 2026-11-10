@@ -91,8 +91,9 @@ export interface HttpFixture {
  * through inferred variables that escape excess-property checks.
  */
 type FixtureRuntimeOptions = Partial<BetterAuthRuntimeOptions<AuthLike>> & {
-  readonly [K in keyof (BetterAuthStaticOptions &
-    BetterAuthAppOptions)]?: never;
+  readonly [
+    K in keyof (BetterAuthStaticOptions & BetterAuthAppOptions)
+  ]?: never;
 };
 export async function startHttpFixture(options: {
   auth: AuthLike;

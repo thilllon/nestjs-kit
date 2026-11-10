@@ -251,7 +251,7 @@ export interface EndpointHookDeclaration {
   readonly match: string | readonly string[] | HookPredicate | undefined;
   readonly options: Readonly<HookOptions>;
   readonly method: string | symbol;
-  // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
   readonly handler: Function;
   readonly declarationOrder: number;
 }
@@ -260,11 +260,11 @@ export interface DatabaseHookDeclaration {
   readonly target: DatabaseHookTarget;
   readonly options: Readonly<DbHookOptions>;
   readonly method: string | symbol;
-  // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
   readonly handler: Function;
   readonly declarationOrder: number;
 }
-// biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+// oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
 export function readHookMetadata(handler: Function): {
   readonly hooks: readonly EndpointHookDeclaration[];
   readonly databaseHooks: readonly DatabaseHookDeclaration[];

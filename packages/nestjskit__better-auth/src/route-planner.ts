@@ -32,7 +32,7 @@ function closest<T>(key: symbol, targets: readonly object[]): T | undefined {
   }
   return undefined;
 }
-// biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+// oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
 export function methodName(target: Type, handler: Function): string {
   for (
     let prototype = target.prototype;
@@ -79,7 +79,7 @@ function rejectEmptyGroups(
 }
 
 export class RoutePlanner {
-  // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+  // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
   private readonly cache = new WeakMap<Type, WeakMap<Function, RoutePlan>>();
 
   constructor(
@@ -89,7 +89,7 @@ export class RoutePlanner {
   ) {}
 
   private prepare(target: Type, method: string) {
-    // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+    // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
     const handler = Reflect.get(target.prototype, method) as Function;
     if (typeof handler !== "function") {
       throw new BetterAuthConfigurationError(
@@ -210,7 +210,7 @@ export class RoutePlanner {
   }
 
   plan(target: Type, method: string): RoutePlan {
-    // biome-ignore lint/complexity/noBannedTypes: Nest handler metadata preserves the framework function identity.
+    // oxlint-disable-next-line typescript/no-unsafe-function-type -- Nest handler metadata preserves the framework function identity.
     const handler = Reflect.get(target.prototype, method) as Function;
     let cache = this.cache.get(target);
     const previous = cache?.get(handler);

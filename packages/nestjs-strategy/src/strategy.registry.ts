@@ -19,9 +19,10 @@ export class UnknownStrategyError extends Error {
  * Strategies of one group, keyed by their `@Strategy()` names. `K` narrows
  * the keys when the group is declared with `defineStrategyGroup()`.
  */
-export class StrategyRegistry<T = unknown, K extends string = string>
-  implements Iterable<[key: K, strategy: T]>
-{
+export class StrategyRegistry<
+  T = unknown,
+  K extends string = string,
+> implements Iterable<[key: K, strategy: T]> {
   private readonly strategies: ReadonlyMap<string, T>;
 
   constructor(

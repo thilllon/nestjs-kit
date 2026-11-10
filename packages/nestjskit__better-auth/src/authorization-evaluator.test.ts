@@ -429,9 +429,8 @@ describe("invocation values", () => {
     ) => import("./auth-contracts.js").RequirementExpr[],
   ) {
     const { requirement } = await import("./auth-decorators.js");
-    const { INVOCATION_VALUES, AMBIGUOUS_INVOCATION_VALUE } = await import(
-      "./auth-tokens.js"
-    );
+    const { INVOCATION_VALUES, AMBIGUOUS_INVOCATION_VALUE } =
+      await import("./auth-tokens.js");
     const leaf = (
       id: string,
       values: [symbol, unknown][],

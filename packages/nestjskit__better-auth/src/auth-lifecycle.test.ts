@@ -322,9 +322,9 @@ describe("application lifecycle", () => {
     await module.close();
     expect(result).toBeInstanceOf(Error);
     expect(
-      await (await auth.$context).internalAdapter.findUserByEmail(
-        "blocked@example.com",
-      ),
+      await (
+        await auth.$context
+      ).internalAdapter.findUserByEmail("blocked@example.com"),
     ).toBeNull();
   });
 });

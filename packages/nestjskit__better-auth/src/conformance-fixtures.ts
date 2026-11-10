@@ -619,7 +619,7 @@ export function runConformance(
         } else {
           // No declared parameters: Jest would treat one as a done callback, and Vitest parses it for fixtures.
           runner.it(item.title, async function () {
-            // biome-ignore lint/complexity/noArguments: see above; the runner's test context is the first argument.
+            // oxlint-disable-next-line prefer-rest-params -- see above; the runner's test context is the first argument.
             const context = arguments[0] as
               | { skip?: (note?: string) => void }
               | undefined;

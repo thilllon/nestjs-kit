@@ -301,7 +301,9 @@ describe("native SDK database hook parity", () => {
         },
         plugins: [native ? nativePlugin : plugin],
       });
-      await (await auth.$context).internalAdapter.createOAuthUser(
+      await (
+        await auth.$context
+      ).internalAdapter.createOAuthUser(
         { name: "committed", email: "new@example.test", emailVerified: false },
         { providerId: "test", accountId: "one" },
       );

@@ -3,8 +3,7 @@
 // rejects at compile time. The tests evaluate the fixture and compare the
 // run-time guarantees of its pointcuts with their types.
 
-// biome-ignore-all lint/correctness/noUnusedVariables: the fixture declares classes and locals only to be type-checked
-// biome-ignore-all lint/correctness/noUnusedFunctionParameters: the fixture declares advice signatures without bodies
+/* oxlint-disable no-unused-vars -- the fixture declares classes, locals and advice signatures only to be type-checked */
 
 import { Reflector } from "@nestjs/core";
 import { describe, expect, expectTypeOf, it } from "vitest";
