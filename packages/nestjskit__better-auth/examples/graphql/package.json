@@ -17,10 +17,10 @@
   "dependencies": {
     "@apollo/server": "5.5.1",
     "@as-integrations/express5": "1.1.2",
-    "@nestjs/apollo": "14.0.2",
+    "@nestjs/apollo": "14.1.2",
     "@nestjs/common": "12.3.2",
     "@nestjs/core": "12.3.2",
-    "@nestjs/graphql": "14.0.2",
+    "@nestjs/graphql": "14.1.2",
     "@nestjs/platform-express": "12.3.2",
     "better-auth": "1.7.13",
     "graphql": "16.14.2",

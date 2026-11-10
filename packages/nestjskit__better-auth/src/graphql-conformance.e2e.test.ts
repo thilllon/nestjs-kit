@@ -682,11 +682,15 @@ function contextOption(
         }),
       };
     case "cached":
+      // The cached object keeps the first operation's request at req: the HTTP request, or the graphql-ws context
+      // that Nest would assign. @nestjs/apollo passes an object whose req is set through unchanged, and copies one
+      // without req for every operation from 14.0.3 on.
       return {
         context: mercurius
           ? (request: object, reply: object) =>
               (cached ??= { req: request, reply })
-          : (value: object) => (cached ??= { ...value }),
+          : (value: { req?: unknown }) =>
+              (cached ??= { ...value, req: value.req ?? value }),
       };
   }
 }
@@ -1441,6 +1445,26 @@ describe("GraphQL transport kit mutations", () => {
     ).rejects.toThrow(
       /a later caller of required read the first caller's principal/,
     );
+  });
+
+  it("skips T-stale-context for a harness whose cached context never serves a closed connection's context", async () => {
+    // A fresh context per operation is what @nestjs/apollo 14.0.3 and later make of a cached object without req.
+    const harness = apollo({ channel: "socket" });
+    const rebuilding: TransportConformanceOptions = {
+      ...harness,
+      createApp: (fixtures, auth, options) =>
+        harness.createApp(fixtures, auth, {
+          ...options,
+          ...(options.graphqlContext === "cached"
+            ? { graphqlContext: "fresh" }
+            : {}),
+        }),
+    };
+    await expect(caseOf(rebuilding, "T-stale-context").run()).resolves.toEqual({
+      skipped: expect.stringMatching(
+        /built a new context for its connection instead of serving the cached one/,
+      ),
+    });
   });
 
   it("fails T-subscription-credentials for a transport that ignores connectionParams credentials", async () => {
