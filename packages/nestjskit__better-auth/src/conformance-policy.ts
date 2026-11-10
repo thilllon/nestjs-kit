@@ -166,7 +166,7 @@ export function policyConformance(
         );
       }
       if (customSession && result.ok && isSessionLoss(result.value)) {
-        // RK2: customSession swallows the failure of its inner session read, the re-classification read included.
+        // RK2: before Better Auth 1.7.8, customSession swallows the failure of its inner session read, the re-classification read included.
         return;
       }
       assert.equal(
@@ -384,7 +384,7 @@ export function policyConformance(
           1,
           `two invocations of one request re-read the session ${sessionReads(probe, reads)} times`,
         );
-        // Storage failure at the same point: infrastructure (customSession: the documented 401, RK2).
+        // Storage failure at the same point: infrastructure (customSession before Better Auth 1.7.8: the documented 401, RK2).
         const failing = {
           key: {},
           headers: await sessionHeaders(auth, userId),
@@ -412,8 +412,10 @@ export function policyConformance(
         for (const outcome of outcomes) {
           if (customSession) {
             assert.ok(
-              outcome.ok && isSessionLoss(outcome.value),
-              `with customSession a storage failure must answer the documented 401: ${outcome.ok ? JSON.stringify(outcome.value) : String(outcome.error)}`,
+              outcome.ok
+                ? isSessionLoss(outcome.value)
+                : isInfrastructureError(outcome.error),
+              `with customSession a storage failure must be infrastructure or the documented 401: ${outcome.ok ? JSON.stringify(outcome.value) : String(outcome.error)}`,
             );
           } else {
             assert.ok(

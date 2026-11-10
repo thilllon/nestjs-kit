@@ -15,19 +15,19 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@nestjs/common": "12.1.1",
-    "@nestjs/core": "12.1.1",
-    "@nestjs/platform-fastify": "12.1.1",
-    "better-auth": "1.7.7",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-fastify": "12.3.2",
+    "better-auth": "1.7.13",
     "@nestjs-kit/better-auth": "workspace:*",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@swc/core": "1.16.18",
+    "@swc/core": "1.16.20",
     "@types/node": "24.19.2",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",
-    "vitest": "5.0.4"
+    "vitest": "5.0.5"
   }
 }

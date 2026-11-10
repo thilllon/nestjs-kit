@@ -695,7 +695,7 @@ Better Auth skips its own origin checks under `NODE_ENV=test` or a truthy `TEST`
 
 **Storage outages.** An outage never turns into a 401 or 403 where the library can tell it apart: resolution and policy failures surface as 5xx. Better Auth hides some outages itself:
 
-- With the `customSession` plugin, Better Auth catches storage errors inside `getSession`, so an outage during the guard's session read or a policy's re-read answers 401 instead of a 5xx.
+- Before Better Auth 1.7.8, the `customSession` plugin catches storage errors inside `getSession`, so an outage during the guard's session read or a policy's re-read answers 401 instead of a 5xx. Better Auth 1.7.8 and later propagate the error, and the request answers 5xx.
 - `verifyApiKey` reports storage failures as `INVALID_API_KEY`. `apiKeyPrincipal()` treats an `INVALID_API_KEY` that took longer than `outageProbe.slowMs` (default 500 ms) as an outage, and otherwise runs a probe (a read and a zero-row write on the key table, at most once per second per instance) before answering 401. Failures confined to the key's own row that return faster than `slowMs`, and keys stored only in secondary storage, still answer 401; set `slowMs` below your pool's lock and statement timeouts and above the cost of a custom key hasher. Better Auth logs `Failed to validate API key` at ERROR for every rejected key.
 - Public routes perform no principal I/O and keep working during an outage.
 

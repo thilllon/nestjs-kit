@@ -24,6 +24,10 @@ updates:
       # declaration generator requires.
       - dependency-name: "typescript"
         versions: [">=7"]
+      # Express 5's router depends on path-to-regexp ^8, and the Better Auth
+      # Express adapter matches routes with the same syntax.
+      - dependency-name: "path-to-regexp"
+        update-types: ["version-update:semver-major"]
     patterns: ["*"]
     multi-ecosystem-group: dependencies
     # Matches pnpm minimumReleaseAge so version updates pass the lockfile policy.
