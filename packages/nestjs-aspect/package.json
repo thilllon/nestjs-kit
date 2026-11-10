@@ -76,19 +76,19 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "@nestjs/common": "12.1.1",
-    "@nestjs/core": "12.1.1",
-    "@nestjs/platform-express": "12.1.1",
-    "@nestjs/testing": "12.1.1",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/testing": "12.3.2",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.25",
-    "tsdown": "0.23.1",
-    "@swc/core": "1.16.18",
+    "tsdown": "0.23.2",
+    "@swc/core": "1.16.20",
     "@types/node": "24.19.2",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",
-    "vitest": "5.0.4"
+    "vitest": "5.0.5"
   }
 }
