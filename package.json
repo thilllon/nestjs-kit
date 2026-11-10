@@ -19,8 +19,8 @@
     "@commitlint/config-conventional": "21.2.4",
     "@commitlint/types": "^21.2.3",
     "@types/node": "24.19.2",
-    "oxfmt": "0.75.0",
-    "oxlint": "1.90.0",
+    "oxfmt": "0.76.0",
+    "oxlint": "1.91.0",
     "turbo": "2.11.10",
     "typescript": "6.0.3"
   }
