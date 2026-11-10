@@ -3654,6 +3654,9 @@ export function transportConformance(
           : options.invoke(app, handler, headers);
       const later = await kitIdentity(env.auth);
       const laterCookie = { ...cookie(env), cookie: later.cookie };
+      // Handlers whose later caller read its own principal over a connection: the stale context carries only the closed
+      // connection's credentials, so that principal shows that the driver built a new context instead of serving it.
+      const rebuilt: string[] = [];
       await withApp(
         options,
         env,
@@ -3666,7 +3669,8 @@ export function transportConformance(
             const label = `a later caller of ${handler}`;
             if (connection) {
               // A connection that is closed when an operation starts lends it no credential: the operation runs
-              // anonymously, or with the later caller's own principal where the driver rebuilds its context.
+              // anonymously, or with the later caller's own principal where the driver rebuilds its context, which
+              // leaves nothing stale to check.
               assert.notEqual(
                 principalOf(result)?.userId,
                 env.identity.userId,
@@ -3678,6 +3682,9 @@ export function transportConformance(
                   principal === null || principal?.userId === later.userId,
                   `${label} read neither its own principal nor none: ${JSON.stringify(result.body)}`,
                 );
+                if (principal !== null) {
+                  rebuilt.push(handler);
+                }
               } else {
                 denied(result, 401, undefined, label);
               }
@@ -3718,6 +3725,12 @@ export function transportConformance(
         },
         { graphqlContext: "cached" },
       );
+      if (rebuilt.length > 0) {
+        return conformanceSkip(
+          `the later caller of ${rebuilt.join(" and ")} read its own principal, so the driver built a new context for its connection instead of serving the cached one, and no closed connection's context reached the transport`,
+        );
+      }
+      return undefined;
     },
   );
   /** The claimed site of each graph fixture handler of a booted app, by fixture name. */

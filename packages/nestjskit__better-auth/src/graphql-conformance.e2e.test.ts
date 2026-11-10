@@ -1447,6 +1447,26 @@ describe("GraphQL transport kit mutations", () => {
     );
   });
 
+  it("skips T-stale-context for a harness whose cached context never serves a closed connection's context", async () => {
+    // A fresh context per operation is what @nestjs/apollo 14.0.3 and later make of a cached object without req.
+    const harness = apollo({ channel: "socket" });
+    const rebuilding: TransportConformanceOptions = {
+      ...harness,
+      createApp: (fixtures, auth, options) =>
+        harness.createApp(fixtures, auth, {
+          ...options,
+          ...(options.graphqlContext === "cached"
+            ? { graphqlContext: "fresh" }
+            : {}),
+        }),
+    };
+    await expect(caseOf(rebuilding, "T-stale-context").run()).resolves.toEqual({
+      skipped: expect.stringMatching(
+        /built a new context for its connection instead of serving the cached one/,
+      ),
+    });
+  });
+
   it("fails T-subscription-credentials for a transport that ignores connectionParams credentials", async () => {
     await expect(
       caseOf(
