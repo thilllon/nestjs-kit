@@ -1,5 +1,11 @@
 # nestjs-slightly-better-auth
 
+## 2.1.1
+
+### Patch Changes
+
+- dc08030: The policy conformance kit accepts a 5xx for a storage outage under `customSession`, which Better Auth 1.7.8 and later report instead of a 401.
+
 ## 2.1.0
 
 ### Minor Changes
