@@ -682,11 +682,15 @@ function contextOption(
         }),
       };
     case "cached":
+      // The cached object keeps the first operation's request at req: the HTTP request, or the graphql-ws context
+      // that Nest would assign. @nestjs/apollo passes an object whose req is set through unchanged, and copies one
+      // without req for every operation from 14.0.3 on.
       return {
         context: mercurius
           ? (request: object, reply: object) =>
               (cached ??= { req: request, reply })
-          : (value: object) => (cached ??= { ...value }),
+          : (value: { req?: unknown }) =>
+              (cached ??= { ...value, req: value.req ?? value }),
       };
   }
 }

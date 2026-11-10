@@ -179,11 +179,16 @@ function acknowledged(
 }
 /**
  * A GraphQL context function for `mode` that returns a fresh object for every operation, or the
- * first operation's object for every later one (a cached context, a configuration error).
+ * first operation's object for every later one (a cached context, a configuration error). The
+ * cached object of the default modes keeps the first graphql-ws context at req, where Nest would
+ * assign it: @nestjs/apollo passes an object whose req is set through unchanged, and copies one
+ * without req for every operation from 14.0.3 on.
  */
 function graphqlContext(mode: Mode, shape: "cached" | "fresh") {
   const custom = mode === "apollo-custom" || mode === "apollo-fastify-custom";
   let cached: object | undefined;
+  const keep = (context: { req?: unknown }, value: object): object =>
+    "req" in value ? value : { ...value, req: context };
   const build = (
     context: {
       req?: unknown;
@@ -203,7 +208,7 @@ function graphqlContext(mode: Mode, shape: "cached" | "fresh") {
         : { ...context };
   return shape === "cached"
     ? (context: Parameters<typeof build>[0], reply?: unknown) =>
-        (cached ??= build(context, reply))
+        (cached ??= keep(context, build(context, reply)))
     : build;
 }
 function execute(client: Client, query: string): Promise<Result> {

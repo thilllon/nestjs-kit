@@ -388,7 +388,9 @@ export interface TransportConformanceOptions {
  * The GraphQL module's `context` option of a boot: 'fresh' is a function returning a new object that keeps what the driver
  * passes it (the native request, the graphql-ws context); 'plain-request' a function returning a new object whose `req` is a
  * plain object holding only the native request's cookie header; 'cached' a function returning the object it built on its
- * first call; 'static' an object.
+ * first call, which keeps that call's request at `req` (Apollo socket operations: the graphql-ws context Nest would
+ * assign), because @nestjs/apollo 14.0.3 and later copy a returned object without `req` for every operation; 'static' an
+ * object.
  */
 export type GraphqlContextShape =
   | "fresh"
