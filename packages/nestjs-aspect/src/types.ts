@@ -10,6 +10,9 @@ import type { ReflectableDecorator } from "@nestjs/core";
 
 export type AnyFunction = (...args: any[]) => any;
 
+/** Method contract of an annotation created with `{ async: true }`. */
+export type AsyncMethod = (...args: any[]) => Promise<unknown>;
+
 export type Class<T = any> = abstract new (...args: any[]) => T;
 
 /** Static shape a pointcut guarantees for every join point it matches. */
@@ -96,6 +99,11 @@ export interface Annotation<
    * whose pointcut refers to the annotation.
    */
   readonly requiresAdvice: boolean;
+  /**
+   * The annotation applies only to methods that return a promise; created
+   * with `{ async: true }`.
+   */
+  readonly async: boolean;
   // void marks an annotation that takes no value
   (...value: [V] extends [void] ? [] : [value: V]): MethodOrClassDecorator<F>;
 }

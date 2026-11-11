@@ -106,6 +106,7 @@ const publicApi = {
       "AspectOptions",
       "AspectReportLevel",
       "AsyncGuard",
+      "AsyncMethod",
       "BeanRef",
       "Class",
       "ClassFilter",

@@ -319,3 +319,72 @@ describe("advice that names an annotation in place of a pointcut", () => {
     ]);
   });
 });
+
+describe("an annotation created with async: true", () => {
+  it("advises the asynchronous methods it is applied to on a method and on a class", async () => {
+    const log: string[] = [];
+    const Timed = createAnnotation("Timed", { async: true });
+
+    @Injectable()
+    class ReportService {
+      @Timed()
+      async build(id: number): Promise<string> {
+        log.push(`build ${id}`);
+        return `report-${id}`;
+      }
+    }
+
+    @Injectable()
+    @Timed()
+    class ExportService {
+      async export(id: number): Promise<string> {
+        log.push(`export ${id}`);
+        return `export-${id}`;
+      }
+    }
+
+    const timedClass = P.withinAnnotated(Timed);
+
+    @Aspect()
+    class TimingAspect {
+      @Around(Timed)
+      async timeMethod(
+        joinPoint: ProceedingJoinPointOf<typeof Timed>,
+      ): Promise<unknown> {
+        log.push(`start ${String(joinPoint.signature.name)}`);
+        const result = await joinPoint.proceed();
+        log.push(`end ${String(joinPoint.signature.name)}`);
+        return result;
+      }
+
+      @Around(timedClass)
+      async timeClass(
+        joinPoint: ProceedingJoinPointOf<typeof timedClass>,
+      ): Promise<unknown> {
+        log.push(`start ${String(joinPoint.signature.name)}`);
+        const result = await joinPoint.proceed();
+        log.push(`end ${String(joinPoint.signature.name)}`);
+        return result;
+      }
+    }
+
+    const { moduleRef } = await initWoven({
+      providers: [ReportService, ExportService, TimingAspect],
+    });
+
+    await expect(moduleRef.get(ReportService).build(1)).resolves.toBe(
+      "report-1",
+    );
+    await expect(moduleRef.get(ExportService).export(2)).resolves.toBe(
+      "export-2",
+    );
+    expect(log).toEqual([
+      "start build",
+      "build 1",
+      "end build",
+      "start export",
+      "export 2",
+      "end export",
+    ]);
+  });
+});

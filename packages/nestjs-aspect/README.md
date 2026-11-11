@@ -81,11 +81,7 @@ import {
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
-export const Timed = createAnnotation<
-  "Timed",
-  void,
-  (...args: any[]) => Promise<unknown>
->("Timed");
+export const Timed = createAnnotation("Timed", { async: true });
 
 @Aspect()
 export class TimingAspect {
@@ -118,7 +114,7 @@ export class ReportService {
 export class ReportModule {}
 ```
 
-- **`Timed`** takes no value. Its third type parameter is the method contract: `@Timed()` applies only to a method that returns a promise, which the `async` advice returns in its place.
+- **`Timed`** takes no value. `async: true` gives it the method contract `(...args: any[]) => Promise<unknown>`: `@Timed()` applies only to a method that returns a promise, which the `async` advice returns in its place. On a synchronous method it is a compile error, and applying it throws `AspectConfigurationError` when the emitted return type of the method is no promise.
 - **`@Around(Timed)`** advises every method that carries `Timed`. `ProceedingJoinPointOf<typeof Timed>` types the join point from the contract; for an annotation that carries a value, `joinPoint.annotation(...)` returns that value.
 - **`ReportService`** has no timing code and does not import the aspect. A call of `build("r-1")` logs a line such as `ReportService.build("r-1") took 0.1 ms`.
 
@@ -287,7 +283,7 @@ A complete HTTP application with transaction, retry and call statistics aspects 
 
 ## Annotations
 
-`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes. Its type parameters are the name literal, the value type and the method contract the annotation accepts.
+`createAnnotation(name, options?)` creates a typed metadata decorator for methods and classes. Its type parameters are the name literal, the value type and the method contract the annotation accepts. The options are `async` and `requiresAdvice`.
 
 ```ts
 import { createAnnotation } from "nestjs-aspect";
@@ -299,22 +295,23 @@ export interface RetryOptions {
 
 export class TransientError extends Error {}
 
-export const Retryable = createAnnotation<
+export const Retryable = createAnnotation<"Retryable", RetryOptions>(
   "Retryable",
-  RetryOptions,
-  (...args: any[]) => Promise<unknown>
->("Retryable", { requiresAdvice: true });
+  {
+    async: true,
+    requiresAdvice: true,
+  },
+);
 
 export const RequiresPermission = createAnnotation<
   "RequiresPermission",
   string
 >("RequiresPermission", { requiresAdvice: true });
 
-export const Evicts = createAnnotation<
+export const Evicts = createAnnotation<"Evicts", (...args: any[]) => string>(
   "Evicts",
-  (...args: any[]) => string,
-  (...args: any[]) => Promise<unknown>
->("Evicts");
+  { async: true },
+);
 ```
 
 - **`Retryable`** takes a `RetryOptions` value and applies only to methods that return a promise; `@Retryable()` without a value or on a synchronous method is a compile error. It marks a call that is safe to repeat: a read, a write that carries an idempotency key, or a transaction that has rolled back. `TransientError` is the class of the errors after which another attempt can succeed.
@@ -326,8 +323,9 @@ export const Evicts = createAnnotation<
 
 - The name is the identity of an annotation: annotations created with the same name read and write the same metadata.
 - A method annotation belongs to the method that declares it; an override without the annotation does not carry it. A class annotation is inherited by subclasses. An annotation without a method contract also applies to accessors.
+- **`async`** restricts an annotation to methods that return a promise, the join points of asynchronous advice. Without a contract type parameter, the annotation has the contract `AsyncMethod`, `(...args: any[]) => Promise<unknown>`: `createAnnotation("Timed", { async: true })` infers the name, and `createAnnotation<"Retryable", RetryOptions>("Retryable", { async: true })` adds a value type. An explicit contract is kept as given: the type of the options does not check it, so options typed as `AnnotationOptions` can be forwarded with any contract. Applying the annotation throws `AspectConfigurationError` on an accessor and on a method whose emitted `design:returntype` metadata is a class other than `Promise`, a subclass of it or `Object`; a method whose metadata is absent or `undefined`, as without `emitDecoratorMetadata` or without a return type annotation, is accepted. On a class, the annotation checks the methods the class declares and inherits that are default join points, the lifecycle hooks excluded, and that have emitted `design:returntype` metadata. The compiler emits that metadata only for decorated members, so an undecorated method of the class is not checked, nor are the methods of a subclass declared later.
 - **`requiresAdvice`** states that an annotated member must be advised by an advisor that handles the annotation: one whose pointcut refers to it with `P.annotated`, `P.withinAnnotated` or `P.targetAnnotated`, in any composition, or whose pointcut comes from `P.matching` or is hand-written. When no such advisor exists, for example because the aspect is not registered, `init()` fails, and in every mode a call of the member raises `AspectConfigurationError` instead of running without the advice. The same holds after the application has closed or has failed to initialize: on an instance its container created, the call of a member that requires advice raises `AspectConfigurationError`.
-- `isAnnotation(value)` tells an annotation from other functions.
+- `isAnnotation(value)` tells an annotation from other functions; `annotation.async` and `annotation.requiresAdvice` report its options.
 - Decorators created with Nest's `Reflector.createDecorator()` are accepted by the advice decorators, `P.annotated`, `P.withinAnnotated`, `P.targetAnnotated` and `joinPoint.findAnnotation`.
 
 ## The example application
