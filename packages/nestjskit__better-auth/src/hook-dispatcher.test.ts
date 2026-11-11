@@ -164,8 +164,9 @@ describe("native SDK endpoint hook parity", () => {
     ]);
   });
 
+  // Better Auth 1.7.15 and later keep the cookies and headers a before-hook sets, with or without a short circuit.
   it.each([false, true])(
-    "matches before cookie/header loss with short circuit = %s",
+    "matches before-hook cookies and headers with short circuit = %s",
     async (shortCircuit) => {
       const hooks = [
         hook((ctx) => {
@@ -178,12 +179,8 @@ describe("native SDK endpoint hook parity", () => {
       }
       const native = await dispatch(true, hooks);
       expect(await dispatch(false, hooks)).toEqual(native);
-      expect(new Headers(native.headers).get("x-before")).toBe(
-        shortCircuit ? "yes" : null,
-      );
-      expect(new Headers(native.headers).getSetCookie()).toHaveLength(
-        shortCircuit ? 1 : 0,
-      );
+      expect(new Headers(native.headers).get("x-before")).toBe("yes");
+      expect(new Headers(native.headers).getSetCookie()).toHaveLength(1);
     },
   );
 

@@ -23,10 +23,10 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
-    "@swc/core": "1.16.20",
+    "@swc/core": "1.16.21",
     "@types/node": "24.19.2",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",
-    "vitest": "5.0.5"
+    "vitest": "5.1.0"
   }
 }
