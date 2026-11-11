@@ -78,6 +78,165 @@ describe("createAnnotation", () => {
   });
 });
 
+describe("createAnnotation with async: true", () => {
+  const Timed = createAnnotation("Timed", { async: true });
+
+  class Deferred<T> extends Promise<T> {}
+
+  it("applies to methods whose emitted return type is a promise", () => {
+    class ReportService {
+      @Timed()
+      async inferred() {
+        return 1;
+      }
+
+      @Timed()
+      annotated(): Promise<number> {
+        return Promise.resolve(1);
+      }
+
+      @Timed()
+      subclass(): Deferred<number> {
+        return new Deferred((resolve) => resolve(1));
+      }
+
+      @Timed()
+      // SWC emits this union as Object and tsc as Promise; neither rejects it.
+      union(): Promise<number> | Promise<string> {
+        return Promise.resolve(1);
+      }
+    }
+
+    for (const name of ["inferred", "annotated", "subclass", "union"]) {
+      expect(hasMethodAnnotation(Timed, ref(ReportService, name))).toBe(true);
+    }
+    expect(Timed.async).toBe(true);
+  });
+
+  it("rejects a method whose emitted return type is no promise", () => {
+    expect(() => {
+      class ReportService {
+        // @ts-expect-error Timed requires a method that returns a Promise
+        @Timed()
+        build(): string {
+          return "";
+        }
+      }
+      return ReportService;
+    }).toThrow(
+      new AspectConfigurationError(
+        "@Timed requires a method that returns a promise; ReportService.build returns String",
+      ),
+    );
+  });
+
+  it("does not reject a method without emitted return type", () => {
+    class ReportService {
+      @Timed()
+      unannotated() {
+        return Promise.resolve("");
+      }
+
+      manual(): string {
+        return "";
+      }
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      ReportService.prototype,
+      "manual",
+    );
+    (Timed() as (...args: unknown[]) => void)(
+      ReportService.prototype,
+      "manual",
+      descriptor,
+    );
+
+    expect(hasMethodAnnotation(Timed, ref(ReportService, "unannotated"))).toBe(
+      true,
+    );
+    expect(hasMethodAnnotation(Timed, ref(ReportService, "manual"))).toBe(true);
+  });
+
+  it("rejects an accessor", () => {
+    expect(() => {
+      class Settings {
+        // @ts-expect-error an async annotation does not apply to accessors
+        @Timed()
+        get size(): number {
+          return 0;
+        }
+      }
+      return Settings;
+    }).toThrow(
+      new AspectConfigurationError(
+        "@Timed applies to methods that return a promise; Settings.size is no method",
+      ),
+    );
+  });
+
+  it("checks the declared and inherited methods of a class it is applied to", () => {
+    class BaseReport {
+      @Audited()
+      format(): string {
+        return "";
+      }
+    }
+
+    expect(() => {
+      @Timed()
+      class Report extends BaseReport {
+        @Audited()
+        async build(): Promise<string> {
+          return "";
+        }
+
+        @Audited()
+        count(): number {
+          return 0;
+        }
+      }
+      return Report;
+    }).toThrow(
+      new AspectConfigurationError(
+        "@Timed on Report requires methods that return a promise: Report.count returns Number, BaseReport.format returns String",
+      ),
+    );
+  });
+
+  it("skips lifecycle hooks and methods without emitted return type on a class", () => {
+    @Timed()
+    class Report {
+      @Audited()
+      onModuleInit(): void {}
+
+      @Audited()
+      async build(): Promise<string> {
+        return "";
+      }
+
+      format(): string {
+        return "";
+      }
+    }
+
+    expect(hasClassAnnotation(Timed, Report)).toBe(true);
+  });
+
+  it("leaves annotations without the option unchecked", () => {
+    class ReportService {
+      @Audited()
+      build(): string {
+        return "";
+      }
+    }
+
+    expect(Audited.async).toBe(false);
+    expect(hasMethodAnnotation(Audited, ref(ReportService, "build"))).toBe(
+      true,
+    );
+  });
+});
+
 describe("findAnnotation", () => {
   it("returns the typed value stored on a method", () => {
     const match = findAnnotation(Retryable, ref(BaseService, "inherited"));

@@ -70,6 +70,7 @@ export type {
   ClassFilter,
   ClassRef,
   AnyFunction,
+  AsyncMethod,
   InterceptorContext,
   JoinPoint,
   JoinPointKind,

@@ -11,8 +11,11 @@ import {
   After,
   AfterReturning,
   AfterThrowing,
+  type Annotation,
+  type AnnotationOptions,
   type AnyFunction,
   type AnyShape,
+  type AsyncMethod,
   Around,
   Aspect,
   Before,
@@ -365,6 +368,87 @@ function declareUsage() {
     }
   }
 
+  // `{ async: true }` gives the annotation the contract AsyncMethod; the name
+  // is inferred.
+  const Timed = createAnnotation("Timed", { async: true });
+  const TimedRetry = createAnnotation<"TimedRetry", RetryOptions>(
+    "TimedRetry",
+    { async: true, requiresAdvice: true },
+  );
+  const Fetched = createAnnotation<
+    "Fetched",
+    void,
+    (id: number) => Promise<User>
+  >("Fetched", { async: true });
+  // Options typed as AnnotationOptions are accepted with any explicit
+  // contract, including a generic one a wrapper forwards.
+  function makeAnnotation<N extends string, V, F extends AnyFunction>(
+    name: N,
+    options: AnnotationOptions = {},
+  ): Annotation<V, F, N> {
+    return createAnnotation<N, V, F>(name, options);
+  }
+  const loggedOptions: AnnotationOptions = { requiresAdvice: true };
+  expectTypeOf(
+    createAnnotation<"Logged", void, (name: string) => string>(
+      "Logged",
+      loggedOptions,
+    ),
+  ).toEqualTypeOf<Annotation<void, (name: string) => string, "Logged">>();
+  expectTypeOf(
+    makeAnnotation<"Made", void, (name: string) => string>("Made"),
+  ).toEqualTypeOf<Annotation<void, (name: string) => string, "Made">>();
+
+  class ReportService {
+    @Timed()
+    @TimedRetry({ attempts: 2 })
+    async build(id: string): Promise<string> {
+      return id;
+    }
+
+    @Fetched()
+    async fetch(id: number): Promise<User> {
+      return new User(String(id));
+    }
+
+    // @ts-expect-error the value of TimedRetry is required and typed
+    @TimedRetry()
+    async other(): Promise<void> {}
+  }
+
+  @Aspect()
+  class TimingAspect {
+    @Around(Timed)
+    async time(
+      joinPoint: ProceedingJoinPointOf<typeof Timed>,
+    ): Promise<unknown> {
+      return joinPoint.proceed();
+    }
+
+    // @ts-expect-error around advice for an async annotation must return a Promise
+    @Around(Timed)
+    wrongReturn(joinPoint: ProceedingJoinPointOf<typeof Timed>): string {
+      return "x";
+    }
+  }
+
+  /** Never called: applying Timed to a synchronous method throws. */
+  function timeASynchronousMethod(): void {
+    class SyncService {
+      // @ts-expect-error Timed requires a method that returns a Promise
+      @Timed()
+      build(id: string): string {
+        return id;
+      }
+
+      // @ts-expect-error an async annotation does not apply to accessors
+      @Timed()
+      get size(): number {
+        return 0;
+      }
+    }
+  }
+
   /** Never called: the decorator throws when it is evaluated. */
   function adviseAClass(): void {
     @Aspect()
@@ -377,10 +461,13 @@ function declareUsage() {
 
   return {
     Audited,
+    Fetched,
     Logged,
     Retryable,
     Roles,
     Settings,
+    Timed,
+    TimedRetry,
     UserService,
     accountOps,
     allOf,
@@ -439,6 +526,44 @@ describe("public types", () => {
       >
     >();
     expectTypeOf<ShapeOf<Usage["Roles"]>>().toEqualTypeOf<AnyShape>();
+  });
+
+  it("give an async annotation the promise contract and infer its name", () => {
+    expectTypeOf<Usage["Timed"]>().toEqualTypeOf<
+      Annotation<void, AsyncMethod, "Timed">
+    >();
+    expectTypeOf<Usage["TimedRetry"]>().toEqualTypeOf<
+      Annotation<RetryOptions, AsyncMethod, "TimedRetry">
+    >();
+    expectTypeOf<Usage["Fetched"]>().toEqualTypeOf<
+      Annotation<void, (id: number) => Promise<User>, "Fetched">
+    >();
+    expectTypeOf<ShapeOf<Usage["Timed"]>["returns"]>().toEqualTypeOf<
+      Promise<unknown>
+    >();
+    expectTypeOf<
+      ShapeOf<Usage["Timed"]>["annotations"]
+    >().toEqualTypeOf<"Timed">();
+    expect(declareUsage().Timed.async).toBe(true);
+  });
+
+  it("keep the types of annotations created without the async option", () => {
+    expectTypeOf(createAnnotation("Plain")).toEqualTypeOf<
+      Annotation<void, AnyFunction, "Plain">
+    >();
+    expectTypeOf(
+      createAnnotation("Required", { requiresAdvice: true }),
+    ).toEqualTypeOf<Annotation<void, AnyFunction, "Required">>();
+    expectTypeOf(
+      createAnnotation<"Valued", string>("Valued", { async: false }),
+    ).toEqualTypeOf<Annotation<string, AnyFunction, "Valued">>();
+    expectTypeOf<Usage["Retryable"]>().toEqualTypeOf<
+      Annotation<RetryOptions, AsyncMethod, "Retryable">
+    >();
+    expectTypeOf<Usage["Logged"]>().toEqualTypeOf<
+      Annotation<void, (name: string) => string, "Logged">
+    >();
+    expect(declareUsage().Retryable.async).toBe(false);
   });
 
   it("type P.args as an argument tuple", () => {

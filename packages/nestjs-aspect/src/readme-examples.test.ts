@@ -63,11 +63,7 @@ import { RecordingLogger } from "./weaving-fixture";
 // Minimal example
 // ---------------------------------------------------------------------------
 
-const Timed = createAnnotation<
-  "Timed",
-  void,
-  (...args: any[]) => Promise<unknown>
->("Timed");
+const Timed = createAnnotation("Timed", { async: true });
 
 @Aspect()
 class TimingAspect {
@@ -248,22 +244,20 @@ interface RetryOptions {
 
 class TransientError extends Error {}
 
-const Retryable = createAnnotation<
-  "Retryable",
-  RetryOptions,
-  (...args: any[]) => Promise<unknown>
->("Retryable", { requiresAdvice: true });
+const Retryable = createAnnotation<"Retryable", RetryOptions>("Retryable", {
+  async: true,
+  requiresAdvice: true,
+});
 
 const RequiresPermission = createAnnotation<"RequiresPermission", string>(
   "RequiresPermission",
   { requiresAdvice: true },
 );
 
-const Evicts = createAnnotation<
+const Evicts = createAnnotation<"Evicts", (...args: any[]) => string>(
   "Evicts",
-  (...args: any[]) => string,
-  (...args: any[]) => Promise<unknown>
->("Evicts");
+  { async: true },
+);
 
 // ---------------------------------------------------------------------------
 // In-memory infrastructure, which the README names but does not show
