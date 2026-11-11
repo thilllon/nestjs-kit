@@ -537,7 +537,7 @@ export const clientCalls = clients.and(asynchronous);
 
 - `retryable`, `guarded` and `evicting` select the methods that carry an annotation.
 - `clients` selects every method of every provider of `ShopModule` whose token ends in `Client`: the six methods of `PaymentClient` and `ShippingClient`, which carry no decorator for it, and those of a client that joins the module later.
-- `asynchronous` selects the methods known to return a promise. `MethodRef.isAsync` is true for a method declared `async`, and for a decorated method whose declared return type is `Promise`; a method that returns a promise without either is not selected.
+- `asynchronous` selects the methods known to return a promise. `MethodRef.isAsync` is true for a method declared `async`, and for a decorated method whose declared return type is `Promise` or a subclass of it; a method that returns a promise without either is not selected.
 - `clientCalls` is the part of `clients` that returns a promise. It leaves out `settlements` and `track`, whose results settle after the method has returned, if they are consumed at all.
 
 Further rules:
@@ -785,18 +785,18 @@ export class RetryAspect {
 
 ### The join point
 
-| Member                                                  | Meaning                                                                                                       |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `joinPoint.target`                                      | The object the member is called on.                                                                           |
-| `joinPoint.args`                                        | The arguments, frozen. `proceedWith` runs the join point with other arguments.                                |
-| `joinPoint.signature`                                   | `name`, `declaringType` (the class that defines the member) and `targetType` (the woven class).               |
-| `joinPoint.kind`                                        | `"method"`, `"getter"` or `"setter"`.                                                                         |
-| `joinPoint.isAsync`                                     | True for an `async` method and for a decorated method whose declared return type is `Promise`.                |
-| `joinPoint.annotation(A)`                               | The value of an annotation the pointcut guarantees. A compile error when the pointcut does not guarantee `A`. |
-| `joinPoint.findAnnotation(A)`                           | The value of an annotation, or `undefined` when it is absent.                                                 |
-| `joinPoint.introduced(Token)`                           | The delegate of an [introduction](#introductions) for the target.                                             |
-| `joinPoint.toString()`                                  | `'ShippingClient.quote("Lisbon")'`: the member and every argument of the call.                                |
-| `joinPoint.proceed()`, `joinPoint.proceedWith(...args)` | Around advice only.                                                                                           |
+| Member                                                  | Meaning                                                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `joinPoint.target`                                      | The object the member is called on.                                                                                |
+| `joinPoint.args`                                        | The arguments, frozen. `proceedWith` runs the join point with other arguments.                                     |
+| `joinPoint.signature`                                   | `name`, `declaringType` (the class that defines the member) and `targetType` (the woven class).                    |
+| `joinPoint.kind`                                        | `"method"`, `"getter"` or `"setter"`.                                                                              |
+| `joinPoint.isAsync`                                     | True for an `async` method and for a decorated method whose declared return type is `Promise` or a subclass of it. |
+| `joinPoint.annotation(A)`                               | The value of an annotation the pointcut guarantees. A compile error when the pointcut does not guarantee `A`.      |
+| `joinPoint.findAnnotation(A)`                           | The value of an annotation, or `undefined` when it is absent.                                                      |
+| `joinPoint.introduced(Token)`                           | The delegate of an [introduction](#introductions) for the target.                                                  |
+| `joinPoint.toString()`                                  | `'ShippingClient.quote("Lisbon")'`: the member and every argument of the call.                                     |
+| `joinPoint.proceed()`, `joinPoint.proceedWith(...args)` | Around advice only.                                                                                                |
 
 Annotation lookups read the method, then the declaring class, then the target class.
 
@@ -1377,7 +1377,7 @@ around: after proceed
 
 - **Promises.** After-returning, after-throwing and after advice follow the settlement of a `Promise`, not the synchronous return of the promise object.
 - **Asynchronous advice.** Before, after, after-returning and after-throwing advice can be `async` when the join point is or may be asynchronous; the settlement the caller sees waits for the advice. On a join point known to be synchronous, `async` advice is a compile error; where the types cannot tell, it raises `AspectUsageError` when called.
-- **Asynchronous before advice** needs a method that is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise`. A method that returns a promise without either counts as synchronous for before advice.
+- **Asynchronous before advice** needs a method that is declared asynchronous: an `async` method, or a decorated method whose declared return type is `Promise` or a subclass of it. A method that returns a promise without either counts as synchronous for before advice.
 - **Other thenables**, such as a lazy query builder, are followed only when the method is declared asynchronous. Returned from any other method they reach the caller untouched and are not run.
 - **Around advice** receives what `proceed()` returns, a promise for an asynchronous method, and awaits it when it needs the result.
 

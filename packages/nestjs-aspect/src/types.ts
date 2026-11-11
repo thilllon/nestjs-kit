@@ -184,7 +184,7 @@ export interface MethodRef {
   readonly original: AnyFunction;
   /**
    * True for a native `async` function and for a method whose
-   * `design:returntype` metadata is `Promise`.
+   * `design:returntype` metadata is `Promise` or a subclass of it.
    */
   readonly isAsync: boolean;
 }

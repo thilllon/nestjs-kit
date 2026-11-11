@@ -625,7 +625,7 @@ The aspect instance is resolved when the chain reaches the advice: the provider 
 
 ### 7.3 Asynchronous join points and return value adapters
 
-A result is _asynchronous_ when a return value adapter supports it. The built-in `promiseAdapter` supports instances of `Promise`. A thenable that is not a `Promise` is followed as `Promise.resolve(value)` only when the method is declared asynchronous: a native `async` function, or a method whose `design:returntype` metadata is `Promise`. Returned from any other method it is a plain value and reaches the caller untouched.
+A result is _asynchronous_ when a return value adapter supports it. The built-in `promiseAdapter` supports instances of `Promise`. A thenable that is not a `Promise` is followed as `Promise.resolve(value)` only when the method is declared asynchronous: a native `async` function, or a method whose `design:returntype` metadata is `Promise` or a subclass of it. Returned from any other method it is a plain value and reaches the caller untouched.
 
 | Kind            | Interceptor                                                                                                                                                                                                                         |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

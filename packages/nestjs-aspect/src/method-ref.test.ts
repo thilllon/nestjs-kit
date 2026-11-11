@@ -7,6 +7,8 @@ function Marked(): MethodDecorator {
   return () => undefined;
 }
 
+class TrackedPromise<T> extends Promise<T> {}
+
 class Base {
   inherited(): string {
     return "base";
@@ -35,6 +37,11 @@ class Concrete extends Base {
   @Marked()
   declared(): Promise<number> {
     return Promise.resolve(1);
+  }
+
+  @Marked()
+  tracked(): TrackedPromise<number> {
+    return new TrackedPromise((resolve) => resolve(1));
   }
 
   plain(): number {
@@ -71,9 +78,10 @@ describe("createMethodRef", () => {
     );
   });
 
-  it("detects asynchronous methods natively and through design:returntype", () => {
+  it("detects asynchronous methods natively and through a design:returntype of Promise or a subclass of it", () => {
     expect(createMethodRef(classRef, "native").isAsync).toBe(true);
     expect(createMethodRef(classRef, "declared").isAsync).toBe(true);
+    expect(createMethodRef(classRef, "tracked").isAsync).toBe(true);
     expect(createMethodRef(classRef, "plain").isAsync).toBe(false);
   });
 

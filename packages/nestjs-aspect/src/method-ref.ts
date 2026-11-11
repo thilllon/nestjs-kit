@@ -76,9 +76,15 @@ function isAsyncMember(
   if (Object.prototype.toString.call(original) === "[object AsyncFunction]") {
     return true;
   }
+  const returnType: unknown = Reflect.getMetadata(
+    "design:returntype",
+    declaringType.prototype,
+    name,
+  );
   return (
-    Reflect.getMetadata("design:returntype", declaringType.prototype, name) ===
-    Promise
+    returnType === Promise ||
+    (typeof returnType === "function" &&
+      returnType.prototype instanceof Promise)
   );
 }
 
