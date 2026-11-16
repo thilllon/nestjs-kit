@@ -260,35 +260,36 @@ describe("overrideAuthGuard", () => {
     });
   });
 
-  it("cannot be replaced by overrideProvider plus overrideGuard of BetterAuthGuard", async () => {
-    const standIn: CanActivate = {
-      canActivate(ctx) {
-        stampPrincipal(ctx, principal("stand-in"));
-        return true;
-      },
-    };
-    const first = await fixture();
-    const providerThenGuard = first
-      .builder()
-      .overrideProvider(BetterAuthGuard)
-      .useValue(standIn)
-      .overrideGuard(BetterAuthGuard)
-      .useValue(standIn);
-    const url = await start(providerThenGuard);
-    // The later overrideGuard discarded the provider override: APP_GUARD runs the real guard.
-    expect((await get(`${url}/global`)).status).toBe(401);
-    const second = await fixture();
-    const guardThenProvider = second
-      .builder()
-      .overrideGuard(BetterAuthGuard)
-      .useValue(standIn)
-      .overrideProvider(BetterAuthGuard)
-      .useValue(standIn);
-    const otherUrl = await start(guardThenProvider);
-    expect((await get(`${otherUrl}/global`)).status).toBe(200);
-    // The @UseBetterAuth() injectable kept the real guard.
-    expect((await get(`${otherUrl}/explicit`)).status).toBe(401);
-  });
+  // @nestjs/testing 12.4.0 and later keep provider and enhancer overrides of one class apart; earlier
+  // versions keep only the later one, so one set of call sites runs the real guard.
+  it.each(["provider first", "guard first"])(
+    "replaces both call sites with overrideProvider plus overrideGuard of BetterAuthGuard, %s",
+    async (order) => {
+      const standIn: CanActivate = {
+        canActivate(ctx) {
+          stampPrincipal(ctx, principal("stand-in"));
+          return true;
+        },
+      };
+      const builder = (await fixture()).builder();
+      const overridden =
+        order === "provider first"
+          ? builder
+              .overrideProvider(BetterAuthGuard)
+              .useValue(standIn)
+              .overrideGuard(BetterAuthGuard)
+              .useValue(standIn)
+          : builder
+              .overrideGuard(BetterAuthGuard)
+              .useValue(standIn)
+              .overrideProvider(BetterAuthGuard)
+              .useValue(standIn);
+      const url = await start(overridden);
+      // The global APP_GUARD resolves the provider and @UseBetterAuth() resolves the enhancer.
+      expect((await get(`${url}/global`)).status).toBe(200);
+      expect((await get(`${url}/explicit`)).status).toBe(200);
+    },
+  );
 });
 
 describe("overridePrincipal and overrideDecisions on real routes", () => {

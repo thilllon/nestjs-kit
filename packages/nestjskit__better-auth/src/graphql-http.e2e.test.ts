@@ -302,6 +302,17 @@ function replyWithRequest(reply: unknown, request: unknown): object {
       })
     : { request };
 }
+// The drivers copy a context's own properties into a fresh object with the same prototype and then
+// assign the live reply onto it. An accessor on the prototype survives that copy and keeps its reply.
+function contextWithReply(req: unknown, reply: () => object): object {
+  const prototype = {
+    get reply() {
+      return reply();
+    },
+    set reply(_reply: unknown) {},
+  };
+  return Object.assign(Object.create(prototype) as object, { req });
+}
 async function securityFixture(
   driver: "apollo" | "mercurius" | "apollo-fastify",
   options: {
@@ -694,13 +705,10 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
     });
     it("allows harmless public unknown contexts while direct auth and guarded work fail closed", async () => {
       const f = await securityFixture(driver, {
-        context: (_request: unknown, reply: unknown) => ({
-          req: { headers: {} },
-          get reply() {
-            return replyWithRequest(reply, { raw: { method: "POST" } });
-          },
-          set reply(_reply: unknown) {},
-        }),
+        context: (_request: unknown, reply: unknown) =>
+          contextWithReply({ headers: {} }, () =>
+            replyWithRequest(reply, { raw: { method: "POST" } }),
+          ),
       });
       try {
         const { body } = await f.query("{ harmless direct guarded }");
@@ -750,13 +758,7 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
         context: (input: unknown, reply: unknown) => {
           const req =
             driver === "apollo" ? (input as { req: unknown }).req : input;
-          context ??= {
-            req,
-            get reply() {
-              return replyWithRequest(reply, req);
-            },
-            set reply(_reply: unknown) {},
-          };
+          context ??= contextWithReply(req, () => replyWithRequest(reply, req));
           return context;
         },
       });
@@ -789,13 +791,7 @@ describe.each(["apollo", "mercurius", "apollo-fastify"] as const)(
         context: (input: unknown, reply: unknown) => {
           const req =
             driver === "apollo" ? (input as { req: unknown }).req : input;
-          context ??= {
-            req,
-            get reply() {
-              return replyWithRequest(reply, req);
-            },
-            set reply(_reply: unknown) {},
-          };
+          context ??= contextWithReply(req, () => replyWithRequest(reply, req));
           return context;
         },
       });
