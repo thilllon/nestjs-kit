@@ -321,8 +321,8 @@ function planInstance(planner: RoutePlanner, context: ExecutionContext) {
 
 /**
  * Replace the guard and scope bodies everywhere with one override each of GUARD_CORE and SCOPE_CORE: the APP_GUARD
- * alias and every @UseBetterAuth()/@UseGuards(BetterAuthGuard) site delegate to the same collaborator, which
- * overrideProvider(BetterAuthGuard) plus overrideGuard(BetterAuthGuard) cannot achieve. With `{ principal }` the
+ * alias and every @UseBetterAuth()/@UseGuards(BetterAuthGuard) site delegate to the same collaborator, on every
+ * supported @nestjs/testing version and with the scope interceptor included. With `{ principal }` the
  * stand-in stamps the principal (for the handler's instance) and allows; with a CanActivate, that guard runs as the
  * whole guard body and may call stampPrincipal(); an object with a canActivate method is always treated as a guard,
  * even when it also has a `principal` property. The stand-in interceptor opens the same transport-described scope
