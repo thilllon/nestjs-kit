@@ -68,9 +68,9 @@
     "@types/pg": "^8.23.1"
   },
   "devDependencies": {
-    "@nestjs/common": "12.4.0",
-    "@nestjs/core": "12.4.0",
-    "@nestjs/testing": "12.4.0",
+    "@nestjs/common": "12.5.0",
+    "@nestjs/core": "12.5.0",
+    "@nestjs/testing": "12.5.0",
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1",
     "@arethetypeswrong/core": "0.18.5",

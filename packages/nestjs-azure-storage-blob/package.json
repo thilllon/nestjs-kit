@@ -61,9 +61,9 @@
     "@azure/storage-blob": "^12.33.0"
   },
   "devDependencies": {
-    "@nestjs/common": "12.4.0",
-    "@nestjs/core": "12.4.0",
-    "@nestjs/testing": "12.4.0",
+    "@nestjs/common": "12.5.0",
+    "@nestjs/core": "12.5.0",
+    "@nestjs/testing": "12.5.0",
     "@azure/storage-blob": "12.34.0",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.25",

@@ -61,10 +61,10 @@
     "@aws-sdk/client-s3": "^3.1135.0"
   },
   "devDependencies": {
-    "@nestjs/common": "12.4.0",
-    "@nestjs/core": "12.4.0",
-    "@nestjs/testing": "12.4.0",
-    "@aws-sdk/client-s3": "3.1164.0",
+    "@nestjs/common": "12.5.0",
+    "@nestjs/core": "12.5.0",
+    "@nestjs/testing": "12.5.0",
+    "@aws-sdk/client-s3": "3.1169.0",
     "@arethetypeswrong/core": "0.18.5",
     "publint": "0.3.25",
     "tsdown": "0.23.7",
