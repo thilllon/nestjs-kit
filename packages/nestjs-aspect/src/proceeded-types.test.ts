@@ -87,6 +87,10 @@ class Users {
   reset(): void {}
 
   async flush(): Promise<void> {}
+
+  status(): { proceeded: boolean; value: string } {
+    return { proceeded: true, value: "ok" };
+  }
 }
 
 /** Declares the annotations, pointcuts and aspects of the fixture. */
@@ -119,6 +123,7 @@ function declareFixture() {
   const current = P.method(Users, "current");
   const reset = P.method(Users, "reset");
   const flush = P.method(Users, "flush");
+  const status = P.method(Users, "status");
 
   let stored: Proceeded<User> | undefined;
 
@@ -242,10 +247,27 @@ function declareFixture() {
     unionReplacement(joinPoint: ProceedingJoinPointOf<typeof greetOrLoad>) {
       return joinPoint.replaceResult("cached");
     }
+
+    // @ts-expect-error a literal with the result's members is no value the join point produced
+    @Around(status)
+    statusLiteral(joinPoint: ProceedingJoinPointOf<typeof status>) {
+      void joinPoint;
+      return { proceeded: true, value: "forged" };
+    }
   }
 
   @Aspect()
   class Accepted {
+    @Around(status)
+    readsResultMembers(joinPoint: ProceedingJoinPointOf<typeof status>) {
+      const result = joinPoint.proceed();
+      const value: string = result.value;
+      const proceeded: boolean = result.proceeded;
+      void value;
+      void proceeded;
+      return result;
+    }
+
     @Around(Timed)
     async time(joinPoint: ProceedingJoinPointOf<typeof Timed>) {
       const started = performance.now();

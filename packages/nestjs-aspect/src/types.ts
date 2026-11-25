@@ -313,14 +313,16 @@ export interface JoinPoint<S extends Shape> {
 }
 
 declare const PROCEEDED: unique symbol;
+declare const BRAND: unique symbol;
 
 /**
  * Nominal brand of a value that `proceed()` produced. The private member
  * makes the class nominal: no object literal, spread or other value is
- * assignable to it. The class exists only as a type.
+ * assignable to it. Its key is an unexported symbol, so it cannot collide
+ * with a member of the result. The class exists only as a type.
  */
 declare class ProceededBrand<out R> {
-  private readonly proceeded: true;
+  private readonly [BRAND]: true;
   /** Phantom member that keeps `R` in the published declarations. */
   readonly [PROCEEDED]?: R;
 }
