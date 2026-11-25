@@ -67,9 +67,9 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "@nestjs/common": "12.4.0",
-    "@nestjs/core": "12.4.0",
-    "@nestjs/testing": "12.4.0",
+    "@nestjs/common": "12.5.0",
+    "@nestjs/core": "12.5.0",
+    "@nestjs/testing": "12.5.0",
     "iovalkey": "0.4.0",
     "ioredis": "6.0.0",
     "redis": "6.3.1",
