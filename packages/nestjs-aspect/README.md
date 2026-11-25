@@ -78,6 +78,7 @@ import {
   Aspect,
   AspectModule,
   createAnnotation,
+  type ProceededOf,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -88,7 +89,9 @@ export class TimingAspect {
   private readonly logger = new Logger(TimingAspect.name);
 
   @Around(Timed)
-  async time(joinPoint: ProceedingJoinPointOf<typeof Timed>): Promise<unknown> {
+  async time(
+    joinPoint: ProceedingJoinPointOf<typeof Timed>,
+  ): ProceededOf<typeof Timed> {
     const started = performance.now();
     try {
       return await joinPoint.proceed();
@@ -557,13 +560,13 @@ Further rules:
 
 `@Aspect({ order?, instantiation? })` marks a class as an aspect and as a Nest provider; list it in the `providers` of a module. Each advice decorator takes a pointcut and checks the signature of the method it decorates against it. `JoinPointOf<typeof pointcut>` and `ProceedingJoinPointOf<typeof pointcut>` are the join point types of a pointcut. An annotation `A`, created by `createAnnotation()` or `Reflector.createDecorator()`, stands for the pointcut `P.annotated(A)`: `@Around(A)` is `@Around(P.annotated(A))`, and `JoinPointOf<typeof A>` is the join point type of `P.annotated(A)`.
 
-| Decorator                                 | Advice signature                                                                | Semantics                                                                                                           |
-| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `@Before(pointcut)`                       | `(joinPoint: JoinPointOf<typeof pointcut>)`                                     | Runs before the join point. An error prevents the join point and propagates.                                        |
-| `@AfterReturning(pointcut)`               | `(joinPoint: JoinPointOf<typeof pointcut>, result)`                             | Runs after a normal completion with the result. It cannot replace the result.                                       |
-| `@AfterThrowing(pointcut, { throwing? })` | `(joinPoint: JoinPointOf<typeof pointcut>, error)`                              | Runs when the join point fails, with `throwing` only for errors of that class. The error propagates afterwards.     |
-| `@After(pointcut)`                        | `(joinPoint: JoinPointOf<typeof pointcut>)`                                     | Runs after the join point, whatever its outcome.                                                                    |
-| `@Around(pointcut)`                       | `(joinPoint: ProceedingJoinPointOf<typeof pointcut>)` returning the result type | Surrounds the join point: it decides whether and how often the join point runs, and its return value is the result. |
+| Decorator                                 | Advice signature                                                                               | Semantics                                                                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `@Before(pointcut)`                       | `(joinPoint: JoinPointOf<typeof pointcut>)`                                                    | Runs before the join point. An error prevents the join point and propagates.                                        |
+| `@AfterReturning(pointcut)`               | `(joinPoint: JoinPointOf<typeof pointcut>, result)`                                            | Runs after a normal completion with the result. It cannot replace the result.                                       |
+| `@AfterThrowing(pointcut, { throwing? })` | `(joinPoint: JoinPointOf<typeof pointcut>, error)`                                             | Runs when the join point fails, with `throwing` only for errors of that class. The error propagates afterwards.     |
+| `@After(pointcut)`                        | `(joinPoint: JoinPointOf<typeof pointcut>)`                                                    | Runs after the join point, whatever its outcome.                                                                    |
+| `@Around(pointcut)`                       | `(joinPoint: ProceedingJoinPointOf<typeof pointcut>)` returning `ProceededOf<typeof pointcut>` | Surrounds the join point: it decides whether and how often the join point runs, and its return value is the result. |
 
 Use the least powerful advice that does the job: an after-returning advice cannot forget to call `proceed()`. The aspects below advise [the example application](#the-example-application) with the pointcuts of [Pointcuts](#pointcuts); [Ordering](#ordering) explains their `order` values.
 
@@ -751,15 +754,29 @@ The alternative is a `try`/`finally` with the two calls in every client method.
 
 Around advice surrounds the join point. `joinPoint.proceed()` runs the rest of the chain and the join point, and can be called zero times, once or several times; `joinPoint.proceedWith(...args)` runs it with other arguments. The value the advice returns is the result of the call. `retryable` guarantees the `Retryable` annotation, so `joinPoint.annotation(Retryable)` is typed as `RetryOptions`.
 
+`proceed()` and `proceedWith()` return the declared result typed as `Proceeded<T>`, a type that only the join point produces, and `@Around` requires the advice to return such a value. The advice can return it, await it, retry it, run it inside a transaction or pass it through Observable operators that keep the emitted values, and it can read the members of the result; it cannot return another object, a copy, a wrapper or a literal in its place. The check is on provenance: a `Proceeded<User>` from one join point is accepted where another join point declares `User`.
+
+- `Promise<T>`, `PromiseLike<T>` and `Observable<T>` carry the brand on `T`, so `await`, `then` and `pipe` keep it. A subclass of `Promise` or `Observable`, such as a `BehaviorSubject`, is typed by its base type, and `proceed()` hides the members the subclass adds; `@Around` then requires a value of the subclass and does not check where it comes from.
+- `null`, `undefined` and `void` carry no brand. Advice on a method that returns `void` or `Promise<void>` returns nothing to skip the call.
+- `joinPoint.replaceResult(value)` returns `value` unchanged, typed as `Proceeded`: the explicit way to return a value that `proceed()` did not produce, such as a cache hit, a fallback or the skipped call of a join point whose result is unknown. For a `Promise` or `Observable` result it takes the settled value; asynchronous advice returns it and synchronous advice wraps it in `Promise.resolve` or `of`. The compiler checks `value` against the declared result only, which is wider than the actual result of a method that a subtype contract or an override reaches, and accepts any value for an unknown result.
+- For `a.or(b)` of methods with different results, the advice returns what `proceed()` returns. `replaceResult` accepts a value of either result without checking which method the call reached; it is rejected when one method is synchronous and the other asynchronous.
+- An annotation without a method contract, such as `createAnnotation("Logged")`, declares the result `any`, so `proceed()` returns `any` and a value derived from it, such as a member of the result or a computed value, is not checked. An object literal or another value of a known type is still rejected.
+- `ProceededOf<typeof pointcut>` spells the return type of the advice. Asynchronous advice on a join point whose result is unknown declares `Promise<Proceeded<unknown>>`. A generic helper that passes on the result of `proceed()` declares `Proceeded<S["returns"]>`.
+
 ```ts
-import { Around, Aspect, type ProceedingJoinPointOf } from "nestjs-aspect";
+import {
+  Around,
+  Aspect,
+  type ProceededOf,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
 
 @Aspect({ order: 20 })
 export class RetryAspect {
   @Around(retryable)
   async retry(
     joinPoint: ProceedingJoinPointOf<typeof retryable>,
-  ): Promise<unknown> {
+  ): ProceededOf<typeof retryable> {
     const { attempts, backoffMilliseconds } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -796,11 +813,14 @@ export class RetryAspect {
 | `joinPoint.findAnnotation(A)`                           | The value of an annotation, or `undefined` when it is absent.                                                      |
 | `joinPoint.introduced(Token)`                           | The delegate of an [introduction](#introductions) for the target.                                                  |
 | `joinPoint.toString()`                                  | `'ShippingClient.quote("Lisbon")'`: the member and every argument of the call.                                     |
-| `joinPoint.proceed()`, `joinPoint.proceedWith(...args)` | Around advice only.                                                                                                |
+| `joinPoint.proceed()`, `joinPoint.proceedWith(...args)` | Around advice only. The result, typed as `Proceeded<T>`.                                                           |
+| `joinPoint.replaceResult(value)`                        | Around advice only. `value` unchanged, typed as a result the join point produced.                                  |
 
 Annotation lookups read the method, then the declaring class, then the target class.
 
-The compiler rejects an annotation on a method outside its contract, a missing or mistyped annotation value, around advice with the wrong return type, `proceedWith` arguments that do not fit the method, an after-returning result or after-throwing error parameter of the wrong type, asynchronous advice on a join point known to be synchronous, and `P.method` with a name that is not a method of the class.
+The compiler rejects an annotation on a method outside its contract, a missing or mistyped annotation value, around advice that returns a value `proceed()` or `replaceResult()` did not produce, `proceedWith` arguments that do not fit the method, an after-returning result or after-throwing error parameter of the wrong type, asynchronous advice on a join point known to be synchronous, and `P.method` with a name that is not a method of the class.
+
+The result check does not cover a cast such as `as any`, a value typed `any` such as the result of `JSON.parse` or a value derived from `proceed()` of an annotation without a method contract, a mutation of the result that `proceed()` returned, an interface that extends `Proceeded<T>`, an overloaded advice method, `replaceResult` on a join point whose result is unknown or wider than the method result, as for a contract, an override or `or()`, and a `MethodInterceptor`, whose `invoke()` returns `unknown`.
 
 ## Recipes
 
@@ -886,6 +906,7 @@ import {
   Aspect,
   createAnnotation,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -906,7 +927,7 @@ export class TransactionAspect {
   @Around(transactional)
   run(
     joinPoint: ProceedingJoinPointOf<typeof transactional>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     return this.database.transactional(
       async () => joinPoint.proceed(),
       joinPoint.findAnnotation(Transactional),
@@ -1023,6 +1044,7 @@ import {
   Around,
   Aspect,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -1046,13 +1068,13 @@ export class JobAspect {
   @Around(scheduled)
   async run(
     joinPoint: ProceedingJoinPointOf<typeof scheduled>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const name =
       joinPoint.findAnnotation(Scheduled)?.name ??
       String(joinPoint.signature.name);
     const release = await this.locks.acquire(name);
     if (!release) {
-      return undefined;
+      return joinPoint.replaceResult(undefined);
     }
     try {
       return await this.actor.run(`job:${name}`, async () =>
@@ -1157,6 +1179,7 @@ import {
   Aspect,
   AspectModule,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 
@@ -1243,7 +1266,7 @@ export class RepositoryTimingAspect {
   @Around(repositoryCalls)
   async time(
     joinPoint: ProceedingJoinPointOf<typeof repositoryCalls>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const { targetType, name } = joinPoint.signature;
     const member = `${targetType.name}.${String(name)}`;
     const started = performance.now();
@@ -1564,7 +1587,12 @@ A `perClass` aspect holds the state of one advised class in plain fields. This c
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { Around, Aspect, type ProceedingJoinPointOf } from "nestjs-aspect";
+import {
+  Around,
+  Aspect,
+  type Proceeded,
+  type ProceedingJoinPointOf,
+} from "nestjs-aspect";
 
 @Injectable()
 export class BreakerSettings {
@@ -1586,7 +1614,7 @@ export class CircuitBreakerAspect {
   @Around(clientCalls)
   async guard(
     joinPoint: ProceedingJoinPointOf<typeof clientCalls>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     if (Date.now() < this.openUntil) {
       const { targetType } = joinPoint.signature;
       throw new CircuitOpenError(`${targetType.name} is unavailable`);
@@ -1819,6 +1847,7 @@ Independent of `strict`, `compile()` fails when `AspectModule` is registered mor
 | `returning`, `throwing`                                             | The second advice parameter; `{ throwing: ErrorClass }`                  |
 | `JoinPoint`, `ProceedingJoinPoint`                                  | `JoinPointOf<typeof pointcut>`, `ProceedingJoinPointOf<typeof pointcut>` |
 | `proceed()`, `proceed(args)`                                        | `joinPoint.proceed()`, `joinPoint.proceedWith(...args)`                  |
+| `Object` result of around advice                                    | `Proceeded<T>`; `joinPoint.replaceResult(value)` for another value       |
 | `args(..)` and `@annotation(..)` binding                            | `joinPoint.args`, `joinPoint.annotation(A)`, typed by the pointcut       |
 | Java annotation                                                     | `createAnnotation()`, or `Reflector.createDecorator()`                   |
 | `@Order`, `Ordered`                                                 | `@Aspect({ order })`, `order` of an advisor                              |

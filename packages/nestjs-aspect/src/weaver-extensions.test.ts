@@ -428,7 +428,7 @@ describe("keyed aspect instances", () => {
       @Around(pointcut)
       async trace(joinPoint: ProceedingJoinPoint<AnyShape>) {
         this.orders.push(String(joinPoint.args[0]));
-        const result: unknown = await joinPoint.proceed();
+        const result = await joinPoint.proceed();
         traces.push([tracers.indexOf(this), [...this.orders]]);
         return result;
       }

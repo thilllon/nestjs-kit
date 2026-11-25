@@ -18,6 +18,7 @@ import type {
   MethodInterceptor,
   Pointcut,
   ProceedingJoinPoint,
+  Proceeded,
 } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 
@@ -106,7 +107,7 @@ describe("advice order across aspects", () => {
     @Aspect({ order: 5 })
     class DefinedFirst {
       @Around(pointcut)
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         log.push("aspect defined first: in");
         const result = joinPoint.proceed();
         log.push("aspect defined first: out");
@@ -407,11 +408,13 @@ function traced(
   @Aspect(order === undefined ? {} : { order })
   class Tracing {
     @Around(pointcut)
-    async around(joinPoint: ProceedingJoinPoint<AnyShape>): Promise<unknown> {
+    async around(
+      joinPoint: ProceedingJoinPoint<AnyShape>,
+    ): Promise<Proceeded<unknown>> {
       log.push(`${label} around`);
       const value = await joinPoint.proceed();
       log.push(`${label} resumed`);
-      return `${String(value)} ${label}`;
+      return joinPoint.replaceResult(`${String(value)} ${label}`);
     }
 
     @Before(pointcut)

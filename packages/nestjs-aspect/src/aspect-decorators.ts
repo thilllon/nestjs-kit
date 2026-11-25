@@ -10,6 +10,7 @@ import type {
   AdviceMetadata,
   AnnotationLike,
   AnyShape,
+  AroundResult,
   AspectMetadata,
   AspectOptions,
   Class,
@@ -206,10 +207,13 @@ type AfterThrowingDecorator<S extends Shape, E> = AdviceDecorator<
   (joinPoint: JoinPoint<S>, error: E) => AdviceResult<S>
 >;
 
-/** Around advice and its parameter for the shape `S`. */
+/**
+ * Around advice and its parameter for the shape `S`. The advice returns a
+ * value that `proceed()`, `proceedWith()` or `replaceResult()` produced.
+ */
 type AroundDecorator<S extends Shape> = AdviceDecorator<
   AnyShape,
-  (joinPoint: ProceedingJoinPoint<S>) => S["returns"]
+  (joinPoint: ProceedingJoinPoint<S>) => AroundResult<S["returns"]>
 >;
 
 /**
@@ -275,7 +279,11 @@ export function AfterThrowing(
   return adviceDecorator("afterThrowing", pointcut, options?.throwing);
 }
 
-/** Surrounds the join point; the return value becomes the caller's result. */
+/**
+ * Surrounds the join point; the return value becomes the caller's result.
+ * The advice returns `AroundResult` of the declared result: what
+ * `joinPoint.proceed()` returns, or `joinPoint.replaceResult(value)`.
+ */
 export function Around<S extends Shape>(
   pointcut: Pointcut<S>,
 ): AroundDecorator<S>;

@@ -13,6 +13,7 @@ import {
   createAnnotation,
   type JoinPointOf,
   Pointcut as P,
+  type ProceededOf,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { observableAdapter } from "nestjs-aspect/rxjs";
@@ -67,7 +68,7 @@ class RetryAspect {
   @Around(retryable)
   async retry(
     joinPoint: ProceedingJoinPointOf<typeof retryable>,
-  ): Promise<unknown> {
+  ): ProceededOf<typeof retryable> {
     const { attempts } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {

@@ -189,7 +189,7 @@ describe("advice decorators", () => {
       @After(Roles)
       @AfterReturning(Roles)
       @AfterThrowing(Audited, { throwing: RangeError })
-      advise(): void {}
+      advise(): any {}
     }
 
     const classRef = createClassRef(Service);

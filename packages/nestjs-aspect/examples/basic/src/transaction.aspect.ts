@@ -2,6 +2,7 @@ import {
   Around,
   Aspect,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { Database } from "./database.js";
@@ -24,7 +25,7 @@ export class TransactionAspect {
   @Around(transactional)
   run(
     joinPoint: ProceedingJoinPointOf<typeof transactional>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     return this.database.transactional(() => joinPoint.proceed());
   }
 }

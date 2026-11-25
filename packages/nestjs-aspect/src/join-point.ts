@@ -9,6 +9,7 @@ import type {
   Class,
   JoinPoint,
   MethodInvocation,
+  Proceeded,
   ProceedingJoinPoint,
 } from "./types";
 
@@ -79,10 +80,13 @@ export function createProceedingJoinPoint(
   return {
     ...createJoinPoint(invocation),
     proceed() {
-      return invocation.cloneFromHere().proceed();
+      return invocation.cloneFromHere().proceed() as Proceeded<unknown>;
     },
     proceedWith(...args: readonly unknown[]) {
-      return invocation.cloneFromHere(args).proceed();
+      return invocation.cloneFromHere(args).proceed() as Proceeded<unknown>;
+    },
+    replaceResult(value: unknown) {
+      return value as Proceeded<unknown>;
     },
   };
 }

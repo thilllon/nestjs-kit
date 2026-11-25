@@ -501,7 +501,9 @@ describe("dispatcher stubs", () => {
       @Around(getters)
       upperCase(joinPoint: ProceedingJoinPointOf<typeof getters>) {
         log.push(`${joinPoint.kind} ${String(joinPoint.signature.name)}`);
-        return String(joinPoint.proceed()).toUpperCase();
+        return joinPoint.replaceResult(
+          String(joinPoint.proceed()).toUpperCase(),
+        );
       }
     }
 

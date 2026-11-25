@@ -18,6 +18,7 @@ import type {
   JoinPoint,
   MethodInterceptor,
   ProceedingJoinPointOf,
+  ProceededOf,
 } from "./types";
 import { closeWoven, compileWoven, initWoven } from "./weaving-fixture";
 
@@ -478,7 +479,7 @@ describe("calls in flight when an application closes", () => {
       @Around(transfers)
       async around(
         joinPoint: ProceedingJoinPointOf<typeof transfers>,
-      ): Promise<string> {
+      ): ProceededOf<typeof transfers> {
         log.push("around enters");
         const result = await joinPoint.proceed();
         log.push(`around returns ${result}`);

@@ -54,6 +54,8 @@ import {
   type MethodInterceptor,
   Pointcut as P,
   type ProceedingJoinPointOf,
+  type Proceeded,
+  type ProceededOf,
   type ReturnValueAdapter,
 } from "./index";
 import { observableAdapter } from "./rxjs";
@@ -70,7 +72,9 @@ class TimingAspect {
   private readonly logger = new Logger(TimingAspect.name);
 
   @Around(Timed)
-  async time(joinPoint: ProceedingJoinPointOf<typeof Timed>): Promise<unknown> {
+  async time(
+    joinPoint: ProceedingJoinPointOf<typeof Timed>,
+  ): ProceededOf<typeof Timed> {
     const started = performance.now();
     try {
       return await joinPoint.proceed();
@@ -748,7 +752,7 @@ class RetryAspect {
   @Around(retryable)
   async retry(
     joinPoint: ProceedingJoinPointOf<typeof retryable>,
-  ): Promise<unknown> {
+  ): ProceededOf<typeof retryable> {
     const { attempts, backoffMilliseconds } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -823,7 +827,7 @@ class TransactionAspect {
   @Around(transactional)
   run(
     joinPoint: ProceedingJoinPointOf<typeof transactional>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     return this.database.transactional(
       async () => joinPoint.proceed(),
       joinPoint.findAnnotation(Transactional),
@@ -899,13 +903,13 @@ class JobAspect {
   @Around(scheduled)
   async run(
     joinPoint: ProceedingJoinPointOf<typeof scheduled>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const name =
       joinPoint.findAnnotation(Scheduled)?.name ??
       String(joinPoint.signature.name);
     const release = await this.locks.acquire(name);
     if (!release) {
-      return undefined;
+      return joinPoint.replaceResult(undefined);
     }
     try {
       return await this.actor.run(`job:${name}`, async () =>
@@ -1106,7 +1110,7 @@ class RepositoryTimingAspect {
   @Around(repositoryCalls)
   async time(
     joinPoint: ProceedingJoinPointOf<typeof repositoryCalls>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const { targetType, name } = joinPoint.signature;
     const member = `${targetType.name}.${String(name)}`;
     const started = performance.now();
@@ -1258,7 +1262,7 @@ class CircuitBreakerAspect {
   @Around(clientCalls)
   async guard(
     joinPoint: ProceedingJoinPointOf<typeof clientCalls>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     if (Date.now() < this.openUntil) {
       const { targetType } = joinPoint.signature;
       throw new CircuitOpenError(`${targetType.name} is unavailable`);
@@ -1343,7 +1347,7 @@ class NestingAspect {
   @Around(greeting)
   async around(
     joinPoint: ProceedingJoinPointOf<typeof greeting>,
-  ): Promise<string> {
+  ): ProceededOf<typeof greeting> {
     trace.push("around: before proceed");
     const result = await joinPoint.proceed();
     trace.push("around: after proceed");
