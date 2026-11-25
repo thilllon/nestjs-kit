@@ -74,6 +74,17 @@ async function compileApp(directory: string): Promise<void> {
       timeout: 120_000,
     },
   );
+  // With code splitting, esbuild does not preserve the ESM evaluation order
+  // (https://github.com/evanw/esbuild/issues/399). The dynamic imports of
+  // @nestjs/core's REPL modules place @nestjs/common's decorated classes in a
+  // shared chunk ahead of its reflect-metadata import, and the application's
+  // own reflect-metadata import runs after every chunk it imports. The ESM
+  // bundle's entry therefore loads reflect-metadata before it imports the
+  // application.
+  await writeFile(
+    join(directory, "out", "main.mjs"),
+    'import "reflect-metadata";\nawait import("./app.mjs");\n',
+  );
 }
 
 async function runIsolated(
@@ -98,7 +109,7 @@ describe.concurrent("bundlers with the current peer versions", () => {
   it.each([
     {
       format: "esm",
-      input: "out/app.mjs",
+      input: "out/main.mjs",
       // ESM output bundles CommonJS dependencies, which call require(). Without
       // code splitting, esbuild leaves Better Auth's memory adapter, which
       // Better Auth also imports dynamically, uninitialized.
@@ -109,7 +120,7 @@ describe.concurrent("bundlers with the current peer versions", () => {
         '--banner:js=import { createRequire as createBundleRequire } from "node:module"; const require = createBundleRequire(import.meta.url);',
       ],
       output: "bundle-esm",
-      entry: "app.mjs",
+      entry: "main.mjs",
       artifact: "mjs",
     },
     {
