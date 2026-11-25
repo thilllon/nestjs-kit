@@ -2,6 +2,7 @@ import {
   Around,
   Aspect,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { CallStatistics } from "./call-statistics.js";
@@ -34,7 +35,7 @@ export class StatisticsAspect {
   @Around(boundaryCalls)
   async record(
     joinPoint: ProceedingJoinPointOf<typeof boundaryCalls>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const { targetType, name } = joinPoint.signature;
     const member = `${targetType.name}.${String(name)}`;
     const started = performance.now();

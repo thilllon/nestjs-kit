@@ -2,6 +2,7 @@ import {
   Around,
   Aspect,
   Pointcut as P,
+  type Proceeded,
   type ProceedingJoinPointOf,
 } from "nestjs-aspect";
 import { Retryable, TransientError } from "./retryable.js";
@@ -21,7 +22,7 @@ export class RetryAspect {
   @Around(retryable)
   async retry(
     joinPoint: ProceedingJoinPointOf<typeof retryable>,
-  ): Promise<unknown> {
+  ): Promise<Proceeded<unknown>> {
     const { attempts, backoffMilliseconds } = joinPoint.annotation(Retryable);
     for (let attempt = 1; ; attempt += 1) {
       try {
