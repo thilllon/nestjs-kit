@@ -24,6 +24,7 @@ import type {
   MethodInterceptor,
   PointcutAdvisor,
   ProceedingJoinPoint,
+  Proceeded,
 } from "./types";
 
 const anything = matching();
@@ -50,7 +51,7 @@ describe("compileAspect", () => {
       secondBefore(): void {}
 
       @Around(anything)
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         return joinPoint.proceed();
       }
     }

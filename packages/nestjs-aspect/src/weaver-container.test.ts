@@ -33,6 +33,7 @@ import type {
   MethodInterceptor,
   Pointcut,
   ProceedingJoinPointOf,
+  ProceededOf,
 } from "./types";
 import {
   closeWoven,
@@ -664,7 +665,7 @@ describe("overlapping calls on request-scoped instances", () => {
       @Around(pointcut)
       async around(
         joinPoint: ProceedingJoinPointOf<typeof pointcut>,
-      ): Promise<string> {
+      ): ProceededOf<typeof pointcut> {
         const [item] = joinPoint.args;
         entered.push(item);
         const value = await joinPoint.proceed();
@@ -673,7 +674,7 @@ describe("overlapping calls on request-scoped instances", () => {
           args: [...joinPoint.args],
           value,
         });
-        return `${item}: ${value}`;
+        return joinPoint.replaceResult(`${item}: ${value}`);
       }
 
       @AfterReturning(pointcut)

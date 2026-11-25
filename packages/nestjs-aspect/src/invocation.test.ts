@@ -25,6 +25,7 @@ import type {
   MethodInvocation,
   PointcutAdvisor,
   ProceedingJoinPoint,
+  Proceeded,
 } from "./types";
 
 let log: string[];
@@ -74,13 +75,13 @@ function tracingAspect(label: string, order?: number): object {
     }
 
     @Around(targets)
-    around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+    around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
       log.push(`${label} around in`);
       const done = () => log.push(`${label} around out`);
       try {
         const result = joinPoint.proceed();
         if (result instanceof Promise) {
-          return result.finally(done);
+          return joinPoint.replaceResult(result.finally(done));
         }
         done();
         return result;
@@ -317,7 +318,7 @@ describe("runtime matchers", () => {
     @Aspect()
     class Trace {
       @Around(targets)
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         return joinPoint.proceedWith("replaced");
       }
 
@@ -339,10 +340,10 @@ describe("arguments", () => {
     @Aspect()
     class Retry {
       @Around(targets)
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         const results = [joinPoint.proceed(), joinPoint.proceed()];
         seen.push(joinPoint.args[0]);
-        return results;
+        return joinPoint.replaceResult(results);
       }
 
       @Before(targets)

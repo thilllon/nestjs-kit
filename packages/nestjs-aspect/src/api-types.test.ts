@@ -26,6 +26,8 @@ import {
   type ProceedingJoinPointOf,
   type Pointcut,
   type ProceedingJoinPoint,
+  type Proceeded,
+  type ProceededOf,
   type ShapeOf,
 } from "./index";
 import { createClassRef, createMethodRef } from "./method-ref";
@@ -100,7 +102,7 @@ function declareUsage() {
       joinPoint: ProceedingJoinPoint<
         typeof retryable extends Pointcut<infer S> ? S : never
       >,
-    ): Promise<unknown> {
+    ): ProceededOf<typeof retryable> {
       const { attempts } = joinPoint.annotation(Retryable); // typed as RetryOptions
       for (let i = 1; ; i++) {
         try {
@@ -130,7 +132,7 @@ function declareUsage() {
     @Around(findById)
     async aroundFind(
       joinPoint: ProceedingJoinPointOf<typeof findById>,
-    ): Promise<User> {
+    ): ProceededOf<typeof findById> {
       const [id] = joinPoint.args; // number
       const n: number = id;
       return joinPoint.proceedWith(n + 1);
@@ -153,7 +155,7 @@ function declareUsage() {
     @Around(findById)
     async wrongArgs(
       joinPoint: ProceedingJoinPointOf<typeof findById>,
-    ): Promise<User> {
+    ): ProceededOf<typeof findById> {
       // @ts-expect-error proceedWith arguments are checked against the signature
       return joinPoint.proceedWith("not-a-number");
     }
@@ -291,7 +293,7 @@ function declareUsage() {
     @Around(broad)
     async broad(
       joinPoint: ProceedingJoinPointOf<typeof broad>,
-    ): Promise<unknown> {
+    ): Promise<Proceeded<unknown>> {
       return joinPoint.proceed();
     }
   }
@@ -302,7 +304,7 @@ function declareUsage() {
     @Around(Retryable)
     async retry(
       joinPoint: ProceedingJoinPointOf<typeof Retryable>,
-    ): Promise<unknown> {
+    ): ProceededOf<typeof Retryable> {
       const { attempts }: RetryOptions = joinPoint.annotation(Retryable);
       return joinPoint.proceed();
     }
@@ -360,7 +362,9 @@ function declareUsage() {
     async check(joinPoint: JoinPointOf<typeof Logged>): Promise<void> {}
 
     @Around(Logged)
-    log(joinPoint: ProceedingJoinPointOf<typeof Logged>): string {
+    log(
+      joinPoint: ProceedingJoinPointOf<typeof Logged>,
+    ): ProceededOf<typeof Logged> {
       const [name]: readonly [name: string] = joinPoint.args;
       // @ts-expect-error proceedWith arguments are checked against the contract
       joinPoint.proceedWith(1);
@@ -421,7 +425,7 @@ function declareUsage() {
     @Around(Timed)
     async time(
       joinPoint: ProceedingJoinPointOf<typeof Timed>,
-    ): Promise<unknown> {
+    ): ProceededOf<typeof Timed> {
       return joinPoint.proceed();
     }
 

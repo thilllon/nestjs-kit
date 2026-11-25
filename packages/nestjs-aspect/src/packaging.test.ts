@@ -131,6 +131,7 @@ const declarations = `import {
   Pointcut as P,
   type JoinPointOf,
   type MethodInterceptor,
+  type ProceededOf,
   type ProceedingJoinPointOf,
   type PointcutAdvisor,
 } from "${packageName}";
@@ -167,14 +168,14 @@ void narrowed;
 @Aspect({ order: 10 })
 class ResilienceAspect {
   @Around(retryable)
-  async retry(joinPoint: ProceedingJoinPointOf<typeof retryable>): Promise<unknown> {
+  async retry(joinPoint: ProceedingJoinPointOf<typeof retryable>): ProceededOf<typeof retryable> {
     const attempts: number = joinPoint.annotation(Retryable).attempts;
     void attempts;
     return joinPoint.proceed();
   }
 
   @Around(rename)
-  upperCase(joinPoint: ProceedingJoinPointOf<typeof rename>): string {
+  upperCase(joinPoint: ProceedingJoinPointOf<typeof rename>): ProceededOf<typeof rename> {
     const [name] = joinPoint.args;
     return joinPoint.proceedWith(name.toUpperCase());
   }

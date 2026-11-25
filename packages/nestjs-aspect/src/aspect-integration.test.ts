@@ -17,6 +17,8 @@ import type {
   JoinPoint,
   JoinPointOf,
   ProceedingJoinPointOf,
+  Proceeded,
+  ProceededOf,
 } from "./types";
 import { closeWoven, initWoven } from "./weaving-fixture";
 
@@ -112,7 +114,7 @@ async function application() {
     @Around(retryable)
     async retry(
       joinPoint: ProceedingJoinPointOf<typeof retryable>,
-    ): Promise<unknown> {
+    ): ProceededOf<typeof retryable> {
       const { attempts } = joinPoint.annotation(Retryable);
       for (let attempt = 1; ; attempt++) {
         try {
@@ -157,7 +159,9 @@ async function application() {
     }
 
     @Around(rename)
-    upperCase(joinPoint: ProceedingJoinPointOf<typeof rename>): User {
+    upperCase(
+      joinPoint: ProceedingJoinPointOf<typeof rename>,
+    ): ProceededOf<typeof rename> {
       const [user, name] = joinPoint.args;
       return joinPoint.proceedWith(user, name.toUpperCase());
     }
@@ -278,7 +282,7 @@ describe("advice that names an annotation in place of a pointcut", () => {
       @Around(Timed)
       async time(
         joinPoint: ProceedingJoinPointOf<typeof Timed>,
-      ): Promise<unknown> {
+      ): Promise<Proceeded<unknown>> {
         const { label } = joinPoint.annotation(Timed);
         log.push(`start ${label}`);
         const result = await joinPoint.proceed();
@@ -350,7 +354,7 @@ describe("an annotation created with async: true", () => {
       @Around(Timed)
       async timeMethod(
         joinPoint: ProceedingJoinPointOf<typeof Timed>,
-      ): Promise<unknown> {
+      ): ProceededOf<typeof Timed> {
         log.push(`start ${String(joinPoint.signature.name)}`);
         const result = await joinPoint.proceed();
         log.push(`end ${String(joinPoint.signature.name)}`);
@@ -360,7 +364,7 @@ describe("an annotation created with async: true", () => {
       @Around(timedClass)
       async timeClass(
         joinPoint: ProceedingJoinPointOf<typeof timedClass>,
-      ): Promise<unknown> {
+      ): Promise<Proceeded<unknown>> {
         log.push(`start ${String(joinPoint.signature.name)}`);
         const result = await joinPoint.proceed();
         log.push(`end ${String(joinPoint.signature.name)}`);

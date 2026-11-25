@@ -11,7 +11,12 @@ import {
 } from "./aspect-decorators";
 import { AspectUsageError } from "./errors";
 import { Pointcut as P } from "./pointcut-designators";
-import type { AnyShape, JoinPoint, ProceedingJoinPoint } from "./types";
+import type {
+  AnyShape,
+  JoinPoint,
+  Proceeded,
+  ProceedingJoinPoint,
+} from "./types";
 import { closeWoven, compileWoven } from "./weaving-fixture";
 
 afterEach(closeWoven);
@@ -64,7 +69,7 @@ async function calculator() {
   @Aspect()
   class Tracing {
     @Around(members)
-    around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+    around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
       log.push("around");
       return joinPoint.proceed();
     }

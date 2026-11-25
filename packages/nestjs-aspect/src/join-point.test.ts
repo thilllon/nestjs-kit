@@ -16,7 +16,12 @@ import {
   formatArgument,
 } from "./join-point";
 import { createClassRef, createMethodRef } from "./method-ref";
-import type { AnyShape, JoinPoint, ProceedingJoinPoint } from "./types";
+import type {
+  AnyShape,
+  JoinPoint,
+  Proceeded,
+  ProceedingJoinPoint,
+} from "./types";
 
 const Audited = createAnnotation<"Audited", { level: string }>("Audited");
 const Marker = createAnnotation<"Marker">("Marker");
@@ -146,7 +151,7 @@ describe("join points in advice", () => {
     @Aspect()
     class Trace {
       @Around(named("find"))
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         seen.push(joinPoint);
         return joinPoint.proceedWith(8);
       }

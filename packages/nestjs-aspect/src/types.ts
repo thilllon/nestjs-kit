@@ -3,6 +3,7 @@
 
 import type { InjectionToken } from "@nestjs/common";
 import type { ReflectableDecorator } from "@nestjs/core";
+import type { Observable } from "rxjs";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -311,14 +312,113 @@ export interface JoinPoint<S extends Shape> {
   toString(): string;
 }
 
+declare const PROCEEDED: unique symbol;
+
+/**
+ * Nominal brand of a value that `proceed()` produced. The private member
+ * makes the class nominal: no object literal, spread or other value is
+ * assignable to it. The class exists only as a type.
+ */
+declare class ProceededBrand<out R> {
+  private readonly proceeded: true;
+  /** Phantom member that keeps `R` in the published declarations. */
+  readonly [PROCEEDED]?: R;
+}
+
+/**
+ * Type of the value `proceed()` and `proceedWith()` return and around advice
+ * must return: the declared result `R` branded as produced by the join point.
+ * Around advice can return it, wrap its production (a retry loop, a
+ * transaction callback) or read it, but cannot replace it with another value
+ * of a type it constructs; `joinPoint.replaceResult(value)` is the explicit
+ * way to return a value that `proceed()` did not produce.
+ *
+ * - A `Promise<T>` result is `Promise<Proceeded<T>>`, a `PromiseLike<T>`
+ *   result `PromiseLike<Proceeded<T>>` and an `Observable<T>` result
+ *   `Observable<Proceeded<T>>`, so `await`, `then` and `pipe` operators that
+ *   keep the emitted values keep the brand. A subclass of `Promise` or
+ *   `Observable` maps to the base type, which hides the members the subclass
+ *   adds.
+ * - An object or primitive `T` is `T & ProceededBrand<T>`: its members stay
+ *   readable.
+ * - `null`, `undefined` and `void` stay as they are: the brand cannot be
+ *   attached to them.
+ * - `unknown` is the bare brand: the advice cannot read members of a result
+ *   whose type it does not know. `any`, the result of an annotation without
+ *   a method contract, stays `any`: a value derived from it is `any` too and
+ *   is not checked, and `AroundResult` rejects only values of a known type.
+ *
+ * The type is a distributive conditional on `R` only, so that a join point
+ * of a narrower shape stays assignable to one of a wider shape.
+ */
+export type Proceeded<R> = R extends null | undefined | void
+  ? R
+  : R extends Promise<infer T>
+    ? Promise<Proceeded<T>>
+    : R extends PromiseLike<infer T>
+      ? PromiseLike<Proceeded<T>>
+      : R extends Observable<infer T>
+        ? Observable<Proceeded<T>>
+        : R & ProceededBrand<R>;
+
+/**
+ * Return type that `@Around` requires of advice whose join point declares
+ * the result `R`.
+ *
+ * - `Proceeded<R>` when it is assignable to `R`.
+ * - The brand or a promise of it for an `unknown` or `any` result:
+ *   asynchronous advice awaits what `proceed()` returns and the advice result
+ *   is a promise of it.
+ * - `R` itself when `Proceeded<R>` is not assignable to it, as for a subclass
+ *   of `Promise` or `Observable`: the advice returns a value of the subclass,
+ *   and the compiler does not check that `proceed()` produced it.
+ *
+ * The type stays deferred while `R` is a type parameter: generic code that
+ * passes on the result of `proceed()` declares `Proceeded<S["returns"]>`.
+ */
+export type AroundResult<R> = 0 extends 1 & R
+  ? ProceededBrand<unknown> | Promise<ProceededBrand<unknown>>
+  : unknown extends R
+    ? ProceededBrand<unknown> | Promise<ProceededBrand<unknown>>
+    : [Proceeded<R>] extends [R]
+      ? Proceeded<R>
+      : R;
+
+/**
+ * The value a result settles to: `T` of a `PromiseLike<T>` or an
+ * `Observable<T>`, the result itself otherwise.
+ */
+type Settled<R> =
+  R extends PromiseLike<infer T> ? T : R extends Observable<infer T> ? T : R;
+
 export interface ProceedingJoinPoint<S extends Shape> extends JoinPoint<S> {
   /** Runs the rest of the chain. Can be called more than once. */
-  proceed(): S["returns"];
+  proceed(): Proceeded<S["returns"]>;
   /** Runs the rest of the chain with replaced arguments. */
   proceedWith(
     ...args: S["args"] extends readonly unknown[] ? S["args"] : never
-  ): S["returns"];
+  ): Proceeded<S["returns"]>;
+  /**
+   * Returns `value` unchanged, typed as a value the join point produced: the
+   * explicit escape for a result that `proceed()` did not produce, such as a
+   * cache hit, a fallback or a skipped call. The compiler checks `value`
+   * against the declared result only, which is wider than the actual result
+   * of a method that a subtype contract, an override or `or()` reaches, and
+   * accepts any value for an `unknown` or `any` result. For a `PromiseLike`
+   * or `Observable` result it takes the settled value: asynchronous advice
+   * returns it, synchronous advice wraps it (`Promise.resolve`, `of`).
+   */
+  replaceResult(value: Settled<S["returns"]>): Proceeded<Settled<S["returns"]>>;
 }
+
+/**
+ * Return type of around advice for a pointcut or an annotation:
+ * `AroundResult` of its declared result. Asynchronous advice on a join point
+ * of unknown result spells `Promise<Proceeded<unknown>>`.
+ */
+export type ProceededOf<PointcutType> = AroundResult<
+  ShapeOf<PointcutType>["returns"]
+>;
 
 /** Join point of the advice for a pointcut or an annotation. */
 export type JoinPointOf<PointcutType> = JoinPoint<ShapeOf<PointcutType>>;

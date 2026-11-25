@@ -16,6 +16,7 @@ import type {
   JoinPoint,
   Pointcut,
   ProceedingJoinPoint,
+  Proceeded,
 } from "./types";
 
 class DomainError extends Error {}
@@ -286,8 +287,10 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Cache {
         @Around(targets)
-        cached(): unknown {
-          return mode === "synchronous" ? 42 : Promise.resolve(42);
+        cached(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
+          return joinPoint.replaceResult(
+            mode === "synchronous" ? 42 : Promise.resolve(42),
+          );
         }
       }
       const calculator = weave(new Calculator(), [new Cache()]);
@@ -300,11 +303,13 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Double {
         @Around(targets)
-        double(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
-          const result = joinPoint.proceed();
-          return result instanceof Promise
-            ? result.then((value) => value * 2)
-            : (result as number) * 2;
+        double(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
+          const result: unknown = joinPoint.proceed();
+          return joinPoint.replaceResult(
+            result instanceof Promise
+              ? result.then((value) => value * 2)
+              : (result as number) * 2,
+          );
         }
       }
       const calculator = weave(new Calculator(), [new Double()]);
@@ -317,7 +322,7 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect()
       class Rewrite {
         @Around(targets)
-        rewrite(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        rewrite(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
           return joinPoint.proceedWith(10, 20);
         }
 
@@ -337,7 +342,7 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
       @Aspect({ order: 1 })
       class Retry {
         @Around(targets)
-        retry(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+        retry(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
           if (mode === "synchronous") {
             try {
               return joinPoint.proceed();
@@ -345,8 +350,10 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
               return joinPoint.proceed();
             }
           }
-          return (joinPoint.proceed() as Promise<unknown>).catch(() =>
-            joinPoint.proceed(),
+          return joinPoint.replaceResult(
+            (joinPoint.proceed() as unknown as Promise<unknown>).catch(() =>
+              joinPoint.proceed(),
+            ),
           );
         }
       }
@@ -378,11 +385,11 @@ describe.each(members)("on a $mode join point", ({ mode, add, fail }) => {
         @Around(targets)
         async fallback(
           joinPoint: ProceedingJoinPoint<AnyShape>,
-        ): Promise<unknown> {
+        ): Promise<Proceeded<unknown>> {
           try {
             return await joinPoint.proceed();
           } catch {
-            return -1;
+            return joinPoint.replaceResult(-1);
           }
         }
       }
@@ -413,7 +420,7 @@ describe("synchronous join points", () => {
     @Aspect()
     class All {
       @Around(targets)
-      around(joinPoint: ProceedingJoinPoint<AnyShape>): unknown {
+      around(joinPoint: ProceedingJoinPoint<AnyShape>): Proceeded<unknown> {
         return joinPoint.proceed();
       }
 

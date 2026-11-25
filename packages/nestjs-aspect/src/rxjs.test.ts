@@ -30,6 +30,7 @@ import type {
   AnyShape,
   JoinPoint,
   JoinPointOf,
+  ProceededOf,
   ProceedingJoinPointOf,
 } from "./types";
 import { closeWoven, initWoven, listenWoven } from "./weaving-fixture";
@@ -542,10 +543,10 @@ describe("around advice on a method that returns an Observable", () => {
       @Around(flaky)
       retry(
         joinPoint: ProceedingJoinPointOf<typeof flaky>,
-      ): Observable<string> {
+      ): ProceededOf<typeof flaky> {
         return joinPoint.proceed().pipe(
           retry(2),
-          map((value) => value.toUpperCase()),
+          map((value) => joinPoint.replaceResult(value.toUpperCase())),
         );
       }
     }
@@ -569,11 +570,13 @@ describe("around advice on a method that returns an Observable", () => {
   it("replaces the stream without subscribing to the source", async () => {
     const { PriceService } = fixture();
 
+    const quotes = P.method(PriceService, "quotes");
+
     @Aspect()
     class CacheAspect {
-      @Around(P.method(PriceService, "quotes"))
-      cached(): Observable<string> {
-        return of("cached");
+      @Around(quotes)
+      cached(joinPoint: ProceedingJoinPointOf<typeof quotes>) {
+        return of(joinPoint.replaceResult("cached"));
       }
     }
 
