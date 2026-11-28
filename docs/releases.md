@@ -45,9 +45,7 @@ For that local first publication only, use `--provenance=false` to override the 
 
 A new public package cannot join OIDC publication before it exists on npm, and an existing package cannot join it while its trusted publisher names another repository: npm accepts one trusted publisher per package. Until its owner-authenticated first publication or the replacement of its trusted publisher, and the verification of that trusted publisher, the package is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-Held packages:
-
-- `birthplace` exists on npm; its trusted publisher must be replaced with one that names this repository.
+No package is currently held.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
