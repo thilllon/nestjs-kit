@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -35,18 +35,12 @@ const makeTemporaryDirectory = (): string => {
   return directory;
 };
 
-// Fixture repositories ignore the global and system Git configuration, such as
-// commit signing, and use the files reference backend that the broken-HEAD
+// Fixture repositories use the files reference backend that the broken-HEAD
 // test writes into.
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync("git", ["-c", "init.defaultRefFormat=files", ...args], {
     cwd,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      GIT_CONFIG_GLOBAL: devNull,
-      GIT_CONFIG_NOSYSTEM: "1",
-    },
   }).trim();
 
 const makeRepository = (
@@ -98,7 +92,15 @@ const expectBirthplaceError = (
   }
 };
 
+// The fixture commands and the collector's Git processes ignore the global and
+// system Git configuration, such as commit signing or hidden untracked files.
+beforeEach(() => {
+  vi.stubEnv("GIT_CONFIG_GLOBAL", devNull);
+  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
