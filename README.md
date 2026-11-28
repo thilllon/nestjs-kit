@@ -1,8 +1,10 @@
 # NestJS Kit
 
-NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, chat, and realtime messaging. Each package connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
+NestJS Kit is a monorepo of independent NestJS integrations for storage, media, PostgreSQL, email, chat, and realtime messaging. Each integration connects an existing SDK to Nest's module and dependency injection system, so application code can focus on using the service.
 
-Install only the integrations you need. Packages have their own npm releases and usage guides, with shared tooling and maintenance in this repository.
+The repository also hosts `birthplace`, a CLI and OpenTelemetry resource detector that records where and when an artifact was built.
+
+Install only the packages you need. Packages have their own npm releases and usage guides, with shared tooling and maintenance in this repository.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thilllon/nestjs-kit/ci.yml?branch=main&label=CI)](https://github.com/thilllon/nestjs-kit/actions/workflows/ci.yml)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
@@ -11,6 +13,8 @@ Install only the integrations you need. Packages have their own npm releases and
 
 Each package README covers installation and usage.
 
+- [`birthplace`](packages/birthplace/README.md) [![npm version of birthplace](https://img.shields.io/npm/v/birthplace)](https://www.npmjs.com/package/birthplace) [![Monthly npm downloads of birthplace](https://img.shields.io/npm/dm/birthplace)](https://www.npmjs.com/package/birthplace)
+  - Build metadata captured by a CLI and loaded into OpenTelemetry Node.js resources.
 - [`nestjs-aspect`](packages/nestjs-aspect/README.md) [![npm version of nestjs-aspect](https://img.shields.io/npm/v/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect) [![Monthly npm downloads of nestjs-aspect](https://img.shields.io/npm/dm/nestjs-aspect)](https://www.npmjs.com/package/nestjs-aspect)
   - Spring-style aspects, pointcuts and advice for the classes a Nest application manages.
 - [`nestjs-azure-storage-blob`](packages/nestjs-azure-storage-blob/README.md) [![npm version of nestjs-azure-storage-blob](https://img.shields.io/npm/v/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob) [![Monthly npm downloads of nestjs-azure-storage-blob](https://img.shields.io/npm/dm/nestjs-azure-storage-blob)](https://www.npmjs.com/package/nestjs-azure-storage-blob)
@@ -40,9 +44,11 @@ Each package README covers installation and usage.
 
 ## Shared approach
 
+The NestJS integrations share the first two conventions; every package follows the last two.
+
 - **Nest-native configuration.** Register options directly or resolve them asynchronously through dependency injection. Inject the client or adapter service using Nest's standard APIs.
 - **SDK access.** Use the underlying SDK's operations and types. Adapters add configuration, useful integration helpers, and connection cleanup where needed.
-- **Separate integrations.** Each package is installed, versioned, and published independently. Its README documents supported registration options and lifecycle behavior.
+- **Separate packages.** Each package is installed, versioned, and published independently. Its README documents its options and, for an integration, its registration and lifecycle behavior.
 - **Both module formats.** Every library ships ESM and CommonJS builds with matching TypeScript declarations. Package exports select the correct files for `import` and `require()`.
 
 ## Develop locally

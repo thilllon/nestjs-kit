@@ -35,7 +35,7 @@ The workflow filename is part of every package's trusted-publisher registration,
 
 Trusted publishing exchanges the workflow's OIDC identity for publish access; the workflow grants `id-token: write` on a hosted runner. pnpm 12 implements publication natively, including npm's package-scoped [OIDC token exchange](https://github.com/pnpm/pnpm/blob/v12.4.2/pnpm/crates/publish/src/oidc/auth_token.rs). Follow the [npm trusted publishing guide](https://docs.npmjs.com/trusted-publishers/) when configuring the package settings.
 
-All thirteen established package identities already exist on npm and participate in the native Changesets release workflow. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
+All fourteen established package identities already exist on npm and participate in the native Changesets release workflow, except the held packages listed below. Skip first-publication commands for these packages; future changes use explicit Changesets and CI trusted publishing.
 
 For a future package that does not yet exist, an initial owner-authenticated publication is required before configuring trust: npm's [trust command prerequisites](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites) require the package to exist. Build its intended release version, inspect the packed archive, then publish it with public access using the owner's npm authentication. Do not publish placeholder code just to create package settings.
 
@@ -43,13 +43,15 @@ For that local first publication only, use `--provenance=false` to override the 
 
 ### Packages held from automated publication
 
-A new public package cannot join OIDC publication before it exists on npm. Until its owner-authenticated first publication and the verification of its trusted publisher, it is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
+A new public package cannot join OIDC publication before it exists on npm, and an existing package cannot join it while its trusted publisher names another repository: npm accepts one trusted publisher per package. Until its owner-authenticated first publication or the replacement of its trusted publisher, and the verification of that trusted publisher, the package is listed under `ignore` in `.changeset/config.json`: native Changesets keeps its Changesets pending and leaves it out of the publish plan, so the other packages keep releasing while `NPM_PUBLISH_ENABLED` is `true`. Removing the entry earlier would make the next Release run request an OIDC publication that npm rejects.
 
-No package is currently held.
+Held packages:
+
+- `birthplace` exists on npm; its trusted publisher must be replaced with one that names this repository.
 
 While a package is held, `pnpm exec changeset` does not offer it. Write its Changesets by hand in files that name only held packages: a Changeset file that also names a released package makes `changeset version` fail, which stops Release preparation for every package, and CI does not detect this before merge.
 
-To publish a held package:
+To publish a held package that does not exist on npm:
 
 1. Merge a documentation PR that removes the package README's first-release note, so the npm page carries a durable installation guide.
 2. On a clean, up-to-date `main`, build and pack its first release without committing the version edit. The chain stops at the first failing command, so a failed build never packs stale output:
@@ -75,6 +77,23 @@ To publish a held package:
 
 3. Configure its trusted publisher with the settings above and confirm the registry with `npm view "$PACKAGE@$VERSION" version`.
 4. Right away, open a checked PR that removes the package from `ignore`, from the held list above, and from the first-release markers in the root README and CONTRIBUTING. The next Release run versions its pending Changesets to the already-published version; `changeset publish` skips it because npm has it, and `changeset git-tag` adds its tag. Merge no changes to the package between steps 2 and 4: their Changesets would be folded into the already-published version and never released.
+
+To release a held package that already exists on npm:
+
+1. Replace its trusted publisher with the owner's npm authentication. npm accepts one trusted publisher per package, so revoke the existing one first:
+
+   ```sh
+   PACKAGE='<package>' # replace with the held package
+   npm whoami # an expired npm session fails the trust commands with E404
+   npm trust list "$PACKAGE"
+   npm trust revoke "$PACKAGE" --id='<id>' # the ID that npm trust list prints
+   npm trust github "$PACKAGE" --file release.yml --repository thilllon/nestjs-kit --allow-publish --yes
+   npm trust list "$PACKAGE"
+   ```
+
+   The first trust command asks for two-factor authentication on the npm website, which offers to skip it for the next five minutes; enabling that lets the remaining commands run without it.
+
+2. Right away, open a checked PR that removes the package from `ignore` and from the held list above. The next Release run versions its pending Changesets, and the publication run that follows publishes the new version through OIDC with provenance.
 
 In repository Actions settings, allow GitHub Actions to create pull requests. Ensure repository rules permit the release bot's merge after the required checks pass; the workflow does not bypass protections. After trusted publishers are configured for every package participating in publication, set `NPM_PUBLISH_ENABLED=true` and manually run **Release** from the Actions tab, or let the next push to `main` trigger it.
 

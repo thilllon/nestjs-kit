@@ -1,0 +1,104 @@
+{
+  "name": "birthplace",
+  "version": "1.0.1",
+  "description": "Record where and when an artifact was built and load it into OpenTelemetry Node.js resources",
+  "license": "MIT",
+  "author": "thilllon",
+  "type": "commonjs",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./otel": {
+      "import": {
+        "types": "./dist/otel.d.mts",
+        "default": "./dist/otel.mjs"
+      },
+      "require": {
+        "types": "./dist/otel.d.cts",
+        "default": "./dist/otel.cjs"
+      }
+    },
+    "./attributes": {
+      "import": {
+        "types": "./dist/attributes.d.mts",
+        "default": "./dist/attributes.mjs"
+      },
+      "require": {
+        "types": "./dist/attributes.d.cts",
+        "default": "./dist/attributes.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "birthplace": "dist/cli.cjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": [
+    "./dist/cli.cjs",
+    "./dist/cli.mjs"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thilllon/nestjs-kit.git",
+    "directory": "packages/birthplace"
+  },
+  "homepage": "https://github.com/thilllon/nestjs-kit/tree/main/packages/birthplace",
+  "bugs": {
+    "url": "https://github.com/thilllon/nestjs-kit/issues"
+  },
+  "keywords": [
+    "opentelemetry",
+    "otel",
+    "resource-detector",
+    "build-info",
+    "build-metadata",
+    "git",
+    "ci"
+  ],
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.test.json",
+    "build": "tsdown",
+    "test": "vitest run --project unit",
+    "test:packaging": "vitest run --project packaging"
+  },
+  "module": "./dist/index.mjs",
+  "dependencies": {
+    "commander": "^9.4.1"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "@arethetypeswrong/core": "0.18.5",
+    "publint": "0.3.25",
+    "tsdown": "0.23.7",
+    "@swc/core": "1.16.22",
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.1.0"
+  }
+}
