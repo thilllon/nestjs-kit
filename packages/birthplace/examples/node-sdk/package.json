@@ -1,0 +1,32 @@
+{
+  "name": "birthplace-node-sdk-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Node.js application that records its build with the birthplace CLI and loads it into OpenTelemetry NodeSDK resources",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.test.json",
+    "build": "tsc --project tsconfig.build.json",
+    "build:metadata": "birthplace generate --output dist/birthplace.json --strict --host",
+    "test": "vitest run --project unit",
+    "test:packaging": "vitest run --project packaging",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/resources": "2.11.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "birthplace": "workspace:*"
+  },
+  "devDependencies": {
+    "@swc/core": "1.16.22",
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.1.0"
+  }
+}

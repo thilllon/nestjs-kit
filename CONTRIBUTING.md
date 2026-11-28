@@ -98,6 +98,7 @@ Package versions and changelogs are maintained by release automation. Do not man
 
 ## Repository layout
 
+- `packages/birthplace`: the `birthplace` CLI and OpenTelemetry resource detector for build metadata. Its `examples/node-sdk` directory holds a private NodeSDK application whose unit test checks the exported resource. The package's own instructions are in its `AGENTS.md`.
 - `packages/nestjs-aspect`: Spring-style aspect-oriented programming for the classes a Nest application manages.
 - `packages/nestjs-azure-storage-blob`: the Azure Blob Storage adapter.
 - `packages/nestjs-drizzle-pg`: the Drizzle ORM adapter for PostgreSQL.
@@ -132,4 +133,4 @@ Root files that packages share import nothing but Node.js built-ins, so the root
 
 Each package's `build` command invokes tsdown directly with the shared `tsdown.config.mts`. Outputs are `dist/index.mjs`, `dist/index.cjs`, and their `.d.mts`/`.d.cts` declarations. Preserve the format-specific `exports` branches and keep dependencies external. Builds run strict publint and Are the Types Wrong checks directly through tsdown; no separate build or package-check wrapper is needed. tsdown resolves both checkers as its optional peers, so each package declares `tsdown`, `publint` and `@arethetypeswrong/core` in its own `devDependencies`. When changing build settings, also verify real CJS/ESM imports and Nest dependency injection from the generated outputs.
 
-Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root `tsconfig.tools.json` typechecks the `.mts` configuration files and scripts of the root, the packages and the example applications; each file resolves its imports from its own project's dependencies.
+Package TypeScript settings live in root `tsconfig.base.json`. Its `${configDir}` paths resolve relative to each package, so package configs only need `extends`. Root `tsconfig.test.json` extends the base and enables checking tests without emitting files; each package’s test config inherits it. Root `tsconfig.tools.json` typechecks the `.mts` configuration files and scripts of the root, the packages, their `fixtures` directories and the example applications; each file resolves its imports from its own project's dependencies.
